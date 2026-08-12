@@ -1,7 +1,9 @@
 import 'package:bot_toast/bot_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/common/labdesk_profiles.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
+import 'package:flutter_hbb/common/widgets/labdesk_groups.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/peer_tab_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
@@ -158,8 +160,7 @@ class _PeerCardState extends State<_PeerCard>
             height: isPortrait ? 50 : null,
             child: Stack(
               children: [
-                getPlatformImage(peer.platform, size: isPortrait ? 38 : 30)
-                    .paddingAll(6),
+                labdeskPeerIcon(peer, isPortrait ? 38 : 30).paddingAll(6),
                 if (_shouldBuildPasswordIcon(peer))
                   Positioned(
                     top: 1,
@@ -312,8 +313,7 @@ class _PeerCardState extends State<_PeerCard>
                             children: [
                               Container(
                                 padding: const EdgeInsets.all(6),
-                                child:
-                                    getPlatformImage(peer.platform, size: 60),
+                                child: labdeskPeerIcon(peer, 60),
                               ),
                               Row(
                                 children: [
@@ -753,6 +753,32 @@ abstract class BasePeerCard extends StatelessWidget {
   }
 
   @protected
+  MenuEntryBase<String> _labdeskIconAction(BuildContext context, String id) {
+    return MenuEntryButton<String>(
+      childBuilder: (TextStyle? style) => Text(
+        translate('Choose icon'),
+        style: style,
+      ),
+      proc: () => showLabDeskIconPicker(context, id),
+      padding: menuPadding,
+      dismissOnClicked: true,
+    );
+  }
+
+  @protected
+  MenuEntryBase<String> _labdeskGroupsAction(BuildContext context, String id) {
+    return MenuEntryButton<String>(
+      childBuilder: (TextStyle? style) => Text(
+        translate('Groups'),
+        style: style,
+      ),
+      proc: () => showLabDeskAssignDialog(context, id),
+      padding: menuPadding,
+      dismissOnClicked: true,
+    );
+  }
+
+  @protected
   MenuEntryBase<String> _renameAction(String id) {
     return MenuEntryButton<String>(
       childBuilder: (TextStyle? style) => Text(
@@ -1005,6 +1031,8 @@ class RecentPeerCard extends BasePeerCard {
     } else {
       menuItems.add(_rmFavAction(peer.id, () async {}));
     }
+    menuItems.add(_labdeskGroupsAction(context, peer.id));
+    menuItems.add(_labdeskIconAction(context, peer.id));
 
     if (gFFI.userModel.userName.isNotEmpty) {
       menuItems.add(_addToAb(peer));
@@ -1065,6 +1093,8 @@ class FavoritePeerCard extends BasePeerCard {
     menuItems.add(_rmFavAction(peer.id, () async {
       await bind.mainLoadFavPeers();
     }));
+    menuItems.add(_labdeskGroupsAction(context, peer.id));
+    menuItems.add(_labdeskIconAction(context, peer.id));
 
     if (gFFI.userModel.userName.isNotEmpty) {
       menuItems.add(_addToAb(peer));
@@ -1124,6 +1154,8 @@ class DiscoveredPeerCard extends BasePeerCard {
     } else {
       menuItems.add(_rmFavAction(peer.id, () async {}));
     }
+    menuItems.add(_labdeskGroupsAction(context, peer.id));
+    menuItems.add(_labdeskIconAction(context, peer.id));
 
     if (gFFI.userModel.userName.isNotEmpty) {
       menuItems.add(_addToAb(peer));
@@ -1465,13 +1497,20 @@ void _rdpDialog(String id) async {
 }
 
 Widget getOnline(double rightPadding, bool online) {
-  return Tooltip(
-      message: translate(online ? 'Online' : 'Offline'),
-      waitDuration: const Duration(seconds: 1),
-      child: Padding(
-          padding: EdgeInsets.fromLTRB(0, 4, rightPadding, 4),
-          child: CircleAvatar(
-              radius: 3, backgroundColor: online ? Colors.green : kColorWarn)));
+  return Obx(() {
+    final checking = labdeskStatusChecking.value;
+    return Tooltip(
+        message: translate(
+            checking ? 'Checking' : (online ? 'Online' : 'Offline')),
+        waitDuration: const Duration(seconds: 1),
+        child: Padding(
+            padding: EdgeInsets.fromLTRB(0, 4, rightPadding, 4),
+            child: CircleAvatar(
+                radius: 3,
+                backgroundColor: checking
+                    ? Colors.amber
+                    : (online ? Colors.green : Colors.redAccent))));
+  });
 }
 
 Widget build_more(BuildContext context, {bool invert = false}) {

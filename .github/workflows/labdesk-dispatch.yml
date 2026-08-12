@@ -1,0 +1,21 @@
+name: Manual build with artifact upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload-tag:
+        description: "Tag name used for artifact naming"
+        type: string
+        required: false
+        default: "manual"
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    uses: ./.github/workflows/flutter-build.yml
+    with:
+      upload-artifact: true
+      upload-tag: ${{ inputs.upload-tag }}
+    secrets: inherit

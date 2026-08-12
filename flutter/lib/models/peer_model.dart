@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_hbb/common/labdesk_profiles.dart';
 import 'package:get/get.dart';
 import 'platform_model.dart';
 // ignore: depend_on_referenced_packages
@@ -217,6 +218,7 @@ class Peers extends ChangeNotifier {
   }
 
   void _updateOnlineState(Map<String, dynamic> evt) {
+    labdeskStatusTick();
     int changedCount = 0;
     evt['onlines'].split(',').forEach((online) {
       for (var i = 0; i < peers.length; i++) {

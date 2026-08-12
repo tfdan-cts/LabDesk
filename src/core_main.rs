@@ -29,6 +29,9 @@ macro_rules! my_println{
 /// If it returns [`Some`], then the process will continue, and flutter gui will be started.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<Vec<String>> {
+    // Set before global_init so config paths, IPC names and translations
+    // pick up the app name.
+    *hbb_common::config::APP_NAME.write().unwrap() = "LabDesk".to_owned();
     if !crate::common::global_init() {
         return None;
     }

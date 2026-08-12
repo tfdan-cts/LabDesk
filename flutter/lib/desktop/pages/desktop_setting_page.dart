@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/labdesk_profiles.dart';
 import 'package:flutter_hbb/common/widgets/audio_input.dart';
 import 'package:flutter_hbb/common/widgets/setting_widgets.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -1663,9 +1664,20 @@ class _NetworkState extends State<_Network> with AutomaticKeepAliveClientMixin {
         block: locked,
         child: Column(children: [
           network(context),
+          serverProfiles(context),
         ]),
       ),
     ]).marginOnly(bottom: _kListViewBottomMargin);
+  }
+
+  Widget serverProfiles(BuildContext context) {
+    if (isWeb || bind.mainGetBuildinOption(key: kOptionHideServerSetting) == 'Y') {
+      return Offstage();
+    }
+    return _Card(
+      title: 'Server profiles',
+      children: [const ServerProfilesSettings()],
+    );
   }
 
   Widget network(BuildContext context) {

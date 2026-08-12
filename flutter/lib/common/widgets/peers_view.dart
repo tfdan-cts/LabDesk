@@ -310,13 +310,13 @@ class _PeersViewState extends State<_PeersView>
     return body;
   }
 
-  var _queryInterval = const Duration(seconds: 20);
+  var _queryInterval = const Duration(seconds: 10);
 
   void _startCheckOnlines() {
     () async {
       final p = await bind.mainIsUsingPublicServer();
       if (!p) {
-        _queryInterval = const Duration(seconds: 6);
+        _queryInterval = const Duration(seconds: 4);
       }
       while (!_exit) {
         final now = DateTime.now();
