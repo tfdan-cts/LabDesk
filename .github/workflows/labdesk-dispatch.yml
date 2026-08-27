@@ -1,5 +1,10 @@
 name: Manual build with artifact upload
 
+# This repository holds no signing secrets, so the Android, macOS and Windows
+# signing steps in flutter-build.yml skip themselves and the artifacts come out
+# unsigned. Add ANDROID_SIGNING_KEY, MACOS_P12_BASE64 or SIGN_BASE_URL to turn
+# the matching steps back on.
+
 on:
   workflow_dispatch:
     inputs:
