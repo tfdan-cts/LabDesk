@@ -4,31 +4,31 @@
 
 # LabDesk
 
-LabDesk is a fork of [RustDesk](https://github.com/rustdesk/rustdesk) focused on people who run **more than one self-hosted ID/relay server** and manage fleets of machines across separate networks (for example, multiple Tailscale tailnets, each with its own RustDesk server).
+LabDesk is a fork of [RustDesk](https://github.com/rustdesk/rustdesk) for people who connect to more than one self-hosted ID/relay server and manage fleets of machines across separate networks.
 
 Stock RustDesk stores a single ID/Relay/API/key configuration; pointing the client at a different server means retyping everything. LabDesk fixes that, and adds fleet-organization features on top.
 
 ## What LabDesk adds
 
-- **Server profiles** — save any number of named ID/Relay/API/key configurations. Manage them under *Settings → Network → Server profiles* (add / edit / delete), switch the active profile from a dropdown on the home screen. The active configuration is applied live, no restart.
-- **Machine groups** — create, rename, and delete local groups in the *Groups* tab, with collapsible sections. Assign machines from the group editor or a machine's right-click menu. Groups are stored locally, no server required.
-- **Machine icons** — give any machine one of 10 themed icons (PC, laptop, server, NAS, home, business, warehouse, router, phone, cloud) from its right-click menu.
-- **Live reachability status** — colored status dots: green (reachable), red (unreachable), amber (checking), with faster status polling and a manual refresh button on the home screen for immediate re-checks after switching profiles or networks.
+- **Server profiles**: save any number of named ID/Relay/API/key configurations. Manage them under *Settings > Network > Server profiles* (add / edit / delete), switch the active profile from a dropdown on the home screen. The active configuration is applied live, no restart.
+- **Machine groups**: create, rename, and delete local groups in the *Groups* tab, with collapsible sections. Assign machines from the group editor or a machine's right-click menu. Groups are stored locally, no server required.
+- **Machine icons**: give any machine one of 10 themed icons (PC, laptop, server, NAS, home, business, warehouse, router, phone, cloud) from its right-click menu.
+- **Live reachability status**: colored status dots: green (reachable), red (unreachable), amber (checking), with faster status polling and a manual refresh button on the home screen for immediate re-checks after switching profiles or networks.
 - **Purple theme and branding** throughout.
 
-Everything else — connection protocol, encryption, file transfer, and server compatibility — is inherited from upstream RustDesk. LabDesk works with the standard open-source `rustdesk-server` (hbbs/hbbr) and RustDesk Server Pro.
+Connection protocol, encryption, file transfer, and server compatibility are all inherited from upstream RustDesk. LabDesk works with the standard open-source `rustdesk-server` (hbbs/hbbr) and RustDesk Server Pro.
 
 ## Downloads
 
 Packaged builds for **Windows, macOS, Linux (deb/rpm/AppImage/flatpak), and Android** are on the [Releases page](https://github.com/tfdan-cts/LabDesk/releases).
 
-Note: binaries are unsigned; on Windows, SmartScreen will warn on first run. Binary filenames keep the upstream `rustdesk-<version>` naming produced by the build pipeline.
+Binaries are unsigned; on Windows, SmartScreen will warn on first run. Binary filenames keep the upstream `rustdesk-<version>` naming produced by the build pipeline.
 
 LabDesk uses its own configuration directory (`LabDesk` instead of `RustDesk`) and generates its own machine ID, so it can be installed alongside stock RustDesk without conflicts.
 
 ## Building
 
-Build steps are identical to upstream RustDesk — see the [upstream build documentation](https://github.com/rustdesk/rustdesk#raw-steps-to-build). This repo's CI (`.github/workflows/labdesk-dispatch.yml`) runs the full upstream `flutter-build.yml` pipeline and publishes artifacts to a release tag.
+Build steps are identical to upstream RustDesk; see the [upstream build documentation](https://github.com/rustdesk/rustdesk#raw-steps-to-build). This repo's CI (`.github/workflows/labdesk-dispatch.yml`) runs the full upstream `flutter-build.yml` pipeline and publishes artifacts to a release tag.
 
 ## Upstream and license
 
