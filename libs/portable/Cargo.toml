@@ -26,6 +26,7 @@ windows = { version = "0.61", features = [
 native-windows-gui = {version = "1.0", default-features = false, features = ["animation-timer", "image-decoder"]}
 
 [package.metadata.winres]
+CompanyName = "LabDesk"
 LegalCopyright = "Copyright © 2026 LabDesk contributors. Based on RustDesk, © Purslane Tech Pte. Ltd."
 ProductName = "LabDesk"
 OriginalFilename = "rustdesk.exe"

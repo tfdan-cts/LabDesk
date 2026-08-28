@@ -18,6 +18,66 @@ Stock RustDesk stores a single ID/Relay/API/key configuration; pointing the clie
 
 Connection protocol, encryption, file transfer, and server compatibility are all inherited from upstream RustDesk. LabDesk works with the standard open-source `rustdesk-server` (hbbs/hbbr) and RustDesk Server Pro.
 
+## Installing
+
+### Windows
+
+From an elevated PowerShell prompt:
+
+```powershell
+irm https://raw.githubusercontent.com/tfdan-cts/LabDesk/master/install.ps1 | iex
+```
+
+This downloads the newest release for the machine's architecture, installs it
+unattended, and verifies the installation registered before reporting success.
+Re-running it upgrades in place.
+
+To point the client at a server during the install, download the script first,
+because piping to `iex` leaves no way to pass parameters:
+
+```powershell
+irm https://raw.githubusercontent.com/tfdan-cts/LabDesk/master/install.ps1 -OutFile install.ps1
+.\install.ps1 -Server id.example.com -Relay relay.example.com -Api https://api.example.com -Key YOURKEY
+```
+
+Every parameter is optional, and any setting you leave out is left untouched.
+
+### Linux
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tfdan-cts/LabDesk/master/install.sh | sudo sh
+```
+
+The script detects the architecture and the package manager, then installs the
+matching `.deb`, `.rpm`, or `.pkg.tar.zst` from the newest release. It supports
+apt, dnf, yum, zypper, and pacman on x86_64 and aarch64, and it installs the
+`rustdesk` systemd service along with the desktop entries. Re-running it
+upgrades in place.
+
+Server settings are passed as environment variables:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tfdan-cts/LabDesk/master/install.sh   | sudo LABDESK_HOST=id.example.com LABDESK_KEY=YOURKEY sh
+```
+
+`LABDESK_HOST`, `LABDESK_RELAY`, `LABDESK_API`, and `LABDESK_KEY` are all
+optional, and any setting you leave out is left untouched.
+
+### Offline or hand-delivered installs
+
+`LabDesk-<version>-x86_64-install.exe` and `LabDesk-<version>-aarch64-install.exe`
+on the [Releases page](https://github.com/tfdan-cts/LabDesk/releases/latest) are
+ordinary Windows installers. Copy one to a flash drive, double-click it on the
+target machine, and it installs without needing a network connection or a
+terminal. They are the standard build renamed: the client treats any executable
+whose filename ends in `install.exe` as a setup program.
+
+Add `--silent-install` to run one without any interface:
+
+```powershell
+.\LabDesk-1.4.9-x86_64-install.exe --silent-install
+```
+
 ## Downloads
 
 Packaged builds for **Windows, macOS, Linux (deb/rpm/AppImage/flatpak), and Android** are on the [Releases page](https://github.com/tfdan-cts/LabDesk/releases).
