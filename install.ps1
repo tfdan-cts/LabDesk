@@ -223,7 +223,16 @@ This usually means files were in use. Close LabDesk and run this again.
             # An exit code is not trustworthy evidence here, so read the setting
             # back and compare. Anything else reports success on a silent no-op.
             $readback = (Invoke-LabDesk -Exe $exe -Arguments @('--option', $name)).Output
-            if ($readback -and $readback.Trim() -eq $value) {
+            # Compare the last non-empty line, not the whole stream: the binary
+            # prints the value on its own line, but anything it logs first would
+            # otherwise turn a correct setting into a reported failure. -ceq
+            # because a server key is base64 and case is significant.
+            $actual = $null
+            if ($readback) {
+                $actual = ($readback -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1)
+                if ($actual) { $actual = $actual.Trim() }
+            }
+            if ($actual -cne $null -and $actual -ceq $value) {
                 $applied += $name
             } else {
                 $failed += $name
