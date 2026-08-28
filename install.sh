@@ -134,9 +134,16 @@ command -v rustdesk >/dev/null 2>&1 || die "install finished but the rustdesk bi
 # of which settings landed.
 applied=""
 failed=""
+# `rustdesk --option` exits 0 whatever happens: in the shipped source every
+# branch, including "Installation and administrative privileges required!",
+# returns None. Reading the value back is the only way to know whether the write
+# landed. This also catches the case below, where there is no session to write
+# to. The value is printed on its own line; take the last non-empty one.
 set_option() {
     [ -n "${2:-}" ] || return 0
-    if rustdesk --option "$1" "$2" >/dev/null 2>&1; then
+    rustdesk --option "$1" "$2" >/dev/null 2>&1 || true
+    actual=$(rustdesk --option "$1" 2>/dev/null | sed '/^[[:space:]]*$/d' | tail -n 1 || true)
+    if [ "$actual" = "$2" ]; then
         applied="$applied $1"
     else
         failed="$failed $1"
@@ -154,10 +161,12 @@ if [ -n "${LABDESK_HOST:-}${LABDESK_RELAY:-}${LABDESK_API:-}${LABDESK_KEY:-}" ];
     if [ -n "$applied" ]; then info "applied:$applied"; fi
     if [ -n "$failed" ]; then
         warn "could not apply:$failed
-The client is installed but only partly pointed at your server. Settings are
-written through the running rustdesk service, so start it and set them by hand:
-  sudo systemctl start rustdesk
-  sudo rustdesk --option custom-rendezvous-server <host>"
+The client is installed but is not pointed at your server. Settings are written
+through the LabDesk instance running in a logged-in user's session, not through
+the root service, so on a machine nobody has logged into yet there is nothing to
+write to. Log in on this machine once, then set them:
+  sudo rustdesk --option custom-rendezvous-server <host>
+Or set them in the GUI under Settings > Network."
     fi
 else
     info "no server settings given, so none were changed"
@@ -178,11 +187,15 @@ reboot or logout is not supported on it. If you need to reach this machine
 when nobody is logged in, switch the login screen to X11 and reboot:
   sudo sed -i 's/^#*WaylandEnable=.*/WaylandEnable=false/' /etc/gdm/custom.conf
   (Debian and Ubuntu use /etc/gdm3/custom.conf)
-LabDesk also publishes a separate 'rustdesk-unattended-wayland' deb that
-captures through DRM/KMS with no X11 switch. It is a distinct package on
-purpose because it bypasses the desktop's consent prompt and injects input as
-root, so install it deliberately rather than as part of a routine setup:
+The path above is for GDM; on KDE or another display manager the setting lives
+elsewhere."
+    if [ "$manager" = "apt" ] && [ "$arch" = "x86_64" ]; then
+        warn "LabDesk also publishes a separate 'rustdesk-unattended-wayland' deb that
+captures through DRM/KMS with no X11 switch. It is a distinct package on purpose
+because it bypasses the desktop's consent prompt and injects input as root, so
+install it deliberately rather than as part of a routine setup:
   https://github.com/$REPO/releases/latest"
+    fi
 fi
 
 info "done. Launch LabDesk from your applications menu or run 'rustdesk'."

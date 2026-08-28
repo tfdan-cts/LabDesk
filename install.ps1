@@ -63,6 +63,39 @@ function Stop-WithError {
     exit 1
 }
 
+# The installer writes DisplayVersion as crate::VERSION with dashes turned into
+# dots (src/platform/windows.rs), so a suffixed upstream version such as 1.4.9-1
+# is recorded as 1.4.9.1 while the asset name still reads 1.4.9. Accept the
+# expected version, or a longer one that extends it, so a successful install is
+# not reported as a failure. A different version, which is what a failed upgrade
+# leaves behind, still is.
+function Test-VersionMatch {
+    param([string]$Installed, [string]$Expected)
+    if (-not $Installed) { return $false }
+    return ($Installed -eq $Expected) -or $Installed.StartsWith("$Expected.")
+}
+
+# Settings are written through the LabDesk service over IPC, and the service is
+# created by the installer, so on a first install the write races the service
+# coming up. Wait for it rather than guessing at a sleep.
+function Wait-LabDeskService {
+    param([int]$TimeoutSeconds = 60)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $started = $false
+    while ((Get-Date) -lt $deadline) {
+        $svc = Get-Service -Name 'LabDesk' -ErrorAction SilentlyContinue
+        if ($svc) {
+            if ($svc.Status -eq 'Running') { return $true }
+            if (-not $started) {
+                $started = $true
+                try { Start-Service -Name 'LabDesk' -ErrorAction SilentlyContinue } catch { }
+            }
+        }
+        Start-Sleep -Seconds 2
+    }
+    return $false
+}
+
 $identity = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Stop-WithError 'must run from an elevated PowerShell session. Right-click PowerShell and choose Run as administrator.'
@@ -181,13 +214,13 @@ try {
         $entry = Get-ItemProperty -Path $uninstallKey -ErrorAction SilentlyContinue
         $installPath = $entry.InstallLocation
         $installedVersion = $entry.DisplayVersion
-        if ($installPath -and $installedVersion -eq $expectedVersion) { break }
+        if ($installPath -and (Test-VersionMatch $installedVersion $expectedVersion)) { break }
         Start-Sleep -Seconds 1
     }
     if (-not $installPath) {
         Stop-WithError 'the installer finished but no LabDesk installation was registered.'
     }
-    if ($installedVersion -ne $expectedVersion) {
+    if (-not (Test-VersionMatch $installedVersion $expectedVersion)) {
         Stop-WithError @"
 the installer exited cleanly but the registry still reports version
 '$installedVersion' instead of '$expectedVersion', so the install did not take.
@@ -211,9 +244,15 @@ This usually means files were in use. Close LabDesk and run this again.
         'key'                      = $Key
     }
     if (@($settings.Values | Where-Object { $_ }).Count -gt 0) {
-        # Setting an option talks to the LabDesk service over IPC, so give the
-        # service a moment to come up after a fresh install.
-        Start-Sleep -Seconds 3
+        if (-not (Wait-LabDeskService)) {
+            Stop-WithError @"
+LabDesk installed, but its service did not reach Running within 60 seconds.
+Settings are written through that service, so none were applied. Start it and
+set them by hand:
+  Start-Service LabDesk
+  & '$exe' --option custom-rendezvous-server <host>
+"@
+        }
         $applied = @()
         $failed = @()
         foreach ($name in $settings.Keys) {
