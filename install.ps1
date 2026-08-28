@@ -48,6 +48,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = 'tfdan-cts/LabDesk'
+$uninstallKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LabDesk'
 
 function Write-Step { param([string]$Message) Write-Host "labdesk: $Message" }
 function Write-Warn { param([string]$Message) [Console]::Error.WriteLine("labdesk: warning: $Message") }
@@ -77,9 +78,13 @@ if (-not $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrat
 $machineArch = $env:PROCESSOR_ARCHITEW6432
 if (-not $machineArch) { $machineArch = $env:PROCESSOR_ARCHITECTURE }
 
+# The release carries the same installer under two names: LabDesk-<version>-<arch>-install.exe,
+# which the README points at for offline installs, and the upstream-named
+# rustdesk-<version>-<arch>.exe. Prefer the branded one and fall back, so this
+# script and the documentation cannot drift onto different files.
 switch ($machineArch) {
-    'AMD64' { $assetPattern = '^rustdesk-.*-x86_64\.exe$' }
-    'ARM64' { $assetPattern = '^rustdesk-.*-aarch64\.exe$' }
+    'AMD64' { $assetPatterns = @('^LabDesk-.*-x86_64-install\.exe$', '^rustdesk-[0-9].*-x86_64\.exe$') }
+    'ARM64' { $assetPatterns = @('^LabDesk-.*-aarch64-install\.exe$', '^rustdesk-[0-9].*-aarch64\.exe$') }
     default { Stop-WithError "unsupported architecture '$machineArch'. LabDesk ships x86_64 and ARM64 builds." }
 }
 
@@ -100,9 +105,23 @@ Wait and retry, or download the installer by hand:
     Stop-WithError "could not reach the GitHub API: $($_.Exception.Message)"
 }
 
-$asset = $release.assets | Where-Object { $_.name -match $assetPattern } | Select-Object -First 1
+$asset = $null
+foreach ($pattern in $assetPatterns) {
+    $asset = $release.assets | Where-Object { $_.name -match $pattern } | Select-Object -First 1
+    if ($asset) { break }
+}
 if (-not $asset) {
-    Stop-WithError "the $($release.tag_name) release has no installer matching $assetPattern. See https://github.com/$repo/releases/latest"
+    Stop-WithError "release $($release.tag_name) carries no Windows installer for $machineArch. See https://github.com/$repo/releases/latest"
+}
+
+# The assets are named for the upstream RustDesk version rather than the release
+# tag, and that version is what the installer writes to the registry. Reading it
+# back afterwards is the only way to tell a finished install from one that
+# changed nothing.
+if ($asset.name -match '(\d+\.\d+\.\d+)') {
+    $expectedVersion = $Matches[1]
+} else {
+    Stop-WithError "could not read a version out of the asset name '$($asset.name)'."
 }
 
 if (Get-Process -Name 'LabDesk' -ErrorAction SilentlyContinue) {
@@ -117,18 +136,23 @@ try {
     Stop-WithError "download failed: $($_.Exception.Message)"
 }
 
-# LabDesk.exe is a GUI-subsystem binary, so the call operator returns
-# immediately and $LASTEXITCODE would be whatever the previous command left
-# behind. Every invocation below goes through Start-Process -Wait for that
-# reason. Output is redirected to a file because a GUI binary has no console to
-# write to, but it does write to a handle it is given.
+# LabDesk.exe is a GUI-subsystem binary, so the call operator returns immediately
+# and $LASTEXITCODE would hold whatever the previous command left behind. Every
+# invocation below goes through Start-Process -Wait for that reason. Output is
+# redirected to a file because a GUI binary has no console to write to, though it
+# does write to a handle it is handed. Redirecting forces UseShellExecute=$false,
+# under which the window cannot be hidden, so each call may flash briefly.
 function Invoke-LabDesk {
     param([string]$Exe, [string[]]$Arguments)
     $out = [IO.Path]::GetTempFileName()
     $err = [IO.Path]::GetTempFileName()
     try {
-        $p = Start-Process -FilePath $Exe -ArgumentList $Arguments -Wait -PassThru `
-            -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err
+        # Windows PowerShell joins an -ArgumentList array with spaces and does not
+        # quote the parts, so a value containing a space would arrive as two
+        # arguments. Quote each one here instead.
+        $quoted = ($Arguments | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -join ' '
+        $p = Start-Process -FilePath $Exe -ArgumentList $quoted -Wait -PassThru `
+            -RedirectStandardOutput $out -RedirectStandardError $err
         [PSCustomObject]@{
             ExitCode = $p.ExitCode
             Output   = (Get-Content $out -Raw -ErrorAction SilentlyContinue)
@@ -138,32 +162,47 @@ function Invoke-LabDesk {
     }
 }
 
+$priorVersion = (Get-ItemProperty -Path $uninstallKey -Name DisplayVersion -ErrorAction SilentlyContinue).DisplayVersion
+if ($priorVersion) { Write-Step "found LabDesk $priorVersion already installed" }
+
 try {
-    Write-Step 'installing (this opens no window and takes a minute)'
+    Write-Step 'installing (this takes a minute)'
     $process = Start-Process -FilePath $installer -ArgumentList '--silent-install' -Wait -PassThru
     if ($process.ExitCode -ne 0) {
         Stop-WithError "the installer exited with code $($process.ExitCode)."
     }
 
-    # install_me writes InstallLocation once it has finished copying files, so
-    # the key is the signal that the install completed, rather than the process
-    # merely having exited.
-    $uninstallKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LabDesk'
+    # Wait for the registry to report the version that was just installed.
+    # Waiting on InstallLocation alone would be satisfied immediately by an
+    # earlier install, so a failed upgrade would report success.
     $installPath = $null
+    $installedVersion = $null
     foreach ($attempt in 1..30) {
-        $installPath = (Get-ItemProperty -Path $uninstallKey -Name InstallLocation -ErrorAction SilentlyContinue).InstallLocation
-        if ($installPath) { break }
+        $entry = Get-ItemProperty -Path $uninstallKey -ErrorAction SilentlyContinue
+        $installPath = $entry.InstallLocation
+        $installedVersion = $entry.DisplayVersion
+        if ($installPath -and $installedVersion -eq $expectedVersion) { break }
         Start-Sleep -Seconds 1
     }
     if (-not $installPath) {
         Stop-WithError 'the installer finished but no LabDesk installation was registered.'
+    }
+    if ($installedVersion -ne $expectedVersion) {
+        Stop-WithError @"
+the installer exited cleanly but the registry still reports version
+'$installedVersion' instead of '$expectedVersion', so the install did not take.
+This usually means files were in use. Close LabDesk and run this again.
+"@
     }
 
     $exe = Join-Path $installPath 'LabDesk.exe'
     if (-not (Test-Path $exe)) {
         Stop-WithError "expected $exe to exist after installing."
     }
-    Write-Step "installed to $installPath"
+    Write-Step "installed $installedVersion to $installPath"
+    if ($priorVersion -eq $expectedVersion) {
+        Write-Warn "version $expectedVersion was already installed, so this run cannot prove it replaced anything. The installer reported success."
+    }
 
     $settings = [ordered]@{
         'custom-rendezvous-server' = $Server

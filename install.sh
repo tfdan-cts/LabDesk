@@ -24,9 +24,11 @@
 #
 # Trust model: the packages are downloaded over TLS from github.com and are not
 # signed or checksummed by this project. A working TLS connection to GitHub is
-# the whole of the trust chain, and rpm and pacman are told to accept the
-# unsigned package. Read the script before piping it to root, as you should
-# with any installer that works this way.
+# the whole of the trust chain. Read the script before piping it to root, as you
+# should with any installer that works this way.
+#
+# Arch note: pacman's default SigLevel rejects unsigned local packages, so the
+# pacman path may refuse to install. The script says so if that happens.
 
 set -eu
 
@@ -48,20 +50,20 @@ esac
 
 if command -v apt-get >/dev/null 2>&1; then
     manager=apt
-    pattern="rustdesk-.*-${arch}\.deb"
+    pattern="rustdesk-[0-9][^/]*-${arch}\.deb"
 elif command -v zypper >/dev/null 2>&1; then
     manager=zypper
-    pattern="rustdesk-.*-${arch}-suse\.rpm"
+    pattern="rustdesk-[0-9][^/]*\.${arch}-suse\.rpm"
 elif command -v dnf >/dev/null 2>&1; then
     manager=dnf
-    pattern="rustdesk-.*\.${arch}\.rpm"
+    pattern="rustdesk-[0-9][^/]*\.${arch}\.rpm"
 elif command -v yum >/dev/null 2>&1; then
     manager=yum
-    pattern="rustdesk-.*\.${arch}\.rpm"
+    pattern="rustdesk-[0-9][^/]*\.${arch}\.rpm"
 elif command -v pacman >/dev/null 2>&1; then
     [ "$arch" = "x86_64" ] || die "LabDesk ships an Arch package for x86_64 only, not $arch."
     manager=pacman
-    pattern="rustdesk-.*-${arch}\.pkg\.tar\.zst"
+    pattern="rustdesk-[0-9][^/]*-${arch}\.pkg\.tar\.zst"
 else
     die "no supported package manager found (looked for apt-get, zypper, dnf, yum, pacman).
 Install one of the .AppImage or .flatpak builds by hand instead:
@@ -71,7 +73,12 @@ fi
 info "installing for $arch using $manager"
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
+# EXIT does the cleanup. INT and TERM only exit, which then fires EXIT: a
+# handler that merely cleans up would delete the directory and let the script
+# carry on with the package manager still reading from it.
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Fetch the release metadata to a file so that a transport or HTTP failure is
 # reported as itself. Folding this into the pipeline below would turn a rate
@@ -111,7 +118,13 @@ case "$manager" in
     dnf) dnf install -y "$pkg" ;;
     yum) yum install -y "$pkg" ;;
     zypper) zypper --non-interactive install --allow-unsigned-rpm "$pkg" ;;
-    pacman) pacman -U --noconfirm "$pkg" ;;
+    pacman)
+        pacman -U --noconfirm "$pkg" || die "pacman refused the package.
+Arch's default SigLevel rejects unsigned local packages, and LabDesk does not
+sign them. To install anyway, download the package and install it with a pacman
+config that sets 'SigLevel = Never', accepting that nothing verifies it:
+  $url"
+        ;;
 esac
 
 command -v rustdesk >/dev/null 2>&1 || die "install finished but the rustdesk binary is not on PATH."
@@ -138,7 +151,7 @@ if [ -n "${LABDESK_HOST:-}${LABDESK_RELAY:-}${LABDESK_API:-}${LABDESK_KEY:-}" ];
     set_option relay-server "${LABDESK_RELAY:-}"
     set_option api-server "${LABDESK_API:-}"
     set_option key "${LABDESK_KEY:-}"
-    [ -n "$applied" ] && info "applied:$applied"
+    if [ -n "$applied" ]; then info "applied:$applied"; fi
     if [ -n "$failed" ]; then
         warn "could not apply:$failed
 The client is installed but only partly pointed at your server. Settings are
@@ -150,20 +163,23 @@ else
     info "no server settings given, so none were changed"
 fi
 
-# The stock package inherits upstream's Wayland limitation: screen capture and
-# unattended access need X11. Say so here rather than let someone discover it
-# when they try to connect to a machine nobody is sitting at.
+# Wayland has had experimental support since 1.2.0, so a Wayland desktop works.
+# What does not work is reaching the *login screen* after a reboot or logout,
+# which still needs X11. Say so rather than let someone discover it the first
+# time a machine reboots with nobody sitting at it.
 session="${XDG_SESSION_TYPE:-}"
 if [ -z "$session" ] && [ -n "$(find /run/user -maxdepth 2 -name 'wayland-*' -print -quit 2>/dev/null)" ]; then
     session=wayland
 fi
 if [ "$session" = "wayland" ]; then
     warn "this machine is running a Wayland session.
-Screen capture and unattended access need X11. Disable Wayland and reboot:
+Wayland support is experimental, and connecting to the login screen after a
+reboot or logout is not supported on it. If you need to reach this machine
+when nobody is logged in, switch the login screen to X11 and reboot:
   sudo sed -i 's/^#*WaylandEnable=.*/WaylandEnable=false/' /etc/gdm/custom.conf
   (Debian and Ubuntu use /etc/gdm3/custom.conf)
 LabDesk also publishes a separate 'rustdesk-unattended-wayland' deb that
-captures through DRM/KMS without switching to X11. It is a distinct package on
+captures through DRM/KMS with no X11 switch. It is a distinct package on
 purpose because it bypasses the desktop's consent prompt and injects input as
 root, so install it deliberately rather than as part of a routine setup:
   https://github.com/$REPO/releases/latest"
