@@ -7,17 +7,26 @@
 # that matches this distribution, and installs it. Re-running the script
 # upgrades an existing installation in place.
 #
-# To point the client at a server as part of the install, set any of these
-# before running it:
+# To point the client at a server as part of the install, set any of these:
 #
 #   LABDESK_HOST    ID / rendezvous server
 #   LABDESK_RELAY   relay server
 #   LABDESK_API     API server
 #   LABDESK_KEY     server public key
 #
+# They must be set for the shell that sudo runs, so put them after sudo:
+#
 #   curl -fsSL .../install.sh | sudo LABDESK_HOST=id.example.com LABDESK_KEY=abc sh
 #
-# Nothing is written to those settings unless you supply a value.
+# Setting them before curl instead does not work, because sudo does not pass
+# the surrounding environment through by default. Any setting you leave out is
+# left untouched.
+#
+# Trust model: the packages are downloaded over TLS from github.com and are not
+# signed or checksummed by this project. A working TLS connection to GitHub is
+# the whole of the trust chain, and rpm and pacman are told to accept the
+# unsigned package. Read the script before piping it to root, as you should
+# with any installer that works this way.
 
 set -eu
 
@@ -26,6 +35,7 @@ API="https://api.github.com/repos/$REPO/releases/latest"
 
 die() { echo "labdesk: $*" >&2; exit 1; }
 info() { echo "labdesk: $*"; }
+warn() { echo "labdesk: warning: $*" >&2; }
 
 [ "$(id -u)" = "0" ] || die "must run as root. Pipe to 'sudo sh' instead of 'sh'."
 command -v curl >/dev/null 2>&1 || die "curl is required but not installed."
@@ -36,8 +46,6 @@ case "$(uname -m)" in
     *) die "unsupported architecture '$(uname -m)'. LabDesk ships x86_64 and aarch64 packages." ;;
 esac
 
-# Each entry is the tool that must exist, the pattern matching its package in
-# the release, and the command that installs a local file with that tool.
 if command -v apt-get >/dev/null 2>&1; then
     manager=apt
     pattern="rustdesk-.*-${arch}\.deb"
@@ -55,26 +63,45 @@ elif command -v pacman >/dev/null 2>&1; then
     manager=pacman
     pattern="rustdesk-.*-${arch}\.pkg\.tar\.zst"
 else
-    die "no supported package manager found (looked for apt-get, zypper, dnf, yum, pacman)."
+    die "no supported package manager found (looked for apt-get, zypper, dnf, yum, pacman).
+Install one of the .AppImage or .flatpak builds by hand instead:
+  https://github.com/$REPO/releases/latest"
 fi
 
 info "installing for $arch using $manager"
 
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+# Fetch the release metadata to a file so that a transport or HTTP failure is
+# reported as itself. Folding this into the pipeline below would turn a rate
+# limit into "no package for your architecture", which sends people looking for
+# a problem they do not have.
+code=$(curl -sSL -w '%{http_code}' -o "$tmp/release.json" "$API" 2>"$tmp/curl.err") || {
+    die "could not reach the GitHub API: $(cat "$tmp/curl.err")"
+}
+case "$code" in
+    200) ;;
+    403 | 429)
+        die "GitHub rate-limited this address (HTTP $code). The API allows 60 unauthenticated
+requests an hour per IP, so imaging several machines behind one address can hit it.
+Wait and retry, or download the package by hand:
+  https://github.com/$REPO/releases/latest" ;;
+    *) die "the GitHub API returned HTTP $code. See https://github.com/$REPO/releases/latest" ;;
+esac
+
 # The asset names carry the upstream RustDesk version rather than the release
-# tag, so the download URL has to come from the release metadata. Parsed with
-# grep and sed because jq is not present on a stock image.
-url=$(curl -fsSL "$API" \
-    | grep -o '"browser_download_url": *"[^"]*"' \
+# tag, so the download URL has to come from the metadata. Parsed with grep and
+# sed because jq is not present on a stock image.
+url=$(grep -o '"browser_download_url": *"[^"]*"' "$tmp/release.json" \
     | sed 's/.*"\(https[^"]*\)"/\1/' \
     | grep -E "/${pattern}$" \
     | head -n 1) || true
 
-[ -n "${url:-}" ] || die "no $manager package for $arch in the latest release. See https://github.com/$REPO/releases"
+[ -n "${url:-}" ] || die "the latest release has no $manager package for $arch.
+See https://github.com/$REPO/releases/latest"
 
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
 pkg="$tmp/${url##*/}"
-
 info "downloading ${url##*/}"
 curl -fsSL --retry 3 -o "$pkg" "$url" || die "download failed: $url"
 
@@ -89,12 +116,18 @@ esac
 
 command -v rustdesk >/dev/null 2>&1 || die "install finished but the rustdesk binary is not on PATH."
 
-# The package enables and starts rustdesk.service itself. Setting an option
-# talks to that service over IPC, so it has to be up first.
+# Apply every setting that was supplied and report the ones that did not take,
+# rather than dying part-way and leaving a half-pointed client with no record
+# of which settings landed.
+applied=""
+failed=""
 set_option() {
     [ -n "${2:-}" ] || return 0
-    info "setting $1"
-    rustdesk --option "$1" "$2" || die "could not set $1. Is rustdesk.service running?"
+    if rustdesk --option "$1" "$2" >/dev/null 2>&1; then
+        applied="$applied $1"
+    else
+        failed="$failed $1"
+    fi
 }
 
 if [ -n "${LABDESK_HOST:-}${LABDESK_RELAY:-}${LABDESK_API:-}${LABDESK_KEY:-}" ]; then
@@ -105,6 +138,35 @@ if [ -n "${LABDESK_HOST:-}${LABDESK_RELAY:-}${LABDESK_API:-}${LABDESK_KEY:-}" ];
     set_option relay-server "${LABDESK_RELAY:-}"
     set_option api-server "${LABDESK_API:-}"
     set_option key "${LABDESK_KEY:-}"
+    [ -n "$applied" ] && info "applied:$applied"
+    if [ -n "$failed" ]; then
+        warn "could not apply:$failed
+The client is installed but only partly pointed at your server. Settings are
+written through the running rustdesk service, so start it and set them by hand:
+  sudo systemctl start rustdesk
+  sudo rustdesk --option custom-rendezvous-server <host>"
+    fi
+else
+    info "no server settings given, so none were changed"
+fi
+
+# The stock package inherits upstream's Wayland limitation: screen capture and
+# unattended access need X11. Say so here rather than let someone discover it
+# when they try to connect to a machine nobody is sitting at.
+session="${XDG_SESSION_TYPE:-}"
+if [ -z "$session" ] && [ -n "$(find /run/user -maxdepth 2 -name 'wayland-*' -print -quit 2>/dev/null)" ]; then
+    session=wayland
+fi
+if [ "$session" = "wayland" ]; then
+    warn "this machine is running a Wayland session.
+Screen capture and unattended access need X11. Disable Wayland and reboot:
+  sudo sed -i 's/^#*WaylandEnable=.*/WaylandEnable=false/' /etc/gdm/custom.conf
+  (Debian and Ubuntu use /etc/gdm3/custom.conf)
+LabDesk also publishes a separate 'rustdesk-unattended-wayland' deb that
+captures through DRM/KMS without switching to X11. It is a distinct package on
+purpose because it bypasses the desktop's consent prompt and injects input as
+root, so install it deliberately rather than as part of a routine setup:
+  https://github.com/$REPO/releases/latest"
 fi
 
 info "done. Launch LabDesk from your applications menu or run 'rustdesk'."

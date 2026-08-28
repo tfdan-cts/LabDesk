@@ -33,14 +33,18 @@ unattended, and verifies the installation registered before reporting success.
 Re-running it upgrades in place.
 
 To point the client at a server during the install, download the script first,
-because piping to `iex` leaves no way to pass parameters:
+because piping to `iex` leaves no way to pass parameters. Windows refuses to run
+downloaded scripts under its default execution policy, so bypass it for this one
+run:
 
 ```powershell
 irm https://raw.githubusercontent.com/tfdan-cts/LabDesk/master/install.ps1 -OutFile install.ps1
-.\install.ps1 -Server id.example.com -Relay relay.example.com -Api https://api.example.com -Key YOURKEY
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Server id.example.com -Relay relay.example.com -Api https://api.example.com -Key YOURKEY
 ```
 
 Every parameter is optional, and any setting you leave out is left untouched.
+Each setting is read back after it is written, so the script reports a failure
+rather than claiming success on a setting that did not apply.
 
 ### Linux
 
@@ -61,7 +65,15 @@ curl -fsSL https://raw.githubusercontent.com/tfdan-cts/LabDesk/master/install.sh
 ```
 
 `LABDESK_HOST`, `LABDESK_RELAY`, `LABDESK_API`, and `LABDESK_KEY` are all
-optional, and any setting you leave out is left untouched.
+optional, and any setting you leave out is left untouched. They have to be set
+for the shell that `sudo` runs, which is why they go after `sudo` and not before
+`curl`.
+
+On a Wayland session the script warns that screen capture and unattended access
+need X11, and prints the change required to switch. LabDesk also publishes a
+separate `rustdesk-unattended-wayland` package that captures through DRM/KMS
+without switching to X11. It is a distinct package because it bypasses the
+desktop's consent prompt, so install it deliberately rather than as routine.
 
 ### Offline or hand-delivered installs
 
