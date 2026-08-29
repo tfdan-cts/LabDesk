@@ -50,9 +50,17 @@ flutter analyze --no-fatal-infos      # must add no new issues under lib/labdesk
 Notes on the gates as they stand today:
 
 - `flutter analyze` reports issues inherited from upstream RustDesk, so the total is never zero.
-  Measured on 2026-08-29 with Flutter 3.47.2: **351 issues in total, of which 17 were in
-  LabDesk's own files** — 16 `deprecated_member_use` and one `unnecessary_non_null_assertion`,
-  which has been fixed. Filter the output for `labdesk` to see them.
+  The gate is that LabDesk's own files contribute none of them. Two measurements from
+  2026-08-29, and the difference between them is the point:
+
+  | Flutter | Total | In LabDesk's files |
+  |---|---|---|
+  | 3.24.5, the pinned version continuous integration builds with | 254 | **0** |
+  | 3.47.2, installed on the development workstation | 351 | 17 |
+
+  The pinned version is the one that counts. The extra items a newer Flutter reports are
+  deprecations it introduced after 3.24.5, plus one `unnecessary_non_null_assertion` that has
+  since been fixed. Filter the output for `labdesk` to see them.
 - **Read the analyzer's count against the pinned Flutter version, not the newest one.** The
   version continuous integration builds with is pinned in
   `.github/workflows/flutter-build.yml` (`FLUTTER_VERSION`, currently 3.24.5). A newer Flutter
