@@ -17,8 +17,75 @@ on:
       - "appimage/**"
       - "flatpak/**"
 
+# Read-only on purpose. Nothing here publishes: run-ci passes
+# upload-artifact: false, so the release steps in flutter-build.yml skip
+# themselves. Granting contents: write to a workflow that builds pull request
+# code would hand that code a token able to write to the repository.
+permissions:
+  contents: read
+
 jobs:
   run-ci:
     uses: ./.github/workflows/flutter-build.yml
     with:
       upload-artifact: false
+
+  # The Dart tests and the analyzer, which nothing else runs. Kept out of
+  # flutter-build.yml so it reports in minutes instead of waiting on a build
+  # that takes hours, and so a failure here names itself.
+  dart-checks:
+    name: Dart tests and analysis
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Read the pin out of flutter-build.yml rather than repeating it, so this
+      # job always analyses with the Flutter the release build compiles with.
+      - name: Read the pinned Flutter version
+        id: pin
+        run: |
+          version=$(sed -n 's/^[[:space:]]*FLUTTER_VERSION:[[:space:]]*"\([^"]*\)".*/\1/p' \
+            .github/workflows/flutter-build.yml | head -n 1)
+          if [ -z "$version" ]; then
+            echo "could not read FLUTTER_VERSION out of .github/workflows/flutter-build.yml" >&2
+            exit 1
+          fi
+          echo "using Flutter $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ steps.pin.outputs.version }}
+          cache: true
+
+      - name: Resolve dependencies
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Run the LabDesk tests
+        working-directory: flutter
+        run: flutter test test/labdesk_*.dart
+
+      # The analyzer runs over the whole package, because that is the only way
+      # to resolve the imports, but only issues in files LabDesk owns fail the
+      # job. Everything else is inherited from upstream RustDesk and predates
+      # this fork by years; failing on it would mean either fixing several
+      # hundred upstream issues or turning the check off, and neither of those
+      # protects LabDesk's own code.
+      #
+      # Known gap: lib/generated_bridge.dart is produced by the bridge job and
+      # is not present here, so lib/models/{model,native_model,platform_model}
+      # report unresolved-symbol errors. Those are upstream files, so they are
+      # filtered out with the rest, but it also means a mistyped bind.* call in
+      # a LabDesk screen resolves against an invalid type and is not reported.
+      # Generating the bridge here would collide with the bridge artifact the
+      # run-ci job already uploads in this same run.
+      - name: Analyze
+        working-directory: flutter
+        run: |
+          report="$RUNNER_TEMP/analyze.txt"
+          flutter analyze --no-fatal-infos --no-fatal-warnings > "$report" 2>&1 || true
+          cat "$report"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/labdesk_analyze_gate.py" "$report"

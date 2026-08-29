@@ -56,8 +56,15 @@ jobs:
   generate-sbom:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
+    # No permissions block on purpose. A called workflow may not ask for more
+    # than its caller was granted, and the repository's default workflow token
+    # is read-only, so a job here that demanded contents: write made GitHub
+    # reject every run of every caller that had not granted it, before any job
+    # was created. Inheriting instead means the callers that publish
+    # (flutter-tag, flutter-nightly, labdesk-dispatch) grant the write this job
+    # needs for "Publish Release", and the callers that do not publish stay
+    # read-only. The publish step is already skipped when upload-artifact is
+    # false, which is the only case where the inherited grant is read-only.
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

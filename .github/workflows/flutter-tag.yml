@@ -9,6 +9,12 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+-[0-9]+'
       - '[0-9]+.[0-9]+.[0-9]+-[0-9]+'
 
+# This build publishes its artifacts to the release for the tag, so it needs a
+# token that can write to the repository's contents. The default workflow token
+# is read-only. Same declaration as labdesk-dispatch.yml, for the same reason.
+permissions:
+  contents: write
+
 jobs:
   run-flutter-tag-build:
     uses: ./.github/workflows/flutter-build.yml
