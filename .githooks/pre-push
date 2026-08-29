@@ -1,0 +1,25 @@
+#!/bin/sh
+# Refuses any push to master. See docs/WORKFLOW.md.
+#
+# master is the released public version and moves only by a release pull request that the
+# owner merges personally. Set LABDESK_ALLOW_MASTER_PUSH=1 to override, which exists for that
+# release and for nothing else.
+#
+# Enable with: git config core.hooksPath .githooks
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+	case "$remote_ref" in
+	refs/heads/master)
+		if [ "$LABDESK_ALLOW_MASTER_PUSH" != "1" ]; then
+			echo "pre-push: refusing to push to master." >&2
+			echo "master moves only by a release pull request merged by the owner." >&2
+			echo "See docs/WORKFLOW.md. Push your feature branch and open a pull request" >&2
+			echo "against labdesk-next instead." >&2
+			exit 1
+		fi
+		echo "pre-push: LABDESK_ALLOW_MASTER_PUSH=1 set, allowing the push to master." >&2
+		;;
+	esac
+done
+
+exit 0

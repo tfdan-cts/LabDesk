@@ -1,1 +1,5 @@
 * text=auto
+
+# Shell scripts must keep LF endings or they fail to run on Linux and macOS.
+.githooks/* text eol=lf
+*.sh text eol=lf
