@@ -230,6 +230,20 @@ This usually means files were in use. Close LabDesk and run this again.
 
     $exe = Join-Path $installPath 'LabDesk.exe'
     if (-not (Test-Path $exe)) {
+        # Releases built before the install_me rename fix copy the payload under
+        # its own name, rustdesk.exe, while the service, the uninstaller and the
+        # shortcuts all point at LabDesk.exe. Carrying on with the binary that is
+        # actually there would hide that, so say what is wrong instead.
+        $stray = Join-Path $installPath 'rustdesk.exe'
+        if (Test-Path $stray) {
+            Stop-WithError @"
+this release installs its binary as rustdesk.exe, but its own service,
+uninstaller and shortcuts all reference LabDesk.exe, so the installation is
+broken: the service cannot start and the uninstaller cannot run.
+Install from the .msi instead, which names the binary correctly:
+  https://github.com/$repo/releases/latest
+"@
+        }
         Stop-WithError "expected $exe to exist after installing."
     }
     Write-Step "installed $installedVersion to $installPath"
