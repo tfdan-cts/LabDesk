@@ -49,14 +49,24 @@ flutter analyze --no-fatal-infos      # must add no new issues under lib/labdesk
 
 Notes on the gates as they stand today:
 
-- `flutter analyze` reports issues inherited from upstream RustDesk. The gate is that LabDesk's
-  own files contribute **zero** of them, not that the total is zero. Check by filtering the
-  output for `labdesk`.
-- Continuous integration builds with the Flutter version pinned in
-  `.github/workflows/flutter-build.yml` (`FLUTTER_VERSION`). A newer Flutter installed locally
-  can fail to compile dependencies that CI compiles fine, so a local failure inside
-  `~/AppData/Local/Pub/Cache` or another package's source is a toolchain mismatch, not a
-  regression in this repository. Confirm the version before treating such a failure as real.
+- `flutter analyze` reports issues inherited from upstream RustDesk, so the total is never zero.
+  Measured on 2026-08-29 with Flutter 3.47.2: **351 issues in total, of which 17 were in
+  LabDesk's own files** — 16 `deprecated_member_use` and one `unnecessary_non_null_assertion`,
+  which has been fixed. Filter the output for `labdesk` to see them.
+- **Read the analyzer's count against the pinned Flutter version, not the newest one.** The
+  version continuous integration builds with is pinned in
+  `.github/workflows/flutter-build.yml` (`FLUTTER_VERSION`, currently 3.24.5). A newer Flutter
+  installed locally deprecates APIs that the pinned one still considers current: every remaining
+  LabDesk deprecation that names a version names v3.32, which is later than the pinned version,
+  so the pinned analyzer cannot be reporting them. Do not "fix" those against a newer SDK. The
+  replacement for `withOpacity` is `withValues`, which does not exist before Flutter 3.27, so
+  applying it would break the build the release actually ships.
+- A newer local Flutter can also fail to compile a dependency that continuous integration
+  compiles fine. A failure inside `~/AppData/Local/Pub/Cache` or another package's source is a
+  toolchain mismatch, not a regression here. Confirm the version before treating it as real.
+- Running the tests locally rewrites `flutter/pubspec.lock` to suit the local SDK, which on a
+  newer Flutter raises the Dart floor above what the pinned version can satisfy. **Never commit
+  that churn.** Revert it with `git checkout -- flutter/pubspec.lock` before staging.
 - The Rust core is not built locally by default; changes under `src/` are compiled by CI.
   A change to `src/` therefore cannot be gated locally, and its pull request must wait for the
   `CI` workflow to pass before merging.
