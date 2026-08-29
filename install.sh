@@ -27,8 +27,9 @@
 # the whole of the trust chain. Read the script before piping it to root, as you
 # should with any installer that works this way.
 #
-# Arch note: pacman's default SigLevel rejects unsigned local packages, so the
-# pacman path may refuse to install. The script says so if that happens.
+# Arch note: Arch ships LocalFileSigLevel = Optional, which accepts an unsigned
+# local package, so pacman -U installs these. A host hardened to
+# LocalFileSigLevel = Required will refuse; the script says so if that happens.
 
 set -eu
 
@@ -131,9 +132,10 @@ case "$manager" in
     zypper) zypper --non-interactive install --allow-unsigned-rpm "$pkg" ;;
     pacman)
         pacman -U --noconfirm "$pkg" || die "pacman refused the package.
-Arch's default SigLevel rejects unsigned local packages, and LabDesk does not
-sign them. To install anyway, download the package and install it with a pacman
-config that sets 'SigLevel = Never', accepting that nothing verifies it:
+LabDesk does not sign its packages. Stock Arch accepts that, because it ships
+LocalFileSigLevel = Optional, so this host is likely set to Required. Either
+install it deliberately with a config that relaxes LocalFileSigLevel, or fetch
+the package and check it yourself first:
   $url"
         ;;
 esac
@@ -192,14 +194,26 @@ if [ -z "$session" ] && [ -n "$(find /run/user -maxdepth 2 -name 'wayland-*' -pr
     session=wayland
 fi
 if [ "$session" = "wayland" ]; then
-    warn "this machine is running a Wayland session.
+    gdm_conf=""
+    for f in /etc/gdm/custom.conf /etc/gdm3/custom.conf; do
+        [ -f "$f" ] && gdm_conf="$f" && break
+    done
+    if [ -n "$gdm_conf" ]; then
+        warn "this machine is running a Wayland session.
 Wayland support is experimental, and connecting to the login screen after a
-reboot or logout is not supported on it. If you need to reach this machine
-when nobody is logged in, switch the login screen to X11 and reboot:
-  sudo sed -i 's/^#*WaylandEnable=.*/WaylandEnable=false/' /etc/gdm/custom.conf
-  (Debian and Ubuntu use /etc/gdm3/custom.conf)
-The path above is for GDM; on KDE or another display manager the setting lives
-elsewhere."
+reboot or logout is not supported on it. To reach this machine when nobody is
+logged in, switch the login screen to X11 and reboot:
+  sudo sed -i 's/^#*WaylandEnable=.*/WaylandEnable=false/' $gdm_conf"
+    else
+        warn "this machine is running a Wayland session.
+Wayland support is experimental, and connecting to the login screen after a
+reboot or logout is not supported on it. Screen capture goes through the
+desktop's portal, so xdg-desktop-portal and the backend for this compositor
+need to be installed and running.
+No GDM configuration was found here, so the X11 switch documented upstream does
+not apply. On a compositor with no X11 session at all, such as Hyprland or
+Sway, there is no login-screen workaround."
+    fi
     if [ "$manager" = "apt" ] && [ "$arch" = "x86_64" ]; then
         warn "LabDesk also publishes a separate 'rustdesk-unattended-wayland' deb that
 captures through DRM/KMS with no X11 switch. It is a distinct package on purpose
