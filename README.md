@@ -28,9 +28,16 @@ From an elevated PowerShell prompt:
 irm https://raw.githubusercontent.com/tfdan-cts/LabDesk/master/install.ps1 | iex
 ```
 
-This downloads the newest release for the machine's architecture, installs it
-unattended, and verifies the installation registered before reporting success.
-Re-running it upgrades in place.
+This finds the newest release that publishes a
+`LabDesk-<version>-<arch>-install.exe`, installs it unattended, and verifies the
+installation registered before reporting success. Re-running it upgrades in
+place.
+
+That setup binary is the only build that installs the LabDesk layout, so the
+script installs nothing else. If no release publishes one for this machine's
+architecture, it says so and stops without changing anything. A full release is
+preferred; when only a pre-release carries the installer, the script says which
+pre-release it is about to install before it does.
 
 To point the client at a server during the install, download the script first,
 because piping to `iex` leaves no way to pass parameters. Windows refuses to run
@@ -53,7 +60,9 @@ curl -fsSL https://raw.githubusercontent.com/tfdan-cts/LabDesk/master/install.sh
 ```
 
 The script detects the architecture and the package manager, then installs the
-matching `.deb`, `.rpm`, or `.pkg.tar.zst` from the newest release. It supports
+matching `.deb`, `.rpm`, or `.pkg.tar.zst` from the newest full release. Unlike
+the Windows script it does not consider pre-releases, because the Linux packages
+keep the upstream layout and every full release carries them. It supports
 apt, dnf, yum, zypper, and pacman on x86_64 and aarch64, and it installs the
 `rustdesk` systemd service along with the desktop entries. Re-running it
 upgrades in place.
@@ -78,11 +87,15 @@ desktop's consent prompt, so install it deliberately rather than as routine.
 ### Offline or hand-delivered installs
 
 `LabDesk-<version>-x86_64-install.exe` and `LabDesk-<version>-aarch64-install.exe`
-on the [Releases page](https://github.com/tfdan-cts/LabDesk/releases/latest) are
-ordinary Windows installers. Copy one to a flash drive, double-click it on the
-target machine, and it installs without needing a network connection or a
+are ordinary Windows installers. Copy one to a flash drive, double-click it on
+the target machine, and it installs without needing a network connection or a
 terminal. They are the standard build renamed: the client treats any executable
 whose filename ends in `install.exe` as a setup program.
+
+Take them from the [full list of releases](https://github.com/tfdan-cts/LabDesk/releases),
+not from the `releases/latest` link. That link resolves to the newest release
+that is not marked pre-release, and these files are so far published only on
+pre-releases, so it will not show them.
 
 Add `--silent-install` to run one without any interface:
 
