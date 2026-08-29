@@ -34,6 +34,13 @@ env:
   FLUTTER_WINDOWS_ARM_VERSION: "3.44.8"
   # for arm64 linux because official Dart SDK does not work
   FLUTTER_ELINUX_VERSION: "3.16.9"
+  # The tag decides whether the release this run publishes is a real one.
+  #
+  # Every publish step used to hardcode prerelease: true, so the pipeline could
+  # never produce a release that /releases/latest would return, and the
+  # installers could only ever fetch whatever had last been promoted by hand.
+  # A tag starting with "v" is a version and publishes as a full release;
+  # anything else (nightly, manual, a preview build) stays a pre-release.
   TAG_NAME: "${{ inputs.upload-tag }}"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   # vcpkg version: 2025.08.27
@@ -56,8 +63,15 @@ jobs:
   generate-sbom:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
+    # No permissions block on purpose. A called workflow may not ask for more
+    # than its caller was granted, and the repository's default workflow token
+    # is read-only, so a job here that demanded contents: write made GitHub
+    # reject every run of every caller that had not granted it, before any job
+    # was created. Inheriting instead means the callers that publish
+    # (flutter-tag, flutter-nightly, labdesk-dispatch) grant the write this job
+    # needs for "Publish Release", and the callers that do not publish stay
+    # read-only. The publish step is already skipped when upload-artifact is
+    # false, which is the only case where the inherited grant is read-only.
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -76,7 +90,7 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             rustdesk.sbom.json
@@ -409,7 +423,7 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             ./SignOutput/rustdesk-*.msi
@@ -563,7 +577,7 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             ./SignOutput/rustdesk-*.exe
@@ -905,7 +919,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             rustdesk*-${{ matrix.job.arch }}.dmg
@@ -949,7 +963,7 @@ jobs:
       - name: Publish unsigned app
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: rustdesk-${{ env.VERSION }}-unsigned.tar.gz
 
@@ -1233,7 +1247,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             ${{steps.sign-rustdesk.outputs.signedReleaseFile}}
@@ -1242,7 +1256,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY == null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             signed-apk/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
@@ -1419,7 +1433,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             ${{steps.sign-rustdesk.outputs.signedReleaseFile}}
@@ -1428,7 +1442,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY == null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             signed-apk/rustdesk-${{ env.VERSION }}-universal${{ env.suffix }}.apk
@@ -1729,7 +1743,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             rustdesk-*.deb
@@ -1765,7 +1779,7 @@ jobs:
         if: matrix.job.arch == 'x86_64' && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             res/rustdesk-${{ env.VERSION }}*.zst
@@ -2026,7 +2040,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             ${{ env.DRM_DEB }}
@@ -2255,7 +2269,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.deb
@@ -2313,7 +2327,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             ./appimage/rustdesk-${{ env.VERSION }}-*.AppImage
@@ -2398,7 +2412,7 @@ jobs:
       - name: Publish flatpak package
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             flatpak/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.flatpak
@@ -2482,7 +2496,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: true
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
           files: |
             flutter/build/rustdesk-${{ env.VERSION }}-${{ env.RELEASE_NAME }}.tar.gz

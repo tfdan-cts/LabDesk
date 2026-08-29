@@ -34,7 +34,8 @@
 set -eu
 
 REPO=tfdan-cts/LabDesk
-API="https://api.github.com/repos/$REPO/releases/latest"
+API_LATEST="https://api.github.com/repos/$REPO/releases/latest"
+API_LIST="https://api.github.com/repos/$REPO/releases?per_page=100"
 
 die() { echo "labdesk: $*" >&2; exit 1; }
 info() { echo "labdesk: $*"; }
@@ -85,29 +86,51 @@ trap 'exit 143' TERM
 # reported as itself. Folding this into the pipeline below would turn a rate
 # limit into "no package for your architecture", which sends people looking for
 # a problem they do not have.
-code=$(curl -sSL -w '%{http_code}' -o "$tmp/release.json" "$API" 2>"$tmp/curl.err") || {
-    die "could not reach the GitHub API: $(cat "$tmp/curl.err")"
-}
-case "$code" in
-    200) ;;
-    403 | 429)
-        die "GitHub rate-limited this address (HTTP $code). The API allows 60 unauthenticated
+fetch_json() {
+    _url=$1
+    _out=$2
+    _code=$(curl -sSL -w '%{http_code}' -o "$_out" "$_url" 2>"$tmp/curl.err") || {
+        die "could not reach the GitHub API: $(cat "$tmp/curl.err")"
+    }
+    case "$_code" in
+        200) ;;
+        403 | 429)
+            die "GitHub rate-limited this address (HTTP $_code). The API allows 60 unauthenticated
 requests an hour per IP, so imaging several machines behind one address can hit it.
 Wait and retry, or download the package by hand:
-  https://github.com/$REPO/releases/latest" ;;
-    *) die "the GitHub API returned HTTP $code. See https://github.com/$REPO/releases/latest" ;;
-esac
+  https://github.com/$REPO/releases" ;;
+        *) die "the GitHub API returned HTTP $_code. See https://github.com/$REPO/releases" ;;
+    esac
+}
 
 # The asset names carry the upstream RustDesk version rather than the release
 # tag, so the download URL has to come from the metadata. Parsed with grep and
 # sed because jq is not present on a stock image.
-url=$(grep -o '"browser_download_url": *"[^"]*"' "$tmp/release.json" \
-    | sed 's/.*"\(https[^"]*\)"/\1/' \
-    | grep -E "/${pattern}$" \
-    | head -n 1) || true
+asset_url() {
+    grep -o '"browser_download_url": *"[^"]*"' "$1" \
+        | sed 's/.*"\(https[^"]*\)"/\1/' \
+        | grep -E "/${pattern}$" \
+        | head -n 1
+}
 
-[ -n "${url:-}" ] || die "the latest release has no $manager package for $arch.
-See https://github.com/$REPO/releases/latest"
+# Prefer the full release, then fall back to the newest release that actually
+# carries a package for this system. Taking /releases/latest and stopping there
+# is what broke the Windows installer: the newest full release had no installer
+# in it, and every later build was published as a pre-release, which that
+# endpoint does not return.
+fetch_json "$API_LATEST" "$tmp/release.json"
+url=$(asset_url "$tmp/release.json") || true
+
+if [ -z "${url:-}" ]; then
+    info "the latest release has no $manager package for $arch, looking further back"
+    fetch_json "$API_LIST" "$tmp/releases.json"
+    # GitHub returns the list newest first, so the first match is the newest
+    # release carrying this package.
+    url=$(asset_url "$tmp/releases.json") || true
+    [ -n "${url:-}" ] || die "no release carries a $manager package for $arch.
+See https://github.com/$REPO/releases"
+    warn "installing from a pre-release, because no full release has a $manager package for $arch."
+fi
 
 # The URL comes out of an API response, so check it points where it should
 # before handing it to curl and the package manager as root. Release assets are

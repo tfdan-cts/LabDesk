@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Installs LabDesk on Windows from the newest GitHub release.
+    Installs LabDesk on Windows from the newest release that ships an installer.
 
 .DESCRIPTION
     Downloads the LabDesk installer for this machine's architecture and runs it
@@ -111,19 +111,28 @@ if (-not $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrat
 $machineArch = $env:PROCESSOR_ARCHITEW6432
 if (-not $machineArch) { $machineArch = $env:PROCESSOR_ARCHITECTURE }
 
-# The release carries the same installer under two names: LabDesk-<version>-<arch>-install.exe,
-# which the README points at for offline installs, and the upstream-named
-# rustdesk-<version>-<arch>.exe. Prefer the branded one and fall back, so this
-# script and the documentation cannot drift onto different files.
+# LabDesk-<version>-<arch>-install.exe is the only asset that installs the
+# LabDesk layout. There is deliberately no fallback to the upstream-named
+# rustdesk-<version>-<arch>.exe: that build copies its payload under its own
+# name while the service, the uninstaller and the shortcuts it writes all point
+# at LabDesk.exe, so it leaves a machine with a service that cannot start and an
+# uninstaller that cannot run. Refusing is the only safe answer, because by the
+# time that is detectable the machine has already been changed.
 switch ($machineArch) {
-    'AMD64' { $assetPatterns = @('^LabDesk-.*-x86_64-install\.exe$', '^rustdesk-[0-9].*-x86_64\.exe$') }
-    'ARM64' { $assetPatterns = @('^LabDesk-.*-aarch64-install\.exe$', '^rustdesk-[0-9].*-aarch64\.exe$') }
+    'AMD64' { $assetPattern = '^LabDesk-.*-x86_64-install\.exe$' }
+    'ARM64' { $assetPattern = '^LabDesk-.*-aarch64-install\.exe$' }
     default { Stop-WithError "unsupported architecture '$machineArch'. LabDesk ships x86_64 and ARM64 builds." }
 }
 
-Write-Step "querying the latest release of $repo"
+# /releases/latest is not the newest release. It reports the newest release that
+# is not marked pre-release, so it skips every pre-release however recent, and
+# the setup binaries have so far only ever been published on pre-releases. Ask
+# for the release list instead and pick the newest one that actually carries the
+# asset this script needs, rather than trusting a single endpoint to point at a
+# release that happens to have it.
+Write-Step "looking for the newest release of $repo with a Windows installer for $machineArch"
 try {
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'labdesk-installer' }
+    $releases = @(Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases?per_page=100" -Headers @{ 'User-Agent' = 'labdesk-installer' })
 } catch {
     $status = $null
     if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
@@ -132,20 +141,43 @@ try {
 GitHub rate-limited this address (HTTP $status). The API allows 60 unauthenticated
 requests an hour per IP, so imaging several machines behind one address can hit it.
 Wait and retry, or download the installer by hand:
-  https://github.com/$repo/releases/latest
+  https://github.com/$repo/releases
 "@
     }
     Stop-WithError "could not reach the GitHub API: $($_.Exception.Message)"
 }
 
-$asset = $null
-foreach ($pattern in $assetPatterns) {
-    $asset = $release.assets | Where-Object { $_.name -match $pattern } | Select-Object -First 1
-    if ($asset) { break }
+# GitHub returns the list newest first, but sort on the date rather than rely on
+# that. Draft releases are not returned to an unauthenticated caller, so every
+# release considered here is one somebody published.
+$candidates = @(
+    $releases |
+        Where-Object { @($_.assets | Where-Object { $_.name -match $assetPattern }).Count -gt 0 } |
+        Sort-Object -Property { [datetime]$_.created_at } -Descending
+)
+
+# Prefer a full release and take a pre-release only when no full release carries
+# the installer, so this starts using stable builds by itself as soon as one
+# ships the setup binary. Say which was chosen either way.
+$release = $candidates | Where-Object { -not $_.prerelease } | Select-Object -First 1
+if (-not $release) {
+    $release = $candidates | Select-Object -First 1
+    if ($release) {
+        Write-Warn "no full release carries a Windows installer for $machineArch, so this will install the pre-release $($release.tag_name)."
+    }
 }
-if (-not $asset) {
-    Stop-WithError "release $($release.tag_name) carries no Windows installer for $machineArch. See https://github.com/$repo/releases/latest"
+if (-not $release) {
+    Stop-WithError @"
+no release of $repo publishes a Windows installer for $machineArch.
+This script installs LabDesk-<version>-$(if ($machineArch -eq 'ARM64') { 'aarch64' } else { 'x86_64' })-install.exe and nothing else,
+because the upstream-named rustdesk-<version>.exe build installs a different
+layout and leaves the machine broken. Nothing has been changed here. See
+  https://github.com/$repo/releases
+"@
 }
+
+$asset = $release.assets | Where-Object { $_.name -match $assetPattern } | Select-Object -First 1
+Write-Step "using release $($release.tag_name)"
 
 # The assets are named for the upstream RustDesk version rather than the release
 # tag, and that version is what the installer writes to the registry. Reading it
@@ -256,7 +288,7 @@ broken: the service cannot start and the uninstaller cannot run. The partial
 install is still on this machine and should be removed by hand.
 
 This is fixed in releases built after the install_me rename fix. Use a newer
-release: https://github.com/$repo/releases/latest
+release: https://github.com/$repo/releases
 
 The .msi is not a workaround. It is built without --app-name, so it installs as
 RustDesk rather than LabDesk, into a different directory and registry entry.
