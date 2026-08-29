@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/common/labdesk_profiles.dart';
 import 'package:flutter_hbb/common/labdesk_status_binding.dart';
 import 'package:flutter_hbb/common/widgets/labdesk_groups.dart';
@@ -10,6 +11,7 @@ import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/widgets/server_profile_switcher.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
+import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 
 import 'console_data.dart';
@@ -55,6 +57,16 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   var _settingsTab = SettingsTabKey.general;
   var _section = ConsoleSection.connect;
 
+  /// The stop-service flag the client's own widgets read.
+  ///
+  /// DesktopHomePage used to own this, and both ConnectionPage
+  /// (connection_page.dart:36) and Settings > General
+  /// (desktop_setting_page.dart:409) resolve it with Get.find, which throws
+  /// when nothing has registered it. Unmounting the home page took the
+  /// registration with it, so the console has to own it now: it hosts both of
+  /// those widgets.
+  final _svcStopped = false.obs;
+
   void _goToSettings(SettingsTabKey tab) {
     setState(() => _settingsTab = tab);
     // Setting the value is enough. When the console is already on settings the
@@ -69,6 +81,9 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     super.initState();
     LabDeskGroupsModel.ensureLoaded();
     ServerProfilesModel.ensureLoaded();
+    if (!Get.isRegistered<RxBool>(tag: 'stop-service')) {
+      Get.put<RxBool>(_svcStopped, tag: 'stop-service');
+    }
     // ponytail: a one second repaint rather than plumbing change notification
     // through a store that is deliberately plain Dart. This is a monitoring
     // surface whose figures are seconds old by nature, and the alternative is
@@ -78,7 +93,17 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     // application's own widget or a screen with nothing that changes second to
     // second, and rebuilding the hosted connect page or a settings page once a
     // second is work nobody asked for.
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) async {
+      // This machine's own id arrives by polling and nothing else. The home
+      // page fetched it every second and took that with it when it was
+      // unmounted, which left the id reading "Generating ..." forever.
+      // fetchID notifies, so the Consumer around ThisMachineScreen rebuilds
+      // itself when the id lands; no setState is needed for it.
+      await gFFI.serverModel.fetchID();
+      // The service flag is polled for the same reason: nothing signals a
+      // change in the service's state.
+      final v = await mainGetBoolOption(kOptionStopService);
+      if (v != _svcStopped.value) _svcStopped.value = v;
       if (mounted && _section == ConsoleSection.fleet) setState(() {});
     });
     // Ask once on open so the fleet is not blank while waiting for the client's
@@ -90,6 +115,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   void dispose() {
     _tick?.cancel();
     _sectionRequest.dispose();
+    Get.delete<RxBool>(tag: 'stop-service');
     super.dispose();
   }
 
