@@ -96,6 +96,7 @@ class ConsoleShell extends StatefulWidget {
     this.subItems = const {},
     this.selectedSubItem,
     this.onSubItemSelected,
+    this.onSectionChanged,
   });
 
   final List<MachineRow> machines;
@@ -138,6 +139,11 @@ class ConsoleShell extends StatefulWidget {
   final String? selectedSubItem;
   final void Function(ConsoleSection section, String id)? onSubItemSelected;
 
+  /// Told which section is showing, so the client can stop doing work the
+  /// visible section does not need. Only Fleet renders anything that changes
+  /// second to second.
+  final ValueChanged<ConsoleSection>? onSectionChanged;
+
   @override
   State<ConsoleShell> createState() => _ConsoleShellState();
 }
@@ -170,7 +176,13 @@ class _ConsoleShellState extends State<ConsoleShell> {
 
   void _onSectionRequested() {
     final s = widget.sectionRequest?.value;
-    if (s != null && mounted) setState(() => _section = s);
+    if (s != null && mounted) _setSection(s);
+  }
+
+  void _setSection(ConsoleSection s) {
+    if (s == _section) return;
+    setState(() => _section = s);
+    widget.onSectionChanged?.call(s);
   }
 
   MachineRow? get _selected {
@@ -200,7 +212,7 @@ class _ConsoleShellState extends State<ConsoleShell> {
             section: _section,
             profileName: widget.profileName,
             selected: _selected,
-            onSelect: (s) => setState(() => _section = s),
+            onSelect: _setSection,
             subItems: widget.subItems,
             selectedSubItem: widget.selectedSubItem,
             onSubItemSelected: widget.onSubItemSelected,

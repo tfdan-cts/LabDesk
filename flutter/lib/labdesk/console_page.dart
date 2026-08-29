@@ -53,6 +53,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   /// open a second settings surface in its own tab.
   final _sectionRequest = ValueNotifier(ConsoleSection.connect);
   var _settingsTab = SettingsTabKey.general;
+  var _section = ConsoleSection.connect;
 
   void _goToSettings(SettingsTabKey tab) {
     setState(() => _settingsTab = tab);
@@ -72,8 +73,13 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     // through a store that is deliberately plain Dart. This is a monitoring
     // surface whose figures are seconds old by nature, and the alternative is
     // reactive wiring in a layer kept free of it on purpose.
+    //
+    // Only while Fleet is showing, though. Everything else here is either the
+    // application's own widget or a screen with nothing that changes second to
+    // second, and rebuilding the hosted connect page or a settings page once a
+    // second is work nobody asked for.
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
+      if (mounted && _section == ConsoleSection.fleet) setState(() {});
     });
     // Ask once on open so the fleet is not blank while waiting for the client's
     // own poll to come round.
@@ -221,6 +227,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         connectedIds: const {},
         onRunAction: _runAction,
         sectionRequest: _sectionRequest,
+        onSectionChanged: (s) => setState(() => _section = s),
         subItems: {
           ConsoleSection.settings: [
             for (final p in settingsPages())
