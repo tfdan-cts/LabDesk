@@ -8,6 +8,7 @@ import 'package:flutter_hbb/common/widgets/labdesk_groups.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/widgets/server_profile_switcher.dart';
+import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
 import 'package:provider/provider.dart';
 
@@ -173,6 +174,12 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
               model.verificationMethod != kUsePermanentPassword,
           serviceRunning: model.isStart,
           profileSwitcher: const ServerProfileSwitcher(),
+          // Both of these existed on the old left rail and would have been lost
+          // in the move. The catalogue of the old interface is what caught it.
+          onRefreshPassword: () => bind.mainUpdateTemporaryPassword(),
+          onEditPassword: () =>
+              DesktopSettingPage.switch2page(SettingsTabKey.safety),
+          onStartService: model.isStart ? null : () => start_service(true),
         ),
       ),
     );

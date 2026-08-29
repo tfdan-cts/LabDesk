@@ -22,6 +22,7 @@ class ThisMachineScreen extends StatelessWidget {
     this.onEditPassword,
     this.onRefreshPassword,
     this.onOpenIdMenu,
+    this.onStartService,
   });
 
   /// This machine's own id, as the client reports it.
@@ -42,6 +43,10 @@ class ThisMachineScreen extends StatelessWidget {
   final VoidCallback? onEditPassword;
   final VoidCallback? onRefreshPassword;
   final VoidCallback? onOpenIdMenu;
+
+  /// Offered only while the service is stopped, which is the one moment it is
+  /// useful. The old interface put this link under the status line.
+  final VoidCallback? onStartService;
 
   @override
   Widget build(BuildContext context) {
@@ -141,6 +146,11 @@ class ThisMachineScreen extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(serviceRunning! ? 'Running' : 'Stopped', style: C.body()),
+                  if (!serviceRunning! && onStartService != null) ...[
+                    const Spacer(),
+                    _TextAction(
+                        label: 'Start service', onTap: onStartService!),
+                  ],
                 ],
               ),
             ),
@@ -270,6 +280,40 @@ class _IconButtonState extends State<_IconButton> {
             ),
             child: Icon(widget.icon,
                 size: 16, color: _hover ? C.text : C.textMuted),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A plain textual action, for the one or two places a button would shout.
+class _TextAction extends StatefulWidget {
+  const _TextAction({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  State<_TextAction> createState() => _TextActionState();
+}
+
+class _TextActionState extends State<_TextAction> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Text(
+          widget.label,
+          style: C.small(color: _hover ? C.accent : C.textMuted).copyWith(
+            decoration: TextDecoration.underline,
+            decorationColor: _hover ? C.accent : C.textFaint,
           ),
         ),
       ),
