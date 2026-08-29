@@ -23,8 +23,13 @@ class FleetConsole extends StatelessWidget {
     this.onSelect,
     this.now,
     this.samples = const [],
+    this.embedded = false,
   });
 
+  /// When embedded the shell already draws the sidebar and the title bar, so
+  /// this renders only the content plane.
+
+  final bool embedded;
   final List<MachineRow> machines;
   final List<ReachSample> samples;
   final String profileName;
@@ -46,6 +51,32 @@ class FleetConsole extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final content = SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _Summary(
+            online: _count(LabDeskPeerStatus.online),
+            offline: _count(LabDeskPeerStatus.offline),
+            unknown: _count(LabDeskPeerStatus.unknown),
+            isLoading: isLoading,
+            samples: samples,
+          ),
+          const SizedBox(height: 20),
+          _MachineList(
+            machines: machines,
+            isLoading: isLoading,
+            selectedId: selectedId,
+            onSelect: onSelect,
+            now: now,
+          ),
+        ],
+      ),
+    );
+
+    if (embedded) return content;
+
     return ColoredBox(
       color: C.bg,
       child: Row(
@@ -62,31 +93,7 @@ class FleetConsole extends StatelessWidget {
                   onRefresh: onRefresh,
                   now: now,
                 ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _Summary(
-                          online: _count(LabDeskPeerStatus.online),
-                          offline: _count(LabDeskPeerStatus.offline),
-                          unknown: _count(LabDeskPeerStatus.unknown),
-                          isLoading: isLoading,
-                          samples: samples,
-                        ),
-                        const SizedBox(height: 20),
-                        _MachineList(
-                          machines: machines,
-                          isLoading: isLoading,
-                          selectedId: selectedId,
-                          onSelect: onSelect,
-                          now: now,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                Expanded(child: content),
               ],
             ),
           ),

@@ -1,0 +1,287 @@
+import 'package:flutter/material.dart';
+
+import '../theme/console_theme.dart';
+
+/// A server profile as the settings screen renders it.
+///
+/// Mirrors what the fork already stores, without importing the profile store,
+/// so the screen stays renderable and testable without the FFI layer.
+class ProfileRow {
+  const ProfileRow({
+    required this.name,
+    required this.host,
+    this.relay = '',
+    this.api = '',
+    this.hasKey = false,
+    this.active = false,
+  });
+
+  final String name;
+  final String host;
+  final String relay;
+  final String api;
+  final bool hasKey;
+  final bool active;
+}
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({
+    super.key,
+    required this.profiles,
+    this.onActivate,
+    this.onEdit,
+    this.onDelete,
+    this.onAdd,
+    this.pollSeconds = 30,
+    this.onPollSecondsChanged,
+  });
+
+  final List<ProfileRow> profiles;
+  final ValueChanged<ProfileRow>? onActivate;
+  final ValueChanged<ProfileRow>? onEdit;
+  final ValueChanged<ProfileRow>? onDelete;
+  final VoidCallback? onAdd;
+
+  final int pollSeconds;
+  final ValueChanged<int>? onPollSecondsChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Panel(
+            title: 'Server profiles',
+            subtitle: 'Named ID, relay, API and key sets. Switching applies immediately.',
+            padding: EdgeInsets.zero,
+            actions: [
+              GhostButton(label: 'Add profile', icon: Icons.add_rounded, onPressed: onAdd),
+            ],
+            child: profiles.isEmpty
+                ? const _NoProfiles()
+                : Column(
+                    children: [
+                      for (var i = 0; i < profiles.length; i++) ...[
+                        if (i > 0) Divider(height: 1, thickness: 1, color: C.hairline),
+                        _ProfileTile(
+                          profile: profiles[i],
+                          onActivate: onActivate,
+                          onEdit: onEdit,
+                          onDelete: onDelete,
+                        ),
+                      ],
+                    ],
+                  ),
+          ),
+          const SizedBox(height: 20),
+          Panel(
+            title: 'Status checks',
+            subtitle: 'How often LabDesk asks the ID server which machines are registered.',
+            child: _PollInterval(
+              seconds: pollSeconds,
+              onChanged: onPollSecondsChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NoProfiles extends StatelessWidget {
+  const _NoProfiles();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 42, horizontal: 24),
+        child: Column(
+          children: [
+            Text('No profiles yet', style: C.h2()),
+            const SizedBox(height: 6),
+            SizedBox(
+              width: 380,
+              child: Text(
+                'A profile stores one server set. Add one for each network you '
+                'reach machines on, then switch between them without retyping '
+                'anything.',
+                textAlign: TextAlign.center,
+                style: C.small(color: C.textFaint),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+class _ProfileTile extends StatefulWidget {
+  const _ProfileTile({
+    required this.profile,
+    required this.onActivate,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final ProfileRow profile;
+  final ValueChanged<ProfileRow>? onActivate;
+  final ValueChanged<ProfileRow>? onEdit;
+  final ValueChanged<ProfileRow>? onDelete;
+
+  @override
+  State<_ProfileTile> createState() => _ProfileTileState();
+}
+
+class _ProfileTileState extends State<_ProfileTile> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.profile;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      cursor: p.active ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: p.active ? null : () => widget.onActivate?.call(p),
+        child: AnimatedContainer(
+          duration: C.fast,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          color: p.active
+              ? C.accent.withOpacity(0.08)
+              : (_hover ? C.surfaceHi : Colors.transparent),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 22,
+                child: p.active
+                    ? Icon(Icons.check_circle_rounded, size: 15, color: C.accent)
+                    : Icon(Icons.radio_button_unchecked_rounded, size: 15, color: C.textFaint),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(p.name, style: C.body()),
+                        if (p.active) ...[
+                          const SizedBox(width: 9),
+                          Text('Active', style: C.micro(color: C.accent)),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      // The host is the operator's own infrastructure. It is
+                      // shown because they need to recognise the profile, and
+                      // never logged or sent anywhere.
+                      p.host.isEmpty ? 'No custom server set' : p.host,
+                      style: C.data(size: 11.5, color: C.textFaint),
+                    ),
+                  ],
+                ),
+              ),
+              if (p.hasKey)
+                Tooltip(
+                  message: 'A server key is set for this profile',
+                  child: Icon(Icons.key_rounded, size: 14, color: C.textFaint),
+                ),
+              const SizedBox(width: 14),
+              AnimatedOpacity(
+                duration: C.fast,
+                opacity: _hover ? 1 : 0,
+                child: Row(
+                  children: [
+                    GhostButton(
+                      label: 'Edit',
+                      onPressed: _hover ? () => widget.onEdit?.call(p) : null,
+                    ),
+                    const SizedBox(width: 8),
+                    GhostButton(
+                      label: 'Delete',
+                      onPressed: _hover && !p.active ? () => widget.onDelete?.call(p) : null,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PollInterval extends StatelessWidget {
+  const _PollInterval({required this.seconds, required this.onChanged});
+
+  final int seconds;
+  final ValueChanged<int>? onChanged;
+
+  static const _options = [10, 30, 60, 300];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            for (final s in _options) ...[
+              _Choice(
+                label: s < 60 ? '${s}s' : '${s ~/ 60}m',
+                selected: s == seconds,
+                onTap: onChanged == null ? null : () => onChanged!(s),
+              ),
+              const SizedBox(width: 8),
+            ],
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Checking more often finds machines sooner and asks more of the ID '
+          'server. Nothing is stored between runs, so a longer interval only '
+          'means a coarser picture while LabDesk is open.',
+          style: C.small(color: C.textFaint),
+        ),
+      ],
+    );
+  }
+}
+
+class _Choice extends StatelessWidget {
+  const _Choice({required this.label, required this.selected, required this.onTap});
+
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: MouseRegion(
+        cursor: onTap == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
+        child: AnimatedContainer(
+          duration: C.fast,
+          height: 30,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? C.accent.withOpacity(0.16) : Colors.transparent,
+            borderRadius: C.roundedSm,
+            border: Border.all(color: selected ? C.accent.withOpacity(0.45) : C.hairline),
+          ),
+          child: Text(
+            label,
+            style: C.small(
+              color: selected ? C.text : C.textMuted,
+              w: selected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
