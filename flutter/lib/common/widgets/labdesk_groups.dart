@@ -375,7 +375,7 @@ Future<void> _showGroupEditDialog(
       LabDeskGroup(name: name, icon: icon.value, peers: members.toList()),
     );
   } else {
-    group!.name = name;
+    group.name = name;
     group.icon = icon.value;
     group.peers = members.toList();
   }
