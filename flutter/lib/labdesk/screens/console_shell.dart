@@ -383,23 +383,36 @@ class _Sidebar extends StatelessWidget {
               ],
             ),
           ),
-          for (final s in ConsoleSection.values) ...[
-            _NavItem(
-              section: s,
-              active: s == section,
-              onTap: () => onSelect(s),
+          // Scrolls rather than overflows. Seven sections plus the eight
+          // settings pages nested under one of them is taller than a short
+          // window, and a Column that cannot fit its children paints overflow
+          // stripes over the interface rather than clipping quietly.
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final s in ConsoleSection.values) ...[
+                    _NavItem(
+                      section: s,
+                      active: s == section,
+                      onTap: () => onSelect(s),
+                    ),
+                    // Nested pages appear only under the open section, so the
+                    // sidebar does not become a wall of everything at once.
+                    if (s == section)
+                      for (final sub
+                          in (subItems[s] ?? const <ConsoleSubItem>[]))
+                        _SubNavItem(
+                          item: sub,
+                          active: sub.id == selectedSubItem,
+                          onTap: () => onSubItemSelected?.call(s, sub.id),
+                        ),
+                  ],
+                ],
+              ),
             ),
-            // Nested pages appear only under the open section, so the sidebar
-            // does not become a wall of everything at once.
-            if (s == section)
-              for (final sub in (subItems[s] ?? const <ConsoleSubItem>[]))
-                _SubNavItem(
-                  item: sub,
-                  active: sub.id == selectedSubItem,
-                  onTap: () => onSubItemSelected?.call(s, sub.id),
-                ),
-          ],
-          const Spacer(),
+          ),
           if (selected != null) ...[
             Divider(height: 1, thickness: 1, color: C.hairline),
             Padding(
@@ -533,7 +546,15 @@ class _TitleBar extends StatelessWidget {
             const SizedBox(width: 12),
             Text('/', style: C.h1().copyWith(color: C.textFaint)),
             const SizedBox(width: 12),
-            Text(machine!.displayName, style: C.h1().copyWith(color: C.textMuted)),
+            // Flexible with an ellipsis: a machine can be named anything, and
+            // an unbounded Text beside a Spacer overflows the title bar.
+            Flexible(
+              child: Text(
+                machine!.displayName,
+                overflow: TextOverflow.ellipsis,
+                style: C.h1().copyWith(color: C.textMuted),
+              ),
+            ),
           ],
           const Spacer(),
           if (section == ConsoleSection.fleet) ...[
