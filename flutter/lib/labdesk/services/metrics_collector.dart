@@ -36,6 +36,27 @@ class MetricsCollector {
   /// an assumed 4096, which is wrong on Apple silicon.
   static const _macos = r'''ps -A -o %cpu | awk '{s+=$1}END{printf "LABDESK_CPU=%.1f\n",s/'"$(sysctl -n hw.ncpu)"'}'; vm_stat | awk -v ps="$(sysctl -n hw.pagesize)" -v tot="$(sysctl -n hw.memsize)" '/Pages free/{f=$3}/Pages inactive/{i=$3}END{gsub(/\./,"",f);gsub(/\./,"",i);printf "LABDESK_MEM_USED=%d\nLABDESK_MEM_TOTAL=%d\n",tot-(f+i)*ps,tot}'; df -k / | awk 'NR==2{printf "LABDESK_DISK_USED=%d\nLABDESK_DISK_TOTAL=%d\n",$3*1024,$2*1024}'; awk -v b="$(sysctl -n kern.boottime | sed -E 's/.*sec = ([0-9]+).*/\1/')" 'BEGIN{printf "LABDESK_UPTIME=%d\n",systime()-b}' ''';
 
+  /// Written by the probe as its last line, carrying the shell's exit status.
+  ///
+  /// A PTY is a byte stream with a prompt at either end, not a request and a
+  /// response, so without this there is no way to tell a finished probe from
+  /// one still arriving, or a failed one from a silent shell.
+  static const endMarker = 'LABDESK_END';
+
+  /// The probe's command with the end marker appended, in the syntax of the
+  /// shell that command already runs in.
+  static String framed(MetricsProbe probe) {
+    if (probe.platform == 'windows') {
+      // The command is a single powershell -Command invocation, so the marker
+      // is appended inside its quoted script rather than after it. $? is a
+      // boolean in PowerShell, so the exit status is spelled out instead.
+      final withMarker =
+          '''; Write-Output ('$endMarker=' + \$(if (\$?) { 0 } else { 1 }))"''';
+      return '${probe.command.substring(0, probe.command.length - 1)}$withMarker';
+    }
+    return '${probe.command}; echo "$endMarker=\$?"';
+  }
+
   static const _probes = <String, MetricsProbe>{
     'linux': MetricsProbe(platform: 'linux', command: _linux),
     'windows': MetricsProbe(platform: 'windows', command: _windows),
