@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 /// LabDesk console design language.
 ///
@@ -49,23 +48,57 @@ class C {
   static const fast = Duration(milliseconds: 140);
   static const medium = Duration(milliseconds: 220);
 
+  /// The two families are bundled with the application rather than fetched at
+  /// runtime. A font CDN is not reachable from an isolated network, and a
+  /// machine worth administering remotely is frequently on one; a console that
+  /// silently loses its typeface there is a console that looks broken exactly
+  /// where it has to be trusted. It also keeps the tool from calling out to a
+  /// third party to draw itself.
+  static const _sans = 'Manrope';
+  static const _mono = 'JetBrainsMono';
+
+  /// Manrope is bundled as its variable cut, so a weight has to be requested on
+  /// the wght axis as well as declared. Setting only [FontWeight] would render
+  /// every weight at the axis default.
+  static List<FontVariation> _wght(FontWeight w) => [FontVariation('wght', w.value.toDouble())];
+
+  static TextStyle _sansStyle({
+    required double fontSize,
+    required FontWeight fontWeight,
+    required Color color,
+    double? letterSpacing,
+    double? height,
+    List<FontFeature>? fontFeatures,
+  }) =>
+      TextStyle(
+        fontFamily: _sans,
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        fontVariations: _wght(fontWeight),
+        color: color,
+        letterSpacing: letterSpacing,
+        height: height,
+        fontFeatures: fontFeatures,
+      );
+
   // A fixed scale with a tight ratio. Product UI is viewed at a consistent
   // size, so fluid type would only add noise.
-  static TextStyle h1() => GoogleFonts.manrope(
+  static TextStyle h1() => _sansStyle(
       fontSize: 20, fontWeight: FontWeight.w700, color: text, letterSpacing: -0.4, height: 1.2);
-  static TextStyle h2() => GoogleFonts.manrope(
+  static TextStyle h2() => _sansStyle(
       fontSize: 15, fontWeight: FontWeight.w600, color: text, letterSpacing: -0.2, height: 1.3);
-  static TextStyle body({Color color = text}) => GoogleFonts.manrope(
+  static TextStyle body({Color color = text}) => _sansStyle(
       fontSize: 13.5, fontWeight: FontWeight.w500, color: color, height: 1.45);
   static TextStyle small({Color color = textMuted, FontWeight w = FontWeight.w500}) =>
-      GoogleFonts.manrope(fontSize: 12, fontWeight: w, color: color, height: 1.4);
-  static TextStyle micro({Color color = textFaint}) => GoogleFonts.manrope(
+      _sansStyle(fontSize: 12, fontWeight: w, color: color, height: 1.4);
+  static TextStyle micro({Color color = textFaint}) => _sansStyle(
       fontSize: 11, fontWeight: FontWeight.w600, color: color, height: 1.3);
 
   /// Identifiers, timestamps, measured values. Tabular so a column of figures
   /// does not jitter as it updates.
   static TextStyle data({double size = 12.5, Color color = text, FontWeight w = FontWeight.w500}) =>
-      GoogleFonts.jetBrainsMono(
+      TextStyle(
+        fontFamily: _mono,
         fontSize: size,
         fontWeight: w,
         color: color,
@@ -74,7 +107,7 @@ class C {
       );
 
   /// A large measured number.
-  static TextStyle metric({Color color = text}) => GoogleFonts.manrope(
+  static TextStyle metric({Color color = text}) => _sansStyle(
         fontSize: 26,
         fontWeight: FontWeight.w700,
         color: color,
