@@ -144,5 +144,22 @@ Build steps are identical to upstream RustDesk; see the [upstream build document
 
 LabDesk is based on RustDesk and stays close to upstream `master` for easy rebasing. All credit for the core remote desktop functionality goes to the [RustDesk project](https://github.com/rustdesk/rustdesk). Like upstream, this repository is licensed under [AGPL-3.0](LICENCE).
 
+### Modifications
+
+This is a modified version of RustDesk, not the original. AGPL-3.0 section 5(a)
+asks a modified work to say so and to carry the date, so:
+
+- **Base:** rustdesk/rustdesk at commit `1d09760ef`, release line 1.4.9.
+- **Modified from 2026-08-11 onward** by the LabDesk maintainers.
+
+What was changed: named server profiles replacing the single ID/Relay/API/key
+configuration, local machine groups and per-machine icons, per-peer reachability
+with a distinct unknown state, a fleet console, application renaming and theming,
+and one-line installers for Windows and Linux. The commit history in this
+repository is the full record.
+
+Please report LabDesk problems here rather than to upstream RustDesk. Bugs in a
+modified build are not theirs to answer for.
+
 > [!Caution]
 > **Misuse Disclaimer:** The developers do not condone or support any unethical or illegal use of this software. Misuse, such as unauthorized access, control, or invasion of privacy, is strictly against our guidelines.
