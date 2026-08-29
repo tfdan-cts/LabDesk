@@ -294,6 +294,16 @@ pub fn core_main() -> Option<Vec<String>> {
                 #[cfg(windows)]
                 hbb_common::allow_err!(crate::platform::windows::uninstall_cert());
                 return None;
+            } else if args[0] == "--remove-service-config" {
+                // Deletes the copy of the configuration the service keeps under
+                // its own account's profile, which holds the servers, the key
+                // and the peer history. The uninstall script does this already;
+                // this exists for the msi, whose uninstall is driven by
+                // Windows Installer and never runs that script, and so that a
+                // machine can be cleared by hand before it is handed on.
+                #[cfg(windows)]
+                crate::platform::windows::remove_service_config();
+                return None;
             } else if args[0] == "--install-idd" {
                 #[cfg(windows)]
                 if crate::virtual_display_manager::is_virtual_display_supported() {

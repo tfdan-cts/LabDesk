@@ -112,9 +112,21 @@ The package is named `rustdesk` on every distribution, because the build
 pipeline keeps the upstream package name.
 
 Neither removes your settings. Machine groups, icons and server profiles live in
-the configuration directory (`%APPDATA%\LabDesk` on Windows,
-`~/.config/labdesk` on Linux, lower case) and survive an uninstall, so reinstalling restores
-them. Delete that directory if you want a clean slate.
+the configuration directory (`%APPDATA%\LabDesk` on Windows, `~/.config/labdesk`
+on Linux, lower case) and survive an uninstall, so reinstalling restores them.
+Delete that directory if you want a clean slate.
+
+On Windows the service keeps a second copy of the configuration under its own
+account's profile, holding the servers, the key and the peer history. Uninstalling
+with the `.exe` installer removes it. Uninstalling an `.msi` installation does not,
+because Windows Installer only removes what it installed and that directory is
+written at runtime. Clear it explicitly before handing a machine on:
+
+```powershell
+& "$env:ProgramFiles\LabDesk\LabDesk.exe" --remove-service-config
+```
+
+Run that before uninstalling, while the program is still present.
 
 ## Downloads
 

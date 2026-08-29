@@ -1863,9 +1863,15 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> String {
 //
 // Runs after get_before_uninstall has stopped the service and killed the
 // processes, so nothing holds these files open.
+const SERVICE_PROFILES: [&str; 3] = [
+    "ServiceProfiles\\LocalService",
+    "ServiceProfiles\\NetworkService",
+    "System32\\config\\systemprofile",
+];
+
 fn get_remove_service_config() -> String {
     let app_name = crate::get_app_name();
-    ["ServiceProfiles\\LocalService", "ServiceProfiles\\NetworkService", "System32\\config\\systemprofile"]
+    SERVICE_PROFILES
         .iter()
         .map(|profile| {
             let dir = format!("%WINDIR%\\{profile}\\AppData\\Roaming\\{app_name}");
@@ -1873,6 +1879,30 @@ fn get_remove_service_config() -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Same removal as the uninstall script performs, callable directly.
+///
+/// The uninstall script cannot be used when the product was installed from the
+/// msi, because `get_uninstall` hands control to msiexec in that case and never
+/// reaches its own commands. Windows Installer removes what it installed, and
+/// these directories are written at runtime by the service rather than laid down
+/// by the package, so it leaves them behind.
+pub fn remove_service_config() {
+    let app_name = crate::get_app_name();
+    let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_owned());
+    for profile in SERVICE_PROFILES.iter() {
+        let dir = std::path::PathBuf::from(format!(
+            "{windir}\\{profile}\\AppData\\Roaming\\{app_name}"
+        ));
+        if !dir.exists() {
+            continue;
+        }
+        match std::fs::remove_dir_all(&dir) {
+            Ok(_) => log::info!("removed service config {}", dir.display()),
+            Err(e) => log::warn!("failed to remove service config {}: {e}", dir.display()),
+        }
+    }
 }
 
 pub fn uninstall_me(kill_self: bool) -> ResultType<()> {
