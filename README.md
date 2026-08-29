@@ -90,6 +90,32 @@ Add `--silent-install` to run one without any interface:
 .\LabDesk-1.4.9-x86_64-install.exe --silent-install
 ```
 
+### Uninstalling
+
+On Windows, use *Settings > Apps > Installed apps*, or run this from an elevated
+prompt:
+
+```powershell
+& "$env:ProgramFiles\LabDesk\LabDesk.exe" --uninstall
+```
+
+On Linux, remove the package with the same tool that installed it:
+
+```sh
+sudo apt remove rustdesk       # Debian, Ubuntu
+sudo dnf remove rustdesk       # Fedora, RHEL
+sudo zypper remove rustdesk    # openSUSE
+sudo pacman -R rustdesk        # Arch
+```
+
+The package is named `rustdesk` on every distribution, because the build
+pipeline keeps the upstream package name.
+
+Neither removes your settings. Machine groups, icons and server profiles live in
+the configuration directory (`%APPDATA%\LabDesk` on Windows,
+`~/.config/labdesk` on Linux, lower case) and survive an uninstall, so reinstalling restores
+them. Delete that directory if you want a clean slate.
+
 ## Downloads
 
 Packaged builds for **Windows, macOS, Linux (deb/rpm/AppImage/flatpak), and Android** are on the [Releases page](https://github.com/tfdan-cts/LabDesk/releases).
