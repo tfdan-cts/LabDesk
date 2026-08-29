@@ -49,6 +49,20 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   bool _refreshing = false;
   DateTime? _lastRefreshed;
 
+  /// Lets controls that mean "go to settings" move the console rather than
+  /// open a second settings surface in its own tab.
+  final _sectionRequest = ValueNotifier(ConsoleSection.connect);
+  var _settingsTab = SettingsTabKey.general;
+
+  void _goToSettings(SettingsTabKey tab) {
+    setState(() => _settingsTab = tab);
+    // Setting the value is enough. When the console is already on settings the
+    // notifier does not fire, but the setState above has already rebuilt the
+    // hosted page against the new key, which is the only thing that needed to
+    // change.
+    _sectionRequest.value = ConsoleSection.settings;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +83,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   @override
   void dispose() {
     _tick?.cancel();
+    _sectionRequest.dispose();
     super.dispose();
   }
 
@@ -159,8 +174,10 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
 
   /// The full settings page, likewise mounted whole.
   Widget _settings(BuildContext context) => DesktopSettingPage(
-        key: const ValueKey('labdesk-console-settings'),
-        initialTabkey: SettingsTabKey.general,
+        // Keyed by the page so asking for a different one rebuilds it there,
+        // rather than showing the page it was first opened on.
+        key: ValueKey('labdesk-console-settings-${_settingsTab.name}'),
+        initialTabkey: _settingsTab,
       );
 
   Widget _thisMachine(BuildContext context) {
@@ -177,8 +194,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
           // Both of these existed on the old left rail and would have been lost
           // in the move. The catalogue of the old interface is what caught it.
           onRefreshPassword: () => bind.mainUpdateTemporaryPassword(),
-          onEditPassword: () =>
-              DesktopSettingPage.switch2page(SettingsTabKey.safety),
+          onEditPassword: () => _goToSettings(SettingsTabKey.safety),
           onStartService: model.isStart ? null : () => start_service(true),
         ),
       ),
@@ -202,6 +218,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         onRefresh: _refresh,
         connectedIds: const {},
         onRunAction: _runAction,
+        sectionRequest: _sectionRequest,
         hosted: {
           ConsoleSection.connect: _connect,
           ConsoleSection.thisMachine: _thisMachine,

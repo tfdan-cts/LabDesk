@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../charts/reachability_chart.dart';
@@ -77,6 +78,7 @@ class ConsoleShell extends StatefulWidget {
     this.onTerminalSubmit,
     this.initialSection = ConsoleSection.connect,
     this.hosted = const {},
+    this.sectionRequest,
   });
 
   final List<MachineRow> machines;
@@ -106,6 +108,14 @@ class ConsoleShell extends StatefulWidget {
   /// what keeps the design harness renderable with no client at all.
   final Map<ConsoleSection, WidgetBuilder> hosted;
 
+  /// Lets the client move the console to a section.
+  ///
+  /// Some controls have always meant "go to settings" - changing how this
+  /// machine is secured, for one. Without this they would open a second
+  /// settings surface in a separate tab, which is the duplication this console
+  /// exists to remove.
+  final ValueListenable<ConsoleSection>? sectionRequest;
+
   @override
   State<ConsoleShell> createState() => _ConsoleShellState();
 }
@@ -114,6 +124,32 @@ class _ConsoleShellState extends State<ConsoleShell> {
   late ConsoleSection _section = widget.initialSection;
   String? _selectedId;
   String? _busyActionId;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.sectionRequest?.addListener(_onSectionRequested);
+  }
+
+  @override
+  void didUpdateWidget(covariant ConsoleShell old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.sectionRequest, widget.sectionRequest)) {
+      old.sectionRequest?.removeListener(_onSectionRequested);
+      widget.sectionRequest?.addListener(_onSectionRequested);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.sectionRequest?.removeListener(_onSectionRequested);
+    super.dispose();
+  }
+
+  void _onSectionRequested() {
+    final s = widget.sectionRequest?.value;
+    if (s != null && mounted) setState(() => _section = s);
+  }
 
   MachineRow? get _selected {
     final id = _selectedId;
