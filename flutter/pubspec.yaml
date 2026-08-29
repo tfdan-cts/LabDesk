@@ -172,6 +172,18 @@ flutter:
     - family: More
       fonts:
         - asset: assets/more.ttf
+    # The console's type. Bundled rather than fetched, because a machine being
+    # administered is often on a network that cannot reach a font CDN, and an
+    # administration tool should not call out to one to draw its own interface.
+    # Manrope is the variable cut; console_theme.dart selects weights on the
+    # wght axis. Both are SIL Open Font License 1.1, licenses alongside them.
+    - family: Manrope
+      fonts:
+        - asset: assets/fonts/Manrope-Variable.ttf
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Medium.ttf
+          weight: 500
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware.

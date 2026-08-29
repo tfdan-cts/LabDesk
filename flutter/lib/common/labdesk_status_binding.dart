@@ -1,5 +1,5 @@
 import 'labdesk_peer_status.dart';
-import '../labdesk/charts/reachability_chart.dart';
+import '../labdesk/models/reach_sample.dart';
 
 /// Turns the client's online-state events into everything the console renders.
 ///

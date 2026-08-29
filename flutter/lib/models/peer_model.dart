@@ -173,6 +173,29 @@ enum UpdateEvent { online, load }
 
 typedef GetInitPeers = RxList<Peer> Function();
 
+/// Feeds the LabDesk status binding from the client's online-state events,
+/// exactly once for the life of the application.
+///
+/// Five Peers instances exist at once, one per peer tab, and each registers its
+/// own handler for the same event. The dispatcher runs every handler, so a
+/// binding fed from inside Peers recorded one poll five times: each machine's
+/// availability strip covered a fifth of the ground it claimed, and the session
+/// chart's axis was compressed by the same factor. This registration is keyed
+/// on its own handler name rather than a tab's, so it lands once no matter how
+/// many tabs exist, and registerEventHandler refuses a name it already holds.
+void _attachLabDeskStatus() {
+  platformFFI.registerEventHandler(Peers._cbQueryOnlines, 'labdesk-status',
+      (evt) async {
+    labdeskStatusTick();
+    // Parsing lives in the binding so the whole path stays testable without the
+    // FFI layer.
+    labdeskStatus.onOnlineStateEvent(
+      onlines: evt['onlines'] ?? '',
+      offlines: evt['offlines'] ?? '',
+    );
+  });
+}
+
 class Peers extends ChangeNotifier {
   final String name;
   final String loadEvent;
@@ -191,6 +214,7 @@ class Peers extends ChangeNotifier {
       required this.getInitPeers,
       required this.loadEvent}) {
     peers = getInitPeers?.call() ?? [];
+    _attachLabDeskStatus();
     platformFFI.registerEventHandler(_cbQueryOnlines, name, (evt) async {
       _updateOnlineState(evt);
     });
@@ -219,14 +243,6 @@ class Peers extends ChangeNotifier {
   }
 
   void _updateOnlineState(Map<String, dynamic> evt) {
-    labdeskStatusTick();
-    // Feed the per-peer store, which keeps a real unknown state, the last time
-    // each machine answered, and a short history the console renders. Parsing
-    // lives in the binding so it stays testable without the FFI layer.
-    labdeskStatus.onOnlineStateEvent(
-      onlines: evt['onlines'] ?? '',
-      offlines: evt['offlines'] ?? '',
-    );
     int changedCount = 0;
     evt['onlines'].split(',').forEach((online) {
       for (var i = 0; i < peers.length; i++) {
