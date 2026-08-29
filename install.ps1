@@ -239,9 +239,14 @@ This usually means files were in use. Close LabDesk and run this again.
             Stop-WithError @"
 this release installs its binary as rustdesk.exe, but its own service,
 uninstaller and shortcuts all reference LabDesk.exe, so the installation is
-broken: the service cannot start and the uninstaller cannot run.
-Install from the .msi instead, which names the binary correctly:
-  https://github.com/$repo/releases/latest
+broken: the service cannot start and the uninstaller cannot run. The partial
+install is still on this machine and should be removed by hand.
+
+This is fixed in releases built after the install_me rename fix. Use a newer
+release: https://github.com/$repo/releases/latest
+
+The .msi is not a workaround. It is built without --app-name, so it installs as
+RustDesk rather than LabDesk, into a different directory and registry entry.
 "@
         }
         Stop-WithError "expected $exe to exist after installing."
