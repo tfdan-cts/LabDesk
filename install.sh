@@ -108,6 +108,17 @@ url=$(grep -o '"browser_download_url": *"[^"]*"' "$tmp/release.json" \
 [ -n "${url:-}" ] || die "the latest release has no $manager package for $arch.
 See https://github.com/$REPO/releases/latest"
 
+# The URL comes out of an API response, so check it points where it should
+# before handing it to curl and the package manager as root. Release assets are
+# always served from these two hosts.
+case "$url" in
+    "https://github.com/$REPO/releases/download/"*) ;;
+    "https://objects.githubusercontent.com/"*) ;;
+    *) die "refusing to install from an unexpected location:
+  $url
+Release assets should come from github.com/$REPO." ;;
+esac
+
 pkg="$tmp/${url##*/}"
 info "downloading ${url##*/}"
 curl -fsSL --retry 3 -o "$pkg" "$url" || die "download failed: $url"

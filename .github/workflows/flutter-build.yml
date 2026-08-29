@@ -370,6 +370,11 @@ jobs:
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
+          # The client treats any executable whose file name ends in install.exe
+          # as a setup program (src/common.rs is_setup), so publishing the same
+          # binary under this name gives a double-click installer for a flash
+          # drive. Copied rather than moved so both names ship.
+          cp ./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.exe ./SignOutput/LabDesk-${{ env.VERSION }}-${{ matrix.job.arch }}-install.exe
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
@@ -381,7 +386,12 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           pushd ./res/msi
-          python preprocess.py --arp -d ../../rustdesk
+          # preprocess.py treats <app-name>.exe as the main executable and skips
+          # it when enumerating components, so the binary must be staged under
+          # that name. Without --app-name it falls back to RustDesk and the msi
+          # installs as RustDesk, in a different directory and registry entry.
+          Move-Item ../../rustdesk/rustdesk.exe ../../rustdesk/LabDesk.exe
+          python preprocess.py --arp --app-name LabDesk -d ../../rustdesk
           nuget restore msi.sln
           $msiPlatform = if ('${{ matrix.job.arch }}' -eq 'aarch64') { 'ARM64' } else { 'x64' }
           msbuild msi.sln -p:Configuration=Release -p:Platform=$msiPlatform /p:TargetVersion=Windows10
@@ -404,6 +414,7 @@ jobs:
           files: |
             ./SignOutput/rustdesk-*.msi
             ./SignOutput/rustdesk-*.exe
+            ./SignOutput/LabDesk-*-install.exe
 
   # The fallback for the flutter version, we use Sciter for 32bit Windows.
   build-for-windows-sciter:

@@ -157,6 +157,19 @@ if ($asset.name -match '(\d+\.\d+\.\d+)') {
     Stop-WithError "could not read a version out of the asset name '$($asset.name)'."
 }
 
+# The download URL comes out of an API response, so check it points where it
+# should before running it elevated. Release assets are always served from these
+# two hosts.
+$downloadUrl = $asset.browser_download_url
+if ($downloadUrl -notlike "https://github.com/$repo/releases/download/*" -and
+    $downloadUrl -notlike 'https://objects.githubusercontent.com/*') {
+    Stop-WithError @"
+refusing to install from an unexpected location:
+  $downloadUrl
+Release assets should come from github.com/$repo.
+"@
+}
+
 if (Get-Process -Name 'LabDesk' -ErrorAction SilentlyContinue) {
     Write-Warn 'LabDesk is running. The installer will try to replace files that are in use; close it first if the install fails.'
 }
@@ -164,7 +177,7 @@ if (Get-Process -Name 'LabDesk' -ErrorAction SilentlyContinue) {
 $installer = Join-Path ([IO.Path]::GetTempPath()) $asset.name
 Write-Step "downloading $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB)"
 try {
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installer -UseBasicParsing
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $installer -UseBasicParsing
 } catch {
     Stop-WithError "download failed: $($_.Exception.Message)"
 }
