@@ -1838,13 +1838,41 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> String {
     {uninstall_amyuni_idd}
     if exist \"{path}\" rd /s /q \"{path}\"
     if exist \"{start_menu}\" rd /s /q \"{start_menu}\"
+    {remove_service_config}
     if exist \"%PUBLIC%\\Desktop\\{app_name}.lnk\" del /f /q \"%PUBLIC%\\Desktop\\{app_name}.lnk\"
     if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
     ",
         before_uninstall=get_before_uninstall(kill_self),
         uninstall_amyuni_idd=get_uninstall_amyuni_idd(),
+        remove_service_config=get_remove_service_config(),
         app_name = crate::get_app_name(),
     )
+}
+
+// The service keeps its own copy of the configuration, under the profile of
+// whichever account it runs as, and uninstalling used to leave it behind. That
+// copy holds the ID and relay servers, the server key and the peer history, in a
+// directory nobody thinks to look in, so a machine that had been "uninstalled"
+// still carried the details of whatever infrastructure it had been pointed at.
+//
+// All three service accounts are covered because the account depends on how the
+// service was registered. The interactive user's own configuration under
+// %APPDATA% is deliberately left alone: that is what makes settings survive a
+// reinstall, it lives where its owner can find and delete it, and removing it
+// would be a surprise rather than a fix.
+//
+// Runs after get_before_uninstall has stopped the service and killed the
+// processes, so nothing holds these files open.
+fn get_remove_service_config() -> String {
+    let app_name = crate::get_app_name();
+    ["ServiceProfiles\\LocalService", "ServiceProfiles\\NetworkService", "System32\\config\\systemprofile"]
+        .iter()
+        .map(|profile| {
+            let dir = format!("%WINDIR%\\{profile}\\AppData\\Roaming\\{app_name}");
+            format!("    if exist \"{dir}\" rd /s /q \"{dir}\"")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub fn uninstall_me(kill_self: bool) -> ResultType<()> {
