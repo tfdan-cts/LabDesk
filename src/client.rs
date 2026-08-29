@@ -4250,8 +4250,13 @@ pub mod peer_online {
         let mut socket = match create_online_stream().await {
             Ok(s) => s,
             Err(e) => {
-                log::debug!("Failed to create peers online stream, {e}");
-                return Ok((vec![], ids.clone()));
+                // Report the failure rather than an empty online list. Returning
+                // Ok here told the caller that every queried peer is offline,
+                // which is indistinguishable from a real answer, so one
+                // unreachable ID server turned the whole list red. The caller
+                // logs an Err and leaves the previous state alone, which is
+                // what the no-response path below already does.
+                bail!("Failed to create peers online stream, {e}");
             }
         };
         // TODO: Use long connections to avoid socket creation
@@ -4259,8 +4264,9 @@ pub mod peer_online {
         // we may face the following error:
         // An established connection was aborted by the software in your host machine. (os error 10053)
         if let Err(e) = socket.send(&msg_out).await {
-            log::debug!("Failed to send peers online states query, {e}");
-            return Ok((vec![], ids.clone()));
+            // Same reasoning as above: a send failure is not evidence that the
+            // peers are offline.
+            bail!("Failed to send peers online states query, {e}");
         }
         // Retry for 2 times to get the online response
         for _ in 0..2 {
