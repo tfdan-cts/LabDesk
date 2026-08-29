@@ -5,12 +5,18 @@ import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/labdesk_profiles.dart';
 import 'package:flutter_hbb/common/labdesk_status_binding.dart';
 import 'package:flutter_hbb/common/widgets/labdesk_groups.dart';
+import 'package:flutter_hbb/desktop/pages/connection_page.dart';
+import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
+import 'package:flutter_hbb/desktop/widgets/server_profile_switcher.dart';
+import 'package:flutter_hbb/models/server_model.dart';
+import 'package:provider/provider.dart';
 
 import 'console_data.dart';
 import 'models/machine_row.dart';
 import 'screens/actions_screen.dart';
 import 'screens/console_shell.dart';
 import 'screens/settings_screen.dart';
+import 'screens/this_machine_screen.dart';
 import 'theme/console_theme.dart';
 
 /// The console, driven by the real client.
@@ -145,6 +151,33 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     }
   }
 
+  /// The application's own connect surface: the remote-id card and every peer
+  /// tab, including LabDesk's groups. Mounted whole rather than reimplemented,
+  /// so none of the behaviour behind those ~200 controls is lost in the move.
+  Widget _connect(BuildContext context) => ConnectionPage();
+
+  /// The full settings page, likewise mounted whole.
+  Widget _settings(BuildContext context) => DesktopSettingPage(
+        key: const ValueKey('labdesk-console-settings'),
+        initialTabkey: SettingsTabKey.general,
+      );
+
+  Widget _thisMachine(BuildContext context) {
+    return ChangeNotifierProvider.value(
+      value: gFFI.serverModel,
+      child: Consumer<ServerModel>(
+        builder: (context, model, _) => ThisMachineScreen(
+          machineId: model.serverId.text,
+          password: model.serverPasswd.text,
+          passwordIsTemporary:
+              model.verificationMethod != kUsePermanentPassword,
+          serviceRunning: model.isStart,
+          profileSwitcher: const ServerProfileSwitcher(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final machines = _machines;
@@ -162,6 +195,11 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         onRefresh: _refresh,
         connectedIds: const {},
         onRunAction: _runAction,
+        hosted: {
+          ConsoleSection.connect: _connect,
+          ConsoleSection.thisMachine: _thisMachine,
+          ConsoleSection.settings: _settings,
+        },
       ),
     );
   }

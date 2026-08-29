@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
-import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/labdesk/console_page.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
@@ -37,28 +36,6 @@ class DesktopTabPage extends StatefulWidget {
     }
   }
 
-  /// Opens the fleet console as a tab on the main window.
-  ///
-  /// It lives beside Home and Settings rather than inside the peer tabs,
-  /// because it carries its own navigation and needs the whole window; nesting
-  /// it under another tab bar would put two chromes around one surface.
-  /// Re-opening focuses the tab that is already there instead of adding a
-  /// second one.
-  static void onAddConsole() {
-    try {
-      DesktopTabController tabController = Get.find<DesktopTabController>();
-      tabController.add(TabInfo(
-          key: kTabLabelConsolePage,
-          label: kTabLabelConsolePage,
-          selectedIcon: Icons.grid_view_sharp,
-          unselectedIcon: Icons.grid_view_outlined,
-          page: const LabDeskConsolePage(
-            key: ValueKey(kTabLabelConsolePage),
-          )));
-    } catch (e) {
-      debugPrintStack(label: '$e');
-    }
-  }
 }
 
 class _DesktopTabPageState extends State<DesktopTabPage> {
@@ -67,14 +44,22 @@ class _DesktopTabPageState extends State<DesktopTabPage> {
   _DesktopTabPageState() {
     RemoteCountState.init();
     Get.put<DesktopTabController>(tabController);
+    // The console is what the application opens on. It carries connecting, the
+    // machine list, the fleet view, this machine's identity and settings behind
+    // one navigation, so there is a single place to land rather than a home
+    // page beside a console that duplicated half of it.
+    //
+    // The tab keeps kTabLabelHomePage as its key because the rest of the client
+    // asks "is the home page showing" by that key (isInHomePage, common.dart);
+    // only the label and the body change.
     tabController.add(TabInfo(
         key: kTabLabelHomePage,
-        label: kTabLabelHomePage,
-        selectedIcon: Icons.home_sharp,
-        unselectedIcon: Icons.home_outlined,
+        label: kTabLabelConsolePage,
+        selectedIcon: Icons.grid_view_sharp,
+        unselectedIcon: Icons.grid_view_outlined,
         closable: false,
-        page: DesktopHomePage(
-          key: const ValueKey(kTabLabelHomePage),
+        page: const LabDeskConsolePage(
+          key: ValueKey(kTabLabelHomePage),
         )));
     if (bind.isIncomingOnly()) {
       tabController.onSelected = (key) {
@@ -123,18 +108,6 @@ class _DesktopTabPageState extends State<DesktopTabPage> {
               tail: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // The console is about machines this client reaches out to,
-                  // so it is hidden in incoming-only mode for the same reason
-                  // the rest of the outgoing interface is.
-                  Offstage(
-                    offstage: bind.isIncomingOnly(),
-                    child: ActionIcon(
-                      message: 'Console',
-                      icon: Icons.grid_view_sharp,
-                      onTap: DesktopTabPage.onAddConsole,
-                      isClose: false,
-                    ),
-                  ),
                   Offstage(
                     offstage:
                         bind.isIncomingOnly() || bind.isDisableSettings(),

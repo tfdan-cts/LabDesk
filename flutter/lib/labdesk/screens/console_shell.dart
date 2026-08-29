@@ -10,10 +10,20 @@ import 'health_screen.dart';
 import 'settings_screen.dart';
 import 'terminal_screen.dart';
 
-enum ConsoleSection { fleet, health, terminal, actions, settings }
+enum ConsoleSection {
+  connect,
+  fleet,
+  health,
+  terminal,
+  actions,
+  thisMachine,
+  settings,
+}
 
 extension ConsoleSectionInfo on ConsoleSection {
   String get label => switch (this) {
+        ConsoleSection.connect => 'Connect',
+        ConsoleSection.thisMachine => 'This machine',
         ConsoleSection.fleet => 'Fleet',
         ConsoleSection.health => 'Health',
         ConsoleSection.terminal => 'Terminal',
@@ -22,6 +32,8 @@ extension ConsoleSectionInfo on ConsoleSection {
       };
 
   IconData get icon => switch (this) {
+        ConsoleSection.connect => Icons.cast_connected_rounded,
+        ConsoleSection.thisMachine => Icons.badge_outlined,
         ConsoleSection.fleet => Icons.grid_view_rounded,
         ConsoleSection.health => Icons.monitor_heart_outlined,
         ConsoleSection.terminal => Icons.terminal_rounded,
@@ -32,7 +44,11 @@ extension ConsoleSectionInfo on ConsoleSection {
   /// Sections that act on one machine show which machine in the title bar, and
   /// prompt to pick one when none is selected.
   bool get needsMachine => switch (this) {
-        ConsoleSection.fleet || ConsoleSection.settings => false,
+        ConsoleSection.connect ||
+        ConsoleSection.thisMachine ||
+        ConsoleSection.fleet ||
+        ConsoleSection.settings =>
+          false,
         _ => true,
       };
 }
@@ -59,7 +75,8 @@ class ConsoleShell extends StatefulWidget {
     this.connectedIds = const {},
     this.onRunAction,
     this.onTerminalSubmit,
-    this.initialSection = ConsoleSection.fleet,
+    this.initialSection = ConsoleSection.connect,
+    this.hosted = const {},
   });
 
   final List<MachineRow> machines;
@@ -80,6 +97,14 @@ class ConsoleShell extends StatefulWidget {
   final void Function(String machineId, MachineAction action)? onRunAction;
   final void Function(String machineId, String command)? onTerminalSubmit;
   final ConsoleSection initialSection;
+
+  /// Sections whose body the caller supplies.
+  ///
+  /// The client mounts the application's own widgets here, which is what lets
+  /// the console own the whole interface without this file importing the FFI.
+  /// A section with no builder falls back to the console's own screen, which is
+  /// what keeps the design harness renderable with no client at all.
+  final Map<ConsoleSection, WidgetBuilder> hosted;
 
   @override
   State<ConsoleShell> createState() => _ConsoleShellState();
@@ -141,6 +166,8 @@ class _ConsoleShellState extends State<ConsoleShell> {
   }
 
   Widget _body() {
+    final host = widget.hosted[_section];
+    if (host != null) return host(context);
     switch (_section) {
       case ConsoleSection.fleet:
         return FleetConsole(
@@ -192,7 +219,46 @@ class _ConsoleShellState extends State<ConsoleShell> {
         );
       case ConsoleSection.settings:
         return SettingsScreen(profiles: widget.profiles);
+      case ConsoleSection.connect:
+      case ConsoleSection.thisMachine:
+        // These two are always supplied by the client, because connecting and
+        // the machine list are the application's own widgets. Reaching here
+        // means the console is running without a client, which is the design
+        // harness, so it says that rather than pretending to be either.
+        return _HostedElsewhere(section: _section);
     }
+  }
+}
+
+/// Stands in for a section the client owns, when there is no client.
+class _HostedElsewhere extends StatelessWidget {
+  const _HostedElsewhere({required this.section});
+
+  final ConsoleSection section;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(section.icon, size: 28, color: C.textFaint),
+            const SizedBox(height: 12),
+            Text('${section.label} is part of the running client',
+                style: C.h2(), textAlign: TextAlign.center),
+            const SizedBox(height: 6),
+            Text(
+              'This harness renders the console without a client, so the '
+              'sections the client supplies are not here.',
+              style: C.small(),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
