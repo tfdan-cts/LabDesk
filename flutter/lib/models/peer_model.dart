@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 import 'platform_model.dart';
 // ignore: depend_on_referenced_packages
 import 'package:collection/collection.dart';
+import '../common/labdesk_status_binding.dart';
 
 class Peer {
   final String id;
@@ -219,6 +220,13 @@ class Peers extends ChangeNotifier {
 
   void _updateOnlineState(Map<String, dynamic> evt) {
     labdeskStatusTick();
+    // Feed the per-peer store, which keeps a real unknown state, the last time
+    // each machine answered, and a short history the console renders. Parsing
+    // lives in the binding so it stays testable without the FFI layer.
+    labdeskStatus.onOnlineStateEvent(
+      onlines: evt['onlines'] ?? '',
+      offlines: evt['offlines'] ?? '',
+    );
     int changedCount = 0;
     evt['onlines'].split(',').forEach((online) {
       for (var i = 0; i < peers.length; i++) {
