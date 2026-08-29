@@ -192,7 +192,13 @@ class Panel extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(18, 15, 12, 14),
             child: Row(
               children: [
-                Flexible(
+                // Expanded, and no Spacer beside it. A Flexible and a Spacer
+                // are both flex 1, so the free space was split evenly: the
+                // title block was capped at half the header however wide the
+                // panel got, wrapping subtitles into a narrow column while the
+                // other half sat empty, and the actions never reached the
+                // right edge.
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
@@ -205,7 +211,6 @@ class Panel extends StatelessWidget {
                     ],
                   ),
                 ),
-                const Spacer(),
                 if (actions != null) ...actions!,
               ],
             ),

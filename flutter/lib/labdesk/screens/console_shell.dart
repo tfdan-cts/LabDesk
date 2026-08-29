@@ -54,6 +54,24 @@ extension ConsoleSectionInfo on ConsoleSection {
       };
 }
 
+/// Carries a request to move the console, and fires every time one is made.
+///
+/// A plain ValueNotifier only notifies when the value changes, so asking for
+/// the same section twice is silently dropped. "Change how this machine is
+/// secured" asks for Settings, and after the first time the console would
+/// never move again.
+class ConsoleSectionRequest extends ValueNotifier<ConsoleSection> {
+  ConsoleSectionRequest(super.value);
+
+  void request(ConsoleSection section) {
+    if (value == section) {
+      notifyListeners();
+    } else {
+      value = section;
+    }
+  }
+}
+
 /// One nested entry under a section, described by the client.
 ///
 /// Settings has eight pages of its own. Rendering the client's settings widget

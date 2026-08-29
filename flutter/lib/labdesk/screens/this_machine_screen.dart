@@ -82,9 +82,17 @@ class ThisMachineScreen extends StatelessWidget {
                   label: passwordIsTemporary
                       ? 'One-time password'
                       : 'Permanent password',
-                  value: password,
-                  mono: true,
-                  onCopy: password.isEmpty || password == '-'
+                  // A permanent password is never handed back to the interface,
+                  // so the client renders a dash for it. Printing that dash
+                  // under a label claiming to be the password reads as an
+                  // empty value rather than a withheld one.
+                  value: passwordIsTemporary
+                      ? password
+                      : (password.isEmpty || password == '-'
+                          ? 'Not shown here'
+                          : password),
+                  mono: passwordIsTemporary,
+                  onCopy: !passwordIsTemporary || password.isEmpty || password == '-'
                       ? null
                       : () => Clipboard.setData(ClipboardData(text: password)),
                   trailing: Row(
@@ -105,21 +113,27 @@ class ThisMachineScreen extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (passwordIsTemporary) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    'A one-time password changes whenever it is regenerated, so '
-                    'unattended access needs a permanent one instead.',
-                    style: C.small(),
-                  ),
-                ],
+                const SizedBox(height: 10),
+                Text(
+                  passwordIsTemporary
+                      ? 'A one-time password changes whenever it is '
+                          'regenerated, so unattended access needs a permanent '
+                          'one instead.'
+                      : 'This machine uses a permanent password. It is not '
+                          'displayed here; set or change it in Security '
+                          'settings.',
+                  style: C.small(),
+                ),
               ],
             ),
           ),
           if (profileSwitcher != null) ...[
             const SizedBox(height: 16),
             _Card(
-              title: 'Server profile',
+              // No title: the switcher mounted below prints its own "Server
+              // profile" caption, and the card was printing it a second time
+              // directly above it.
+              title: 'Servers',
               subtitle:
                   'Which ID and relay servers this machine is registered with.',
               child: profileSwitcher!,

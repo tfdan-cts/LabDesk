@@ -2,16 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
-import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/common/labdesk_profiles.dart';
 import 'package:flutter_hbb/common/labdesk_status_binding.dart';
 import 'package:flutter_hbb/common/widgets/labdesk_groups.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart';
+import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/widgets/server_profile_switcher.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
-import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 
 import 'console_data.dart';
@@ -53,27 +52,17 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
 
   /// Lets controls that mean "go to settings" move the console rather than
   /// open a second settings surface in its own tab.
-  final _sectionRequest = ValueNotifier(ConsoleSection.connect);
+  final _sectionRequest = ConsoleSectionRequest(ConsoleSection.connect);
   var _settingsTab = SettingsTabKey.general;
   var _section = ConsoleSection.connect;
 
-  /// The stop-service flag the client's own widgets read.
-  ///
-  /// DesktopHomePage used to own this, and both ConnectionPage
-  /// (connection_page.dart:36) and Settings > General
-  /// (desktop_setting_page.dart:409) resolve it with Get.find, which throws
-  /// when nothing has registered it. Unmounting the home page took the
-  /// registration with it, so the console has to own it now: it hosts both of
-  /// those widgets.
-  final _svcStopped = false.obs;
 
   void _goToSettings(SettingsTabKey tab) {
-    setState(() => _settingsTab = tab);
-    // Setting the value is enough. When the console is already on settings the
-    // notifier does not fire, but the setState above has already rebuilt the
-    // hosted page against the new key, which is the only thing that needed to
-    // change.
-    _sectionRequest.value = ConsoleSection.settings;
+    // A page this build does not offer must not become reachable through the
+    // console: tabKeys hides pages by policy and by platform.
+    final offered = settingsPages().any((p) => p.key == tab);
+    setState(() => _settingsTab = offered ? tab : SettingsTabKey.general);
+    _sectionRequest.request(ConsoleSection.settings);
   }
 
   @override
@@ -81,9 +70,6 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     super.initState();
     LabDeskGroupsModel.ensureLoaded();
     ServerProfilesModel.ensureLoaded();
-    if (!Get.isRegistered<RxBool>(tag: 'stop-service')) {
-      Get.put<RxBool>(_svcStopped, tag: 'stop-service');
-    }
     // ponytail: a one second repaint rather than plumbing change notification
     // through a store that is deliberately plain Dart. This is a monitoring
     // surface whose figures are seconds old by nature, and the alternative is
@@ -93,17 +79,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     // application's own widget or a screen with nothing that changes second to
     // second, and rebuilding the hosted connect page or a settings page once a
     // second is work nobody asked for.
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) async {
-      // This machine's own id arrives by polling and nothing else. The home
-      // page fetched it every second and took that with it when it was
-      // unmounted, which left the id reading "Generating ..." forever.
-      // fetchID notifies, so the Consumer around ThisMachineScreen rebuilds
-      // itself when the id lands; no setState is needed for it.
-      await gFFI.serverModel.fetchID();
-      // The service flag is polled for the same reason: nothing signals a
-      // change in the service's state.
-      final v = await mainGetBoolOption(kOptionStopService);
-      if (v != _svcStopped.value) _svcStopped.value = v;
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _section == ConsoleSection.fleet) setState(() {});
     });
     // Ask once on open so the fleet is not blank while waiting for the client's
@@ -115,7 +91,6 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   void dispose() {
     _tick?.cancel();
     _sectionRequest.dispose();
-    Get.delete<RxBool>(tag: 'stop-service');
     super.dispose();
   }
 
@@ -240,7 +215,31 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     final machines = _machines;
     return Container(
       color: C.bg,
-      child: ConsoleShell(
+      child: Stack(
+        children: [
+          // The old home page, mounted and never painted.
+          //
+          // Its widget tree is replaced by the console, but its State owned
+          // work nothing else does: it registers the main window's
+          // multi-window method handler (show, hide, move a tab to a new
+          // window, open a monitor session, report remote window coords), the
+          // stop-service flag that ConnectionPage and Settings resolve with
+          // Get.find, the uni-links subscription, the macOS permission
+          // watches, and the once-a-second fetch of this machine's own id.
+          //
+          // Reimplementing that was the alternative, and reimplementing a
+          // lifecycle by reading it is how the three defects a critique found
+          // in this rebuild got there in the first place. Mounting it offstage
+          // keeps every one of those responsibilities exactly as it was while
+          // the console owns the whole visible interface.
+          //
+          // What this deliberately does NOT restore is the page's own visible
+          // parts: the install prompt, the macOS permission cards, the update
+          // banner and the system error banner. Those are real interface and
+          // belong in the console; they are named in docs/CONSOLE.md as
+          // outstanding rather than quietly dropped.
+          const Offstage(offstage: true, child: DesktopHomePage()),
+          ConsoleShell(
         machines: machines,
         samples: labdeskStatus.samples,
         profiles: _profiles,
@@ -270,11 +269,13 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
             }
           }
         },
-        hosted: {
-          ConsoleSection.connect: _connect,
-          ConsoleSection.thisMachine: _thisMachine,
-          ConsoleSection.settings: _settings,
-        },
+            hosted: {
+              ConsoleSection.connect: _connect,
+              ConsoleSection.thisMachine: _thisMachine,
+              ConsoleSection.settings: _settings,
+            },
+          ),
+        ],
       ),
     );
   }

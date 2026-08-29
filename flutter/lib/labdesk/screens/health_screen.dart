@@ -93,14 +93,31 @@ class _MachineHeader extends StatelessWidget {
           child: Icon(_platformIcon(machine.platform), size: 18, color: C.textMuted),
         ),
         const SizedBox(width: 14),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(machine.displayName, style: C.h1()),
-            const SizedBox(height: 3),
-            Text(machine.id, style: C.data(size: 11.5, color: C.textFaint)),
-          ],
+        // Flexible with an ellipsis, for the same reason the console's title
+        // bar needs one: a machine can be named anything, and an unbounded
+        // Text in a Row beside a Spacer overflows rather than truncating. A
+        // twenty-odd character name already reaches the edge at the default
+        // window width.
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                machine.displayName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: C.h1(),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                machine.id,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: C.data(size: 11.5, color: C.textFaint),
+              ),
+            ],
+          ),
         ),
         const SizedBox(width: 18),
         _ConnectionPill(connected: connected),
