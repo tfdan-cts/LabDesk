@@ -172,12 +172,14 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   /// so none of the behaviour behind those ~200 controls is lost in the move.
   Widget _connect(BuildContext context) => ConnectionPage();
 
-  /// The full settings page, likewise mounted whole.
-  Widget _settings(BuildContext context) => DesktopSettingPage(
-        // Keyed by the page so asking for a different one rebuilds it there,
-        // rather than showing the page it was first opened on.
-        key: ValueKey('labdesk-console-settings-${_settingsTab.name}'),
-        initialTabkey: _settingsTab,
+  /// One settings page, with no navigation of its own.
+  ///
+  /// Mounting DesktopSettingPage whole put a second navigation rail beside the
+  /// console's, which is two sidebars for one interface. Its pages are nested
+  /// in the console's own sidebar instead, and only the body renders here.
+  Widget _settings(BuildContext context) => Container(
+        color: C.bg,
+        child: settingsPageBody(_settingsTab),
       );
 
   Widget _thisMachine(BuildContext context) {
@@ -219,6 +221,22 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         connectedIds: const {},
         onRunAction: _runAction,
         sectionRequest: _sectionRequest,
+        subItems: {
+          ConsoleSection.settings: [
+            for (final p in settingsPages())
+              ConsoleSubItem(id: p.key.name, label: p.label, icon: p.icon),
+          ],
+        },
+        selectedSubItem: _settingsTab.name,
+        onSubItemSelected: (section, id) {
+          if (section != ConsoleSection.settings) return;
+          for (final p in settingsPages()) {
+            if (p.key.name == id) {
+              setState(() => _settingsTab = p.key);
+              break;
+            }
+          }
+        },
         hosted: {
           ConsoleSection.connect: _connect,
           ConsoleSection.thisMachine: _thisMachine,

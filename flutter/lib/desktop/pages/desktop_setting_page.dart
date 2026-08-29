@@ -3247,3 +3247,51 @@ void changeSocks5Proxy() async {
 }
 
 //#endregion
+
+/// One settings page, described for a host that draws its own navigation.
+///
+/// The console nests the settings pages in its own sidebar rather than showing
+/// a second rail beside it, so it needs the list and the bodies without the
+/// page's own chrome. Kept beside the pages themselves because the page widgets
+/// are private to this file.
+class SettingsPageInfo {
+  const SettingsPageInfo(this.key, this.label, this.icon);
+
+  final SettingsTabKey key;
+  final String label;
+  final IconData icon;
+}
+
+/// The settings pages this build actually offers, in order.
+///
+/// Derived from the same `tabKeys` the page itself uses, so a page hidden by a
+/// build option or by the platform stays hidden here too.
+List<SettingsPageInfo> settingsPages() {
+  const labels = {
+    SettingsTabKey.general: ('General', Icons.settings_outlined),
+    SettingsTabKey.safety: ('Security', Icons.enhanced_encryption_outlined),
+    SettingsTabKey.network: ('Network', Icons.link_outlined),
+    SettingsTabKey.display: ('Display', Icons.desktop_windows_outlined),
+    SettingsTabKey.plugin: ('Plugin', Icons.extension_outlined),
+    SettingsTabKey.account: ('Account', Icons.person_outline),
+    SettingsTabKey.printer: ('Printer', Icons.print_outlined),
+    SettingsTabKey.about: ('About', Icons.info_outline),
+  };
+  return [
+    for (final k in DesktopSettingPage.tabKeys)
+      if (labels[k] != null)
+        SettingsPageInfo(k, labels[k]!.$1, labels[k]!.$2),
+  ];
+}
+
+/// The body of one settings page, with no navigation and no header.
+Widget settingsPageBody(SettingsTabKey tab) => switch (tab) {
+      SettingsTabKey.general => const _General(),
+      SettingsTabKey.safety => const _Safety(),
+      SettingsTabKey.network => const _Network(),
+      SettingsTabKey.display => const _Display(),
+      SettingsTabKey.plugin => const _Plugin(),
+      SettingsTabKey.account => const _Account(),
+      SettingsTabKey.printer => const _Printer(),
+      SettingsTabKey.about => const _About(),
+    };

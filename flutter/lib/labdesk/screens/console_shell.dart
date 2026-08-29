@@ -54,6 +54,20 @@ extension ConsoleSectionInfo on ConsoleSection {
       };
 }
 
+/// One nested entry under a section, described by the client.
+///
+/// Settings has eight pages of its own. Rendering the client's settings widget
+/// whole put a second navigation rail beside the console's, which is two
+/// sidebars for one interface. The client passes the pages up instead and the
+/// console nests them in its own sidebar, so there is one place to navigate.
+class ConsoleSubItem {
+  const ConsoleSubItem({required this.id, required this.label, this.icon});
+
+  final String id;
+  final String label;
+  final IconData? icon;
+}
+
 /// The console: navigation, the selected machine, and the section bodies.
 ///
 /// Owns no data of its own. Everything is passed in, so the same shell renders
@@ -79,6 +93,9 @@ class ConsoleShell extends StatefulWidget {
     this.initialSection = ConsoleSection.connect,
     this.hosted = const {},
     this.sectionRequest,
+    this.subItems = const {},
+    this.selectedSubItem,
+    this.onSubItemSelected,
   });
 
   final List<MachineRow> machines;
@@ -115,6 +132,11 @@ class ConsoleShell extends StatefulWidget {
   /// settings surface in a separate tab, which is the duplication this console
   /// exists to remove.
   final ValueListenable<ConsoleSection>? sectionRequest;
+
+  /// Pages nested under a section, shown in the sidebar beneath it.
+  final Map<ConsoleSection, List<ConsoleSubItem>> subItems;
+  final String? selectedSubItem;
+  final void Function(ConsoleSection section, String id)? onSubItemSelected;
 
   @override
   State<ConsoleShell> createState() => _ConsoleShellState();
@@ -179,6 +201,9 @@ class _ConsoleShellState extends State<ConsoleShell> {
             profileName: widget.profileName,
             selected: _selected,
             onSelect: (s) => setState(() => _section = s),
+            subItems: widget.subItems,
+            selectedSubItem: widget.selectedSubItem,
+            onSubItemSelected: widget.onSubItemSelected,
           ),
           Expanded(
             child: Column(
@@ -304,12 +329,18 @@ class _Sidebar extends StatelessWidget {
     required this.profileName,
     required this.selected,
     required this.onSelect,
+    this.subItems = const {},
+    this.selectedSubItem,
+    this.onSubItemSelected,
   });
 
   final ConsoleSection section;
   final String profileName;
   final MachineRow? selected;
   final ValueChanged<ConsoleSection> onSelect;
+  final Map<ConsoleSection, List<ConsoleSubItem>> subItems;
+  final String? selectedSubItem;
+  final void Function(ConsoleSection section, String id)? onSubItemSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -340,12 +371,22 @@ class _Sidebar extends StatelessWidget {
               ],
             ),
           ),
-          for (final s in ConsoleSection.values)
+          for (final s in ConsoleSection.values) ...[
             _NavItem(
               section: s,
               active: s == section,
               onTap: () => onSelect(s),
             ),
+            // Nested pages appear only under the open section, so the sidebar
+            // does not become a wall of everything at once.
+            if (s == section)
+              for (final sub in (subItems[s] ?? const <ConsoleSubItem>[]))
+                _SubNavItem(
+                  item: sub,
+                  active: sub.id == selectedSubItem,
+                  onTap: () => onSubItemSelected?.call(s, sub.id),
+                ),
+          ],
           const Spacer(),
           if (selected != null) ...[
             Divider(height: 1, thickness: 1, color: C.hairline),
@@ -505,5 +546,71 @@ class _TitleBar extends StatelessWidget {
     if (s < 60) return 'Checked ${s}s ago';
     if (s < 3600) return 'Checked ${s ~/ 60}m ago';
     return 'Checked ${s ~/ 3600}h ago';
+  }
+}
+
+/// A page nested under the open section. Indented and quieter than a section,
+/// so the hierarchy reads without a second rail.
+class _SubNavItem extends StatefulWidget {
+  const _SubNavItem({
+    required this.item,
+    required this.active,
+    required this.onTap,
+  });
+
+  final ConsoleSubItem item;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  State<_SubNavItem> createState() => _SubNavItemState();
+}
+
+class _SubNavItemState extends State<_SubNavItem> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = widget.active ? C.text : (_hover ? C.text : C.textMuted);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: C.fast,
+          height: 30,
+          margin: const EdgeInsets.fromLTRB(10, 1, 10, 1),
+          padding: const EdgeInsets.only(left: 28, right: 10),
+          decoration: BoxDecoration(
+            color: widget.active ? C.surfaceHi : Colors.transparent,
+            borderRadius: C.roundedSm,
+          ),
+          child: Row(
+            children: [
+              // A rule rather than an icon: the section above already carries
+              // one, and repeating icons at both levels flattens the hierarchy.
+              Container(
+                width: 2,
+                height: 12,
+                color: widget.active ? C.accent : C.hairline,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  widget.item.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: C.small(
+                    color: fg,
+                    w: widget.active ? FontWeight.w600 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
