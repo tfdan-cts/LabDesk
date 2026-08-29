@@ -105,21 +105,11 @@ class _DesktopTabPageState extends State<DesktopTabPage> {
             backgroundColor: Theme.of(context).colorScheme.background,
             body: DesktopTab(
               controller: tabController,
-              tail: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Offstage(
-                    offstage:
-                        bind.isIncomingOnly() || bind.isDisableSettings(),
-                    child: ActionIcon(
-                      message: 'Settings',
-                      icon: IconFont.menu,
-                      onTap: DesktopTabPage.onAddSetting,
-                      isClose: false,
-                    ),
-                  ),
-                ],
-              ),
+              // No tail. Settings is a section of the console, and an icon
+              // here opened the same page again in a second tab, which is the
+              // duplication the console was built to remove. Incoming-only
+              // builds keep their own path to it through the console.
+              tail: null,
             )));
     return isMacOS || kUseCompatibleUiMode
         ? tabWidget
