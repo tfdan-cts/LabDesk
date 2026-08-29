@@ -4,8 +4,11 @@
 // core and no peer connection, so the interface can be looked at and judged in
 // seconds. The screens are the shipping widgets; only the data is fixture.
 //
-//   flutter run -t lib/labdesk_preview.dart -d chrome --web-port=5899
 //   flutter run -t lib/labdesk_preview.dart -d windows
+//
+// Desktop only. This project has no `web/` directory, so the web device is not
+// available to it and `-d chrome` fails with "This project is not configured
+// for the web" before it reaches anything here.
 //
 // Nothing here may import the FFI layer. The moment it does, the harness stops
 // building without the generated bridge and the fast loop is gone.
