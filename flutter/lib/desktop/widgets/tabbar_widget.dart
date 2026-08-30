@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui;
 
@@ -8,6 +9,9 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide TabBarTheme;
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
+import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
+import 'package:flutter_hbb/labdesk/theme/ld_icons.dart';
+import 'package:flutter_hbb/labdesk/theme/session_toolbar_skin.dart';
 import 'package:flutter_hbb/desktop/pages/remote_page.dart';
 import 'package:flutter_hbb/desktop/pages/view_camera_page.dart';
 import 'package:flutter_hbb/main.dart';
@@ -22,9 +26,97 @@ import 'package:visibility_detector/visibility_detector.dart';
 import '../../utils/multi_window_manager.dart';
 
 const double _kTabBarHeight = kDesktopRemoteTabBarHeight;
-const double _kIconSize = 18;
-const double _kDividerIndent = 10;
+const double _kIconSize = TabSkin.glyphSize;
 const double _kActionIconSize = 12;
+
+/// The kind of session a window holds, as one of the console's own glyphs.
+///
+/// Every tab in a window is the same kind — the kind is fixed when the window
+/// is opened — so this is what the tab bar knows about a session without
+/// asking anything new.
+String? _tabTypeGlyph(DesktopTabType tabType, String tabKey) {
+  switch (tabType) {
+    case DesktopTabType.remoteScreen:
+      return LdIcons.display;
+    case DesktopTabType.viewCamera:
+      return LdIcons.camera;
+    case DesktopTabType.fileTransfer:
+      return LdIcons.fileTransfer;
+    case DesktopTabType.portForward:
+      return LdIcons.portForward;
+    case DesktopTabType.terminal:
+      return LdIcons.terminal;
+    // The main window's own tabs are sections of the console, not sessions.
+    case DesktopTabType.main:
+      return tabKey == kTabLabelSettingPage ? LdIcons.settings : LdIcons.fleet;
+    case DesktopTabType.cm:
+    case DesktopTabType.install:
+      return null;
+  }
+}
+
+/// The platform of the machine behind a tab, as a glyph, or null when nothing
+/// has been recorded about it yet.
+///
+/// This reads the same peer record the tab's own label already comes from —
+/// [getDesktopTabLabel] calls `mainGetPeerSync` for the hostname on every
+/// build — so the strip is not given a new source of truth, only the part of
+/// the one it already reads that was being thrown away. A machine that has
+/// never connected has no platform recorded, and then the tab leads with the
+/// kind of session instead, exactly as it used to.
+String? _peerPlatformGlyph(String tabKey) {
+  String? read(String id) {
+    try {
+      final config = jsonDecode(bind.mainGetPeerSync(id: id));
+      final raw = config['info']?['platform'];
+      return raw is String && raw.isNotEmpty ? raw.toLowerCase() : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Terminal tabs are keyed '<peer>_<terminal>'; every other kind is keyed by
+  // the peer alone.
+  var platform = read(tabKey);
+  final cut = tabKey.lastIndexOf('_');
+  if (platform == null && cut > 0) {
+    platform = read(tabKey.substring(0, cut));
+  }
+  if (platform == null) return null;
+  if (platform.contains('win')) return LdIcons.windows;
+  if (platform.contains('mac') ||
+      platform.contains('darwin') ||
+      platform.contains('ios')) {
+    return LdIcons.macos;
+  }
+  if (platform.contains('android')) return LdIcons.android;
+  if (platform.contains('linux') || platform.contains('nix')) {
+    return LdIcons.linux;
+  }
+  // An unrecognised platform is not guessed at.
+  return null;
+}
+
+/// The window's own buttons carry [IconData] in their public API, and four
+/// pages outside this file still hand them Material and RustDesk icon-font
+/// values. Mapping here means those callers draw the console's glyphs without
+/// being touched, and anything unmapped still draws what it asked for.
+final Map<IconData, String> _kLdGlyphs = {
+  IconFont.min: LdIcons.minus,
+  IconFont.max: LdIcons.maximize,
+  IconFont.restore: LdIcons.restore,
+  IconFont.close: LdIcons.close,
+  IconFont.add: LdIcons.add,
+  IconFont.menu: LdIcons.more,
+  IconFont.more: LdIcons.more,
+  IconFont.search: LdIcons.search,
+  Icons.close: LdIcons.close,
+  Icons.add: LdIcons.add,
+  Icons.arrow_drop_down: LdIcons.chevronDown,
+  Icons.keyboard_arrow_down_rounded: LdIcons.chevronDown,
+  Icons.arrow_left: LdIcons.chevronLeft,
+  Icons.arrow_right: LdIcons.chevronRight,
+};
 
 class TabInfo {
   final String key; // Notice: cm use client_id.toString() as key
@@ -249,8 +341,10 @@ class DesktopTab extends StatefulWidget {
   final TabBuilder? tabBuilder;
   final LabelGetter? labelGetter;
   final double? maxLabelWidth;
-  final Color? selectedTabBackgroundColor;
-  final Color? unSelectedTabBackgroundColor;
+
+  /// Whether this window marks its current tab with the accent rule. Kept as a
+  /// colour for the pages that already pass one, but the strip has one accent
+  /// and picks it itself.
   final Color? selectedBorderColor;
 
   final DesktopTabController controller;
@@ -274,8 +368,6 @@ class DesktopTab extends StatefulWidget {
     this.tabBuilder,
     this.labelGetter,
     this.maxLabelWidth,
-    this.selectedTabBackgroundColor,
-    this.unSelectedTabBackgroundColor,
     this.selectedBorderColor,
   }) : super(key: key);
 
@@ -310,9 +402,6 @@ class _DesktopTabState extends State<DesktopTab>
   TabBuilder? get tabBuilder => widget.tabBuilder;
   LabelGetter? get labelGetter => widget.labelGetter;
   double? get maxLabelWidth => widget.maxLabelWidth;
-  Color? get selectedTabBackgroundColor => widget.selectedTabBackgroundColor;
-  Color? get unSelectedTabBackgroundColor =>
-      widget.unSelectedTabBackgroundColor;
   Color? get selectedBorderColor => widget.selectedBorderColor;
   DesktopTabController get controller => widget.controller;
   RxList<String> get invisibleTabKeys => widget.invisibleTabKeys;
@@ -517,18 +606,26 @@ class _DesktopTabState extends State<DesktopTab>
           final showBottomDivider = _showTabBarBottomDivider(tabType);
           return SizedBox(
             height: _kTabBarHeight,
-            child: Column(
-              children: [
-                SizedBox(
-                  height:
-                      showBottomDivider ? _kTabBarHeight - 1 : _kTabBarHeight,
-                  child: _buildBar(),
-                ),
-                if (showBottomDivider)
-                  const Divider(
-                    height: 1,
+            // The strip is the window's title bar and wears the chrome plane,
+            // one step off the content plane below it. That step is what
+            // separates the two when there is no divider to do it.
+            child: ColoredBox(
+              color: TabSkin.barColor,
+              child: Column(
+                children: [
+                  SizedBox(
+                    height:
+                        showBottomDivider ? _kTabBarHeight - 1 : _kTabBarHeight,
+                    child: _buildBar(),
                   ),
-              ],
+                  if (showBottomDivider)
+                    const Divider(
+                      height: 1,
+                      thickness: 1,
+                      color: C.hairline,
+                    ),
+                ],
+              ),
             ),
           );
         } else {
@@ -594,7 +691,11 @@ class _DesktopTabState extends State<DesktopTab>
 
   Widget _buildBar() {
     final isIncomingHomePage = bind.isIncomingOnly() && isInHomePage();
-    return Row(
+    // Every tooltip the strip raises — a truncated machine name, a window
+    // button — is the console's panel, not Material's grey lozenge.
+    return TooltipTheme(
+      data: toolbarTooltipTheme,
+      child: Row(
       children: [
         Expanded(
             child: GestureDetector(
@@ -642,10 +743,11 @@ class _DesktopTabState extends State<DesktopTab>
                             offstage: !showTitle,
                             child: Text(
                               bind.mainGetAppNameSync(),
-                              style: TextStyle(fontSize: 13),
-                            ).marginOnly(left: 2))
+                              style: C.small(
+                                  color: C.textMuted, w: FontWeight.w600),
+                            ).marginOnly(left: 6))
                       ]).marginOnly(
-                        left: 5,
+                        left: 8,
                         right: 10,
                       ),
                     ),
@@ -673,11 +775,7 @@ class _DesktopTabState extends State<DesktopTab>
                               tabMenuBuilder: tabMenuBuilder,
                               labelGetter: labelGetter,
                               maxLabelWidth: maxLabelWidth,
-                              selectedTabBackgroundColor:
-                                  selectedTabBackgroundColor,
-                              unSelectedTabBackgroundColor:
-                                  unSelectedTabBackgroundColor,
-                              selectedBorderColor: selectedBorderColor,
+                              markSelected: selectedBorderColor != null,
                             ))),
                   ],
                 ))),
@@ -695,7 +793,7 @@ class _DesktopTabState extends State<DesktopTab>
           labelGetter: labelGetter,
         ).paddingOnly(left: 10)
       ],
-    );
+    ));
   }
 }
 
@@ -881,8 +979,7 @@ Future<bool> closeConfirmDialog() async {
 
     return CustomAlertDialog(
       title: Row(children: [
-        const Icon(Icons.warning_amber_sharp,
-            color: Colors.redAccent, size: 28),
+        const LdIcon(LdIcons.alert, color: C.bad, size: 22),
         const SizedBox(width: 10),
         Text(translate("Warning")),
       ]),
@@ -925,9 +1022,7 @@ class _ListView extends StatelessWidget {
   final TabMenuBuilder? tabMenuBuilder;
   final LabelGetter? labelGetter;
   final double? maxLabelWidth;
-  final Color? selectedTabBackgroundColor;
-  final Color? selectedBorderColor;
-  final Color? unSelectedTabBackgroundColor;
+  final bool markSelected;
 
   Rx<DesktopTabState> get state => controller.state;
 
@@ -938,9 +1033,7 @@ class _ListView extends StatelessWidget {
     this.tabMenuBuilder,
     this.labelGetter,
     this.maxLabelWidth,
-    this.selectedTabBackgroundColor,
-    this.unSelectedTabBackgroundColor,
-    this.selectedBorderColor,
+    this.markSelected = false,
   });
 
   /// Check whether to show ListView
@@ -1008,10 +1101,8 @@ class _ListView extends StatelessWidget {
                     tabBuilder: tabBuilder,
                     tabMenuBuilder: tabMenuBuilder,
                     maxLabelWidth: maxLabelWidth,
-                    selectedTabBackgroundColor: selectedTabBackgroundColor ??
-                        MyTheme.tabbar(context).selectedTabBackgroundColor,
-                    unSelectedTabBackgroundColor: unSelectedTabBackgroundColor,
-                    selectedBorderColor: selectedBorderColor,
+                    markSelected: markSelected,
+                    isLast: index == state.value.tabs.length - 1,
                   ),
                 );
                 return GestureDetector(
@@ -1036,9 +1127,10 @@ class _Tab extends StatefulWidget {
   final TabBuilder? tabBuilder;
   final TabMenuBuilder? tabMenuBuilder;
   final double? maxLabelWidth;
-  final Color? selectedTabBackgroundColor;
-  final Color? unSelectedTabBackgroundColor;
-  final Color? selectedBorderColor;
+  final bool markSelected;
+
+  /// A separator after the last tab has nothing to separate it from.
+  final bool isLast;
 
   const _Tab({
     Key? key,
@@ -1055,9 +1147,8 @@ class _Tab extends StatefulWidget {
     required this.onClose,
     required this.onTap,
     this.maxLabelWidth,
-    this.selectedTabBackgroundColor,
-    this.unSelectedTabBackgroundColor,
-    this.selectedBorderColor,
+    this.markSelected = false,
+    this.isLast = false,
   }) : super(key: key);
 
   @override
@@ -1067,20 +1158,35 @@ class _Tab extends StatefulWidget {
 class _TabState extends State<_Tab> with RestorationMixin {
   final RestorableBool restoreHover = RestorableBool(false);
 
-  Widget _buildTabContent() {
+  /// The tab reads as the machine first: its platform, then its name. What
+  /// kind of session it is follows the name in the faint size, because inside
+  /// one window it is the same on every tab.
+  ///
+  /// When nothing is on record about the machine's platform the kind of
+  /// session leads instead, so the tab is never left without a glyph.
+  Widget _buildTabContent(bool isSelected, bool isHover) {
     bool showIcon =
         widget.selectedIcon != null && widget.unselectedIcon != null;
-    bool isSelected = widget.index == widget.selected;
 
-    final icon = Offstage(
-        offstage: !showIcon,
-        child: Icon(
-          isSelected ? widget.selectedIcon : widget.unselectedIcon,
-          size: _kIconSize,
-          color: isSelected
-              ? MyTheme.tabbar(context).selectedTabIconColor
-              : MyTheme.tabbar(context).unSelectedTabIconColor,
-        ).paddingOnly(right: 5));
+    // Nothing is read about the machine for a tab that was not given a glyph
+    // to begin with — the connection manager's tabs are keyed by client, not
+    // by peer, and asking about them would answer about somebody else.
+    final typeGlyph =
+        showIcon ? _tabTypeGlyph(widget.tabType, widget.tabInfoKey) : null;
+    final platformGlyph =
+        showIcon ? _peerPlatformGlyph(widget.tabInfoKey) : null;
+    final leadGlyph = platformGlyph ?? typeGlyph;
+    final glyphColor = TabSkin.glyphColor(isSelected, isHover);
+
+    final icon = leadGlyph == null
+        ? const SizedBox.shrink()
+        : LdIcon(leadGlyph, size: _kIconSize, color: glyphColor)
+            .paddingOnly(right: TabSkin.glyphGap);
+    final typeMark = platformGlyph == null || typeGlyph == null
+        ? const SizedBox.shrink()
+        : LdIcon(typeGlyph, size: TabSkin.typeGlyphSize, color: C.textFaint)
+            .paddingOnly(left: TabSkin.typeGlyphGap);
+
     final labelWidget = Obx(() {
       return ConstrainedBox(
           constraints: BoxConstraints(maxWidth: widget.maxLabelWidth ?? 200),
@@ -1092,10 +1198,7 @@ class _TabState extends State<_Tab> with RestorationMixin {
                   ? translate(widget.label.value)
                   : widget.label.value,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: isSelected
-                      ? MyTheme.tabbar(context).selectedTextColor
-                      : MyTheme.tabbar(context).unSelectedTextColor),
+              style: TabSkin.labelStyle(isSelected, isHover),
               overflow: TextOverflow.ellipsis,
             ),
           ));
@@ -1136,66 +1239,47 @@ class _TabState extends State<_Tab> with RestorationMixin {
           }
         }
       },
-      child: getWidgetWithBuilder(),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        getWidgetWithBuilder(),
+        typeMark,
+      ]),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     bool isSelected = widget.index == widget.selected;
-    bool showDivider =
-        widget.index != widget.selected - 1 && widget.index != widget.selected;
+    bool showDivider = widget.index != widget.selected - 1 &&
+        widget.index != widget.selected &&
+        !widget.isLast;
     RxBool hover = restoreHover.value.obs;
     return Ink(
       child: InkWell(
+        // The tab paints its own hover plane, on the console's ramp and with
+        // the console's timing. Material's overlay on top of it would be a
+        // second, paler answer to the same question.
+        hoverColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
         onHover: (value) {
           hover.value = value;
           restoreHover.value = value;
         },
         onTap: () => widget.onTap(),
-        child: Container(
-            decoration: isSelected && widget.selectedBorderColor != null
-                ? BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color: widget.selectedBorderColor!,
-                        width: 1,
-                      ),
-                    ),
-                  )
-                : null,
-            child: Container(
-              color: isSelected
-                  ? widget.selectedTabBackgroundColor
-                  : widget.unSelectedTabBackgroundColor,
-              child: Row(
-                children: [
-                  SizedBox(
-                      // _kTabBarHeight also displays normally
-                      height: _showTabBarBottomDivider(widget.tabType)
-                          ? _kTabBarHeight - 1
-                          : _kTabBarHeight,
-                      child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            _buildTabContent(),
-                            Obx((() => _CloseButton(
-                                  visible: hover.value && widget.closable,
-                                  tabSelected: isSelected,
-                                  onClose: () => widget.onClose(),
-                                )))
-                          ])).paddingOnly(left: 10, right: 5),
-                  Offstage(
-                    offstage: !showDivider,
-                    child: VerticalDivider(
-                      width: 1,
-                      indent: _kDividerIndent,
-                      endIndent: _kDividerIndent,
-                      color: MyTheme.tabbar(context).dividerColor,
-                    ),
-                  )
-                ],
+        child: Obx(() => TabSurface(
+              // _kTabBarHeight also displays normally
+              height: _showTabBarBottomDivider(widget.tabType)
+                  ? _kTabBarHeight - 1
+                  : _kTabBarHeight,
+              selected: isSelected,
+              hover: hover.value,
+              showIndicator: widget.markSelected,
+              showDivider: showDivider,
+              close: TabCloseButton(
+                visible: hover.value && widget.closable,
+                onClose: () => widget.onClose(),
               ),
+              child: _buildTabContent(isSelected, hover.value),
             )),
       ),
     );
@@ -1207,44 +1291,6 @@ class _TabState extends State<_Tab> with RestorationMixin {
   @override
   void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
     registerForRestoration(restoreHover, 'restoreHover');
-  }
-}
-
-class _CloseButton extends StatelessWidget {
-  final bool visible;
-  final bool tabSelected;
-  final Function onClose;
-
-  const _CloseButton({
-    Key? key,
-    required this.visible,
-    required this.tabSelected,
-    required this.onClose,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-            width: _kIconSize,
-            child: () {
-              if (visible) {
-                return InkWell(
-                  hoverColor: MyTheme.tabbar(context).closeHoverColor,
-                  customBorder: const CircleBorder(),
-                  onTap: () => onClose(),
-                  child: Icon(
-                    Icons.close,
-                    size: _kIconSize,
-                    color: tabSelected
-                        ? MyTheme.tabbar(context).selectedIconColor
-                        : MyTheme.tabbar(context).unSelectedIconColor,
-                  ),
-                );
-              } else {
-                return Offstage();
-              }
-            }())
-        .paddingOnly(left: 10);
   }
 }
 
@@ -1277,34 +1323,36 @@ class _ActionIconState extends State<ActionIcon> {
 
   @override
   Widget build(BuildContext context) {
+    final enabled = widget.onTap != null || widget.onTapDown != null;
+    final glyph = _kLdGlyphs[widget.icon];
+    // Big enough that a stroked glyph reads at this size, never so big that it
+    // touches the edge of the pad the hover raises under it.
+    final glyphSize = min(widget.iconSize + 2, widget.boxSize - 8);
     return Tooltip(
       message: widget.message != null ? translate(widget.message!) : "",
       waitDuration: const Duration(seconds: 1),
       child: InkWell(
-        hoverColor: widget.isClose
-            ? const Color.fromARGB(255, 196, 43, 28)
-            : MyTheme.tabbar(context).hoverColor,
+        // The pad below is the hover state; Material's own would sit on top of
+        // it in a colour from another product.
+        hoverColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
         onHover: (value) => hover.value = value,
         onTap: widget.onTap,
         onTapDown: widget.onTapDown,
-        child: SizedBox(
-          height: widget.boxSize,
-          width: widget.boxSize,
-          child: widget.onTap == null
-              ? Icon(
-                  widget.icon,
-                  color: Colors.grey,
-                  size: widget.iconSize,
-                )
-              : Obx(
-                  () => Icon(
-                    widget.icon,
-                    color: hover.value && widget.isClose
-                        ? Colors.white
-                        : MyTheme.tabbar(context).unSelectedIconColor,
-                    size: widget.iconSize,
-                  ),
-                ),
+        child: Obx(
+          () => WindowButtonSurface(
+            hover: enabled && hover.value,
+            boxSize: widget.boxSize,
+            // Closing a window is destructive, so it takes the one colour that
+            // means that — but only under the cursor. A red cross sitting in
+            // every title bar is a warning about nothing.
+            color: enabled ? C.textMuted : C.textFaint,
+            hoverColor: widget.isClose ? C.bad : C.text,
+            iconBuilder: (fg) => glyph == null
+                ? Icon(widget.icon, color: fg, size: widget.iconSize)
+                : LdIcon(glyph, size: glyphSize, color: fg),
+          ),
         ),
       ),
     );
@@ -1359,6 +1407,15 @@ class _TabDropDownButtonState extends State<_TabDropDownButton> {
         showMenu(
           context: context,
           position: position,
+          // The console's panel: its surface, its hairline, its radius. Left
+          // to Material this fell out of the title bar as a tinted sheet.
+          color: C.surface,
+          surfaceTintColor: Colors.transparent,
+          elevation: 10,
+          shape: RoundedRectangleBorder(
+            borderRadius: C.rounded,
+            side: const BorderSide(color: C.hairline),
+          ),
           items: sortedKeys.map((e) {
             var label = e;
             final tabInfo = widget.controller.state.value.tabs
@@ -1389,7 +1446,10 @@ class _TabDropDownButtonState extends State<_TabDropDownButton> {
                 child: Row(
                   children: [
                     Expanded(
-                      child: InkWell(child: Text(label)),
+                      child: InkWell(
+                          child: Text(label,
+                              overflow: TextOverflow.ellipsis,
+                              style: C.body())),
                     ),
                     Obx(
                       () {
@@ -1408,9 +1468,11 @@ class _TabDropDownButtonState extends State<_TabDropDownButton> {
                                       setState(() => btnHover.value = true),
                                   onExit: (event) =>
                                       setState(() => btnHover.value = false),
-                                  child: Icon(Icons.close,
-                                      color:
-                                          btnHover.value ? Colors.red : null)));
+                                  child: LdIcon(LdIcons.close,
+                                      size: 14,
+                                      color: btnHover.value
+                                          ? C.bad
+                                          : C.textFaint)));
                         } else {
                           return Offstage();
                         }
