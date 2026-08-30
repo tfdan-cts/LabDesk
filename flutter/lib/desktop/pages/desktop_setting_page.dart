@@ -13,6 +13,9 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
+import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
+import 'package:flutter_hbb/labdesk/theme/ld_icons.dart';
+import 'package:flutter_hbb/labdesk/theme/settings_skin.dart';
 import 'package:flutter_hbb/mobile/widgets/dialog.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/printer_model.dart';
@@ -30,16 +33,10 @@ import '../../common/widgets/login.dart';
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;
-const double _kCardFixedWidth = 540;
-const double _kCardLeftMargin = 15;
-const double _kContentHMargin = 15;
-const double _kContentHSubMargin = _kContentHMargin + 33;
-const double _kCheckBoxLeftMargin = 10;
-const double _kRadioLeftMargin = 10;
-const double _kListViewBottomMargin = 15;
-const double _kTitleFontSize = 20;
-const double _kContentFontSize = 15;
-const Color _accentColor = MyTheme.accent;
+// The page metrics that used to live here — a fixed 540-pixel card, a left
+// margin for cards, another for checkboxes, another for radios — are gone with
+// the cards. Spacing is the skin's now: SettingsSkin holds the one measure and
+// the one indent step, so a row cannot drift a few pixels from its neighbours.
 const String _kSettingPageControllerTag = 'settingPageController';
 const String _kSettingPageTabKeyTag = 'settingPageTabKey';
 
@@ -278,22 +275,29 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
   Widget build(BuildContext context) {
     super.build(context);
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.background,
+      backgroundColor: C.bg,
       body: _buildBlock(
         children: <Widget>[
-          SizedBox(
-            width: _kTabWidth,
-            child: Column(
-              children: [
-                _header(context),
-                Flexible(child: _listView(tabs: _settingTabs())),
-              ],
+          // The standalone settings window keeps its own rail, because nothing
+          // else navigates it. Inside the console this whole widget is never
+          // built: the console nests the page bodies in its own sidebar, so
+          // there is one rail on screen and not two.
+          ColoredBox(
+            color: C.chrome,
+            child: SizedBox(
+              width: _kTabWidth,
+              child: Column(
+                children: [
+                  _header(context),
+                  Flexible(child: _listView(tabs: _settingTabs())),
+                ],
+              ),
             ),
           ),
-          const VerticalDivider(width: 1),
+          const VerticalDivider(width: 1, thickness: 1, color: C.hairline),
           Expanded(
             child: Container(
-              color: Theme.of(context).scaffoldBackgroundColor,
+              color: C.bg,
               child: PageView(
                 controller: controller,
                 physics: NeverScrollableScrollPhysics(),
@@ -310,11 +314,7 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
     final settingsText = Text(
       translate('Settings'),
       textAlign: TextAlign.left,
-      style: const TextStyle(
-        color: _accentColor,
-        fontSize: _kTitleFontSize,
-        fontWeight: FontWeight.w400,
-      ),
+      style: C.h1(),
     );
     return Row(
       children: [
@@ -325,7 +325,7 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
                 Navigator.pop(context);
               }
             },
-            icon: Icon(Icons.arrow_back),
+            icon: const LdIcon(LdIcons.chevronLeft, size: 18, color: C.textMuted),
           ).marginOnly(left: 5),
         if (isWeb)
           SizedBox(
@@ -338,8 +338,8 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
         if (!isWeb)
           SizedBox(
             height: 62,
-            child: settingsText,
-          ).marginOnly(left: 20, top: 10),
+            child: Align(alignment: Alignment.centerLeft, child: settingsText),
+          ).marginOnly(left: 18, top: 10),
         const Spacer(),
       ],
     );
@@ -349,49 +349,104 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
     final scrollController = ScrollController();
     return ListView(
       controller: scrollController,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       children: tabs.map((tab) => _listItem(tab: tab)).toList(),
     );
   }
 
   Widget _listItem({required _TabInfo tab}) {
     return Obx(() {
-      bool selected = tab.key == selectedTab.value;
-      return SizedBox(
-        width: _kTabWidth,
-        height: _kTabHeight,
-        child: InkWell(
-          onTap: () {
-            if (selectedTab.value != tab.key) {
-              int index = DesktopSettingPage.tabKeys.indexOf(tab.key);
-              if (index == -1) {
-                return;
-              }
-              controller.jumpToPage(index);
+      final bool selected = tab.key == selectedTab.value;
+      return _RailItem(
+        label: translate(tab.label),
+        icon: selected ? tab.selected : tab.unselected,
+        selected: selected,
+        onTap: () {
+          if (selectedTab.value != tab.key) {
+            int index = DesktopSettingPage.tabKeys.indexOf(tab.key);
+            if (index == -1) {
+              return;
             }
-            selectedTab.value = tab.key;
-          },
+            controller.jumpToPage(index);
+          }
+          selectedTab.value = tab.key;
+        },
+      );
+    });
+  }
+}
+
+/// One entry in the standalone window's rail.
+///
+/// It wears the console's selection: a quiet accent wash and a brighter label,
+/// never a blue bar down the left edge.
+class _RailItem extends StatefulWidget {
+  const _RailItem({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+
+  /// Still a Material glyph. The console's own sidebar draws [LdIcons], but the
+  /// eight settings pages have no LabDesk glyphs of their own yet and inventing
+  /// them here would put two glyph systems in one set.
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  State<_RailItem> createState() => _RailItemState();
+}
+
+class _RailItemState extends State<_RailItem> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = widget.selected
+        ? C.text
+        : (_hover ? C.text : C.textMuted);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: C.fast,
+          height: _kTabHeight,
+          margin: const EdgeInsets.only(bottom: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 11),
+          decoration: BoxDecoration(
+            color: widget.selected
+                ? C.accent.withOpacity(0.14)
+                : (_hover ? C.surface : Colors.transparent),
+            borderRadius: C.roundedSm,
+          ),
           child: Row(children: [
-            Container(
-              width: 4,
-              height: _kTabHeight * 0.7,
-              color: selected ? _accentColor : null,
-            ),
-            Icon(
-              selected ? tab.selected : tab.unselected,
-              color: selected ? _accentColor : null,
-              size: 20,
-            ).marginOnly(left: 13, right: 10),
-            Text(
-              translate(tab.label),
-              style: TextStyle(
-                  color: selected ? _accentColor : null,
-                  fontWeight: FontWeight.w400,
-                  fontSize: _kContentFontSize),
+            Icon(widget.icon,
+                size: 18, color: widget.selected ? C.accent : fg),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Text(
+                widget.label,
+                overflow: TextOverflow.ellipsis,
+                // The heading face at body size, so the current page is set in
+                // a real semibold rather than in a weight the variable font
+                // was never asked for.
+                style: widget.selected
+                    ? C.h2().copyWith(fontSize: 13.5, color: fg)
+                    : C.body(color: fg),
+              ),
             ),
           ]),
         ),
-      );
-    });
+      ),
+    );
   }
 }
 
@@ -413,7 +468,7 @@ class _GeneralState extends State<_General> {
   @override
   Widget build(BuildContext context) {
     final scrollController = ScrollController();
-    return ListView(
+    return SettingsPage(
       controller: scrollController,
       children: [
         if (!isWeb) service(),
@@ -425,7 +480,7 @@ class _GeneralState extends State<_General> {
         if (!isWeb) WaylandCard(),
         other()
       ],
-    ).marginOnly(bottom: _kListViewBottomMargin);
+    );
   }
 
   Widget theme() {
@@ -646,10 +701,11 @@ class _GeneralState extends State<_General> {
           'Show on the minimized toolbar',
           kOptionAllowMonitorSwitchMinToolbar,
           isServer: false,
+          indent: SettingsSkin.indent,
           update: (_) {
             reloadAllWindows();
           },
-        ).marginOnly(left: _kCheckBoxLeftMargin * 3),
+        ),
       ));
     }
     return _Card(title: 'Other', children: children);
@@ -666,27 +722,22 @@ class _GeneralState extends State<_General> {
     }(), hasData: (data) {
       if (data is bool && data == true) {
         bool value = mainGetBoolOptionSync(kOptionAllowRemoveWallpaper);
-        return Row(
-          children: [
-            Flexible(
-              child: _OptionCheckBox(
-                context,
-                'Remove wallpaper during incoming sessions',
-                kOptionAllowRemoveWallpaper,
-                update: (bool v) {
-                  setState(() {});
-                },
-              ),
-            ),
-            if (value)
-              _CountDownButton(
-                text: 'Test',
-                second: 5,
-                onPressed: () {
-                  bind.mainTestWallpaper(second: 5);
-                },
-              )
-          ],
+        return _OptionCheckBox(
+          context,
+          'Remove wallpaper during incoming sessions',
+          kOptionAllowRemoveWallpaper,
+          update: (bool v) {
+            setState(() {});
+          },
+          extra: value
+              ? _CountDownButton(
+                  text: 'Test',
+                  second: 5,
+                  onPressed: () {
+                    bind.mainTestWallpaper(second: 5);
+                  },
+                )
+              : null,
         );
       }
 
@@ -720,15 +771,19 @@ class _GeneralState extends State<_General> {
     }
 
     builder(devices, currentDevice, setDevice) {
-      final child = ComboBox(
-        keys: devices,
-        values: devices,
-        initialKey: currentDevice,
-        onChanged: (key) async {
-          setDevice(key);
-          setState(() {});
-        },
-      ).marginOnly(left: _kContentHMargin);
+      final child = Padding(
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+        child: LdSelect(
+          keys: List<String>.from(devices),
+          values: List<String>.from(devices),
+          initialKey: currentDevice,
+          width: 340,
+          onChanged: (key) async {
+            setDevice(key);
+            setState(() {});
+          },
+        ),
+      );
       return _Card(title: 'Audio Input Device', children: [child]);
     }
 
@@ -765,69 +820,46 @@ class _GeneralState extends State<_General> {
               kOptionAllowAutoRecordOutgoing,
               isServer: false),
         if (showRootDir && !bind.isOutgoingOnly())
-          Row(
-            children: [
-              Text(
-                  '${translate(bind.isIncomingOnly() ? "Directory" : "Incoming")}:'),
-              Expanded(
-                child: GestureDetector(
-                    onTap: root_dir_exists
-                        ? () => launchUrl(Uri.file(root_dir))
-                        : null,
-                    child: Text(
-                      root_dir,
-                      softWrap: true,
-                      style: root_dir_exists
-                          ? const TextStyle(
-                              decoration: TextDecoration.underline)
-                          : null,
-                    )).marginOnly(left: 10),
-              ),
-            ],
-          ).marginOnly(left: _kContentHMargin),
+          SettingsRow(
+            label: translate(
+                bind.isIncomingOnly() ? "Directory" : "Incoming"),
+            controlAbove: true,
+            control: _directoryPath(root_dir, root_dir_exists),
+          ),
         if (!(showRootDir && bind.isIncomingOnly()))
-          Row(
-            children: [
-              Text(
-                  '${translate((showRootDir && !bind.isOutgoingOnly()) ? "Outgoing" : "Directory")}:'),
-              Expanded(
-                child: GestureDetector(
-                    onTap: user_dir_exists
-                        ? () => launchUrl(Uri.file(user_dir))
-                        : null,
-                    child: Text(
-                      user_dir,
-                      softWrap: true,
-                      style: user_dir_exists
-                          ? const TextStyle(
-                              decoration: TextDecoration.underline)
-                          : null,
-                    )).marginOnly(left: 10),
-              ),
-              ElevatedButton(
-                      onPressed: isOptionFixed(kOptionVideoSaveDirectory)
-                          ? null
-                          : () async {
-                              String? initialDirectory;
-                              if (await Directory.fromUri(
-                                      Uri.directory(user_dir))
-                                  .exists()) {
-                                initialDirectory = user_dir;
-                              }
-                              String? selectedDirectory =
-                                  await FilePicker.platform.getDirectoryPath(
-                                      initialDirectory: initialDirectory);
-                              if (selectedDirectory != null) {
-                                await bind.mainSetLocalOption(
-                                    key: kOptionVideoSaveDirectory,
-                                    value: selectedDirectory);
-                                setState(() {});
-                              }
-                            },
-                      child: Text(translate('Change')))
-                  .marginOnly(left: 5),
-            ],
-          ).marginOnly(left: _kContentHMargin),
+          SettingsRow(
+            label: translate((showRootDir && !bind.isOutgoingOnly())
+                ? "Outgoing"
+                : "Directory"),
+            controlAbove: true,
+            control: Row(
+              children: [
+                Expanded(child: _directoryPath(user_dir, user_dir_exists)),
+                const SizedBox(width: 12),
+                LdButton(
+                  label: translate('Change'),
+                  onPressed: isOptionFixed(kOptionVideoSaveDirectory)
+                      ? null
+                      : () async {
+                          String? initialDirectory;
+                          if (await Directory.fromUri(Uri.directory(user_dir))
+                              .exists()) {
+                            initialDirectory = user_dir;
+                          }
+                          String? selectedDirectory =
+                              await FilePicker.platform.getDirectoryPath(
+                                  initialDirectory: initialDirectory);
+                          if (selectedDirectory != null) {
+                            await bind.mainSetLocalOption(
+                                key: kOptionVideoSaveDirectory,
+                                value: selectedDirectory);
+                            setState(() {});
+                          }
+                        },
+                ),
+              ],
+            ),
+          ),
       ]);
     });
   }
@@ -849,18 +881,21 @@ class _GeneralState extends State<_General> {
         currentKey = defaultOptionLang;
       }
       final isOptFixed = isOptionFixed(kCommConfKeyLang);
-      return ComboBox(
-        keys: keys,
-        values: values,
-        initialKey: currentKey,
-        onChanged: (key) async {
-          await bind.mainSetLocalOption(key: kCommConfKeyLang, value: key);
-          if (isWeb) reloadCurrentWindow();
-          if (!isWeb) reloadAllWindows();
-          if (!isWeb) bind.mainChangeLanguage(lang: key);
-        },
-        enabled: !isOptFixed,
-      ).marginOnly(left: _kContentHMargin);
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+        child: LdSelect(
+          keys: keys,
+          values: values,
+          initialKey: currentKey,
+          onChanged: (key) async {
+            await bind.mainSetLocalOption(key: kCommConfKeyLang, value: key);
+            if (isWeb) reloadCurrentWindow();
+            if (!isWeb) reloadAllWindows();
+            if (!isWeb) bind.mainChangeLanguage(lang: key);
+          },
+          enabled: !isOptFixed,
+        ),
+      );
     });
   }
 }
@@ -887,27 +922,22 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return SingleChildScrollView(
-        controller: scrollController,
-        child: Column(
-          children: [
-            _lock(locked, 'Unlock Security Settings', () {
-              locked = false;
-              setState(() => {});
-            }),
-            preventMouseKeyBuilder(
-              block: locked,
-              child: Column(children: [
-                permissions(context),
-                password(context),
-                _Card(title: '2FA', children: [tfa()]),
-                if (!isChangeIdDisabled())
-                  _Card(title: 'ID', children: [changeId()]),
-                more(context),
-              ]),
-            ),
-          ],
-        )).marginOnly(bottom: _kListViewBottomMargin);
+    return SettingsPage(controller: scrollController, children: [
+      _lock(locked, 'Unlock Security Settings', () {
+        locked = false;
+        setState(() => {});
+      }),
+      preventMouseKeyBuilder(
+        block: locked,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          permissions(context),
+          password(context),
+          _Card(title: '2FA', children: [tfa()]),
+          if (!isChangeIdDisabled()) _Card(title: 'ID', children: [changeId()]),
+          more(context),
+        ]),
+      ),
+    ]);
   }
 
   Widget tfa() {
@@ -932,27 +962,15 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
         }
       }
 
-      final tfa = GestureDetector(
-        child: InkWell(
-          child: Obx(() => Row(
-                children: [
-                  Checkbox(
-                          value: has2fa.value,
-                          onChanged: enabled ? onChanged : null)
-                      .marginOnly(right: 5),
-                  Expanded(
-                      child: Text(
-                    translate('enable-2fa-title'),
-                    style:
-                        TextStyle(color: disabledTextColor(context, enabled)),
-                  ))
-                ],
-              )),
-        ),
-        onTap: () {
-          onChanged(!has2fa.value);
-        },
-      ).marginOnly(left: _kCheckBoxLeftMargin);
+      final tfa = Obx(() => SettingsRow(
+            label: translate('enable-2fa-title'),
+            enabled: enabled,
+            onTap: () => onChanged(!has2fa.value),
+            control: LdSwitch(
+              value: has2fa.value,
+              onChanged: enabled ? onChanged : null,
+            ),
+          ));
       if (!has2fa.value) {
         return tfa;
       }
@@ -972,56 +990,41 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
         }
       }
 
-      final bot = GestureDetector(
-        child: Tooltip(
-          waitDuration: Duration(milliseconds: 300),
-          message: translate("enable-bot-tip"),
-          child: InkWell(
-              child: Obx(() => Row(
-                    children: [
-                      Checkbox(
-                              value: hasBot.value,
-                              onChanged: enabled ? onChangedBot : null)
-                          .marginOnly(right: 5),
-                      Expanded(
-                          child: Text(
-                        translate('Telegram bot'),
-                        style: TextStyle(
-                            color: disabledTextColor(context, enabled)),
-                      ))
-                    ],
-                  ))),
-        ),
-        onTap: () {
-          onChangedBot(!hasBot.value);
-        },
-      ).marginOnly(left: _kCheckBoxLeftMargin + 30);
+      final bot = Tooltip(
+        waitDuration: Duration(milliseconds: 300),
+        message: translate("enable-bot-tip"),
+        child: Obx(() => SettingsRow(
+              label: translate('Telegram bot'),
+              enabled: enabled,
+              indent: SettingsSkin.indent,
+              onTap: () => onChangedBot(!hasBot.value),
+              control: LdSwitch(
+                value: hasBot.value,
+                onChanged: enabled ? onChangedBot : null,
+              ),
+            )),
+      );
 
-      final trust = Row(
+      final trust = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Flexible(
-            child: Tooltip(
-              waitDuration: Duration(milliseconds: 300),
-              message: translate("enable-trusted-devices-tip"),
-              child: _OptionCheckBox(context, "Enable trusted devices",
-                  kOptionEnableTrustedDevices,
-                  enabled: !locked, update: (v) {
-                setState(() {});
-              }),
-            ),
+          Tooltip(
+            waitDuration: Duration(milliseconds: 300),
+            message: translate("enable-trusted-devices-tip"),
+            child: _OptionCheckBox(context, "Enable trusted devices",
+                kOptionEnableTrustedDevices,
+                enabled: !locked, indent: SettingsSkin.indent, update: (v) {
+              setState(() {});
+            }),
           ),
           if (mainGetBoolOptionSync(kOptionEnableTrustedDevices))
-            ElevatedButton(
-                onPressed: locked
-                    ? null
-                    : () {
-                        manageTrustedDeviceDialog();
-                      },
-                child: Text(translate('Manage trusted devices')))
+            _SubButton('Manage trusted devices', manageTrustedDeviceDialog,
+                !locked),
         ],
-      ).marginOnly(left: 30);
+      );
 
       return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [tfa, bot, trust],
       );
     }
@@ -1069,24 +1072,28 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
       }
 
       return _Card(title: 'Permissions', children: [
-        ComboBox(
-            keys: [
-              defaultOptionAccessMode,
-              'full',
-              'view',
-            ],
-            values: [
-              translate('Custom'),
-              translate('Full Access'),
-              translate('Screen Share'),
-            ],
-            enabled: enabled && !isOptionFixed(kOptionAccessMode),
-            initialKey: initialKey,
-            onChanged: (mode) async {
-              await bind.mainSetOption(key: kOptionAccessMode, value: mode);
-              setState(() {});
-            }).marginOnly(left: _kContentHMargin),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
+          child: LdSelect(
+              keys: [
+                defaultOptionAccessMode,
+                'full',
+                'view',
+              ],
+              values: [
+                translate('Custom'),
+                translate('Full Access'),
+                translate('Screen Share'),
+              ],
+              enabled: enabled && !isOptionFixed(kOptionAccessMode),
+              initialKey: initialKey,
+              onChanged: (mode) async {
+                await bind.mainSetOption(key: kOptionAccessMode, value: mode);
+                setState(() {});
+              }),
+        ),
         Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _OptionCheckBox(
                 context, 'Enable keyboard/mouse', kOptionEnableKeyboard,
@@ -1196,52 +1203,30 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
                 }
               : null;
           List<Widget> lengthRadios = ['6', '8', '10']
-              .map((value) => GestureDetector(
-                    child: Row(
-                      children: [
-                        Radio(
-                            value: value,
-                            groupValue: model.temporaryPasswordLength,
-                            onChanged: onChanged),
-                        Text(
-                          value,
-                          style: TextStyle(
-                              color: disabledTextColor(
-                                  context, onChanged != null)),
-                        ),
-                      ],
-                    ).paddingOnly(right: 10),
-                    onTap: () => onChanged?.call(value),
+              .map((value) => _InlineRadio(
+                    label: value,
+                    selected: value == model.temporaryPasswordLength,
+                    onTap: onChanged == null ? null : () => onChanged(value),
                   ))
               .toList();
 
           final isOptFixedNumOTP =
               isOptionFixed(kOptionAllowNumericOneTimePassword);
           final isNumOPTChangable = !isOptFixedNumOTP && tmpEnabled && !locked;
-          final numericOneTimePassword = GestureDetector(
-            child: InkWell(
-                child: Row(
-              children: [
-                Checkbox(
-                        value: model.allowNumericOneTimePassword,
-                        onChanged: isNumOPTChangable
-                            ? (bool? v) {
-                                model.switchAllowNumericOneTimePassword();
-                              }
-                            : null)
-                    .marginOnly(right: 5),
-                Expanded(
-                    child: Text(
-                  translate('Numeric one-time password'),
-                  style: TextStyle(
-                      color: disabledTextColor(context, isNumOPTChangable)),
-                ))
-              ],
-            )),
+          final numericOneTimePassword = SettingsRow(
+            label: translate('Numeric one-time password'),
+            enabled: isNumOPTChangable,
+            indent: SettingsSkin.indent,
             onTap: isNumOPTChangable
                 ? () => model.switchAllowNumericOneTimePassword()
                 : null,
-          ).marginOnly(left: _kContentHSubMargin - 5);
+            control: LdSwitch(
+              value: model.allowNumericOneTimePassword,
+              onChanged: isNumOPTChangable
+                  ? (_) => model.switchAllowNumericOneTimePassword()
+                  : null,
+            ),
+          );
 
           final modeKeys = <String>[
             'password',
@@ -1261,19 +1246,24 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
 
           final isApproveModeFixed = isOptionFixed(kOptionApproveMode);
           return _Card(title: 'Password', children: [
-            ComboBox(
-              enabled: !locked && !isApproveModeFixed,
-              keys: modeKeys,
-              values: modeValues,
-              initialKey: modeInitialKey,
-              onChanged: (key) => model.setApproveMode(key),
-            ).marginOnly(left: _kContentHMargin),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
+              child: LdSelect(
+                enabled: !locked && !isApproveModeFixed,
+                keys: modeKeys,
+                values: modeValues,
+                initialKey: modeInitialKey,
+                width: 320,
+                onChanged: (key) => model.setApproveMode(key),
+              ),
+            ),
             if (usePassword) radios[0],
             if (usePassword)
               _SubLabeledWidget(
                   context,
                   'One-time password length',
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       ...lengthRadios,
                     ],
@@ -1321,21 +1311,15 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
     bool value = bind.mainIsShareRdp();
     return Offstage(
       offstage: !(isWindows && bind.mainIsInstalled()),
-      child: GestureDetector(
-          child: Row(
-            children: [
-              Checkbox(
-                      value: value,
-                      onChanged: enabled ? (_) => onChanged(!value) : null)
-                  .marginOnly(right: 5),
-              Expanded(
-                child: Text(translate('Enable RDP session sharing'),
-                    style:
-                        TextStyle(color: disabledTextColor(context, enabled))),
-              )
-            ],
-          ).marginOnly(left: _kCheckBoxLeftMargin),
-          onTap: enabled ? () => onChanged(!value) : null),
+      child: SettingsRow(
+        label: translate('Enable RDP session sharing'),
+        enabled: enabled,
+        onTap: enabled ? () => onChanged(!value) : null,
+        control: LdSwitch(
+          value: value,
+          onChanged: enabled ? (_) => onChanged(!value) : null,
+        ),
+      ),
     );
   }
 
@@ -1360,25 +1344,21 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
             child: _SubLabeledWidget(
               context,
               'Port',
-              Row(children: [
-                SizedBox(
-                  width: 95,
-                  child: TextField(
-                    controller: controller,
-                    enabled: enabled && !locked && !isOptFixed,
-                    onChanged: (_) => applyEnabled.value = true,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(
-                          r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
-                    ],
-                    decoration: const InputDecoration(
-                      hintText: '21118',
-                      contentPadding:
-                          EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                    ),
-                  ).workaroundFreezeLinuxMint().marginOnly(right: 15),
-                ),
-                Obx(() => ElevatedButton(
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                LdTextField(
+                  controller: controller,
+                  enabled: enabled && !locked && !isOptFixed,
+                  width: 100,
+                  hint: '21118',
+                  onChanged: (_) => applyEnabled.value = true,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(
+                        r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
+                  ],
+                ).workaroundFreezeLinuxMint(),
+                const SizedBox(width: 10),
+                Obx(() => LdButton(
+                      label: translate('Apply'),
                       onPressed: applyEnabled.value &&
                               enabled &&
                               !locked &&
@@ -1390,9 +1370,6 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
                                   value: controller.text);
                             }
                           : null,
-                      child: Text(
-                        translate('Apply'),
-                      ),
                     ))
               ]),
               enabled: enabled && !locked && !isOptFixed,
@@ -1419,39 +1396,24 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
       }
 
       final isOptFixed = isOptionFixed(kOptionWhitelist);
-      return GestureDetector(
-        child: Tooltip(
-          message: translate('whitelist_tip'),
-          child: Obx(() => Row(
-                children: [
-                  Checkbox(
-                          value: hasWhitelist.value,
-                          onChanged: enabled && !isOptFixed ? onChanged : null)
-                      .marginOnly(right: 5),
-                  Offstage(
-                    offstage: !hasWhitelist.value,
-                    child: MouseRegion(
-                      child: const Icon(Icons.warning_amber_rounded,
-                              color: Color.fromARGB(255, 255, 204, 0))
-                          .marginOnly(right: 5),
-                      cursor: SystemMouseCursors.click,
-                    ),
-                  ),
-                  Expanded(
-                      child: Text(
-                    translate('Use IP Whitelisting'),
-                    style:
-                        TextStyle(color: disabledTextColor(context, enabled)),
-                  ))
-                ],
-              )),
-        ),
-        onTap: enabled
-            ? () {
-                onChanged(!hasWhitelist.value);
-              }
-            : null,
-      ).marginOnly(left: _kCheckBoxLeftMargin);
+      return Tooltip(
+        message: translate('whitelist_tip'),
+        child: Obx(() => SettingsRow(
+              label: translate('Use IP Whitelisting'),
+              enabled: enabled,
+              // The list is holding machines out right now, which is worth a
+              // mark beside the label. Drawn in the console's one warning
+              // colour rather than in a borrowed amber.
+              leading: hasWhitelist.value
+                  ? const LdIcon(LdIcons.alert, size: 15, color: C.bad)
+                  : null,
+              onTap: enabled ? () => onChanged(!hasWhitelist.value) : null,
+              control: LdSwitch(
+                value: hasWhitelist.value,
+                onChanged: enabled && !isOptFixed ? onChanged : null,
+              ),
+            )),
+      );
     }
 
     return tmpWrapper();
@@ -1469,38 +1431,21 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
     }
 
     final isOptFixed = isOptionFixed(kOptionIdWhitelist);
-    return GestureDetector(
-      child: Tooltip(
-        message: translate('id_whitelist_tip'),
-        child: Obx(() => Row(
-              children: [
-                Checkbox(
-                        value: hasIdWhitelist.value,
-                        onChanged: enabled && !isOptFixed ? onChanged : null)
-                    .marginOnly(right: 5),
-                Offstage(
-                  offstage: !hasIdWhitelist.value,
-                  child: MouseRegion(
-                    child: const Icon(Icons.warning_amber_rounded,
-                            color: Color.fromARGB(255, 255, 204, 0))
-                        .marginOnly(right: 5),
-                    cursor: SystemMouseCursors.click,
-                  ),
-                ),
-                Expanded(
-                    child: Text(
-                  translate('Use ID whitelisting'),
-                  style: TextStyle(color: disabledTextColor(context, enabled)),
-                ))
-              ],
-            )),
-      ),
-      onTap: enabled
-          ? () {
-              onChanged(!hasIdWhitelist.value);
-            }
-          : null,
-    ).marginOnly(left: _kCheckBoxLeftMargin);
+    return Tooltip(
+      message: translate('id_whitelist_tip'),
+      child: Obx(() => SettingsRow(
+            label: translate('Use ID whitelisting'),
+            enabled: enabled,
+            leading: hasIdWhitelist.value
+                ? const LdIcon(LdIcons.alert, size: 15, color: C.bad)
+                : null,
+            onTap: enabled ? () => onChanged(!hasIdWhitelist.value) : null,
+            control: LdSwitch(
+              value: hasIdWhitelist.value,
+              onChanged: enabled && !isOptFixed ? onChanged : null,
+            ),
+          )),
+    );
   }
 
   Widget hide_cm(bool enabled) {
@@ -1517,29 +1462,18 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
           }
 
           return Tooltip(
-              message: enableHideCm ? "" : translate('hide_cm_tip'),
-              child: GestureDetector(
-                onTap:
-                    enableHideCm ? () => onHideCmChanged(!model.hideCm) : null,
-                child: Row(
-                  children: [
-                    Checkbox(
-                            value: model.hideCm,
-                            onChanged: enabled && enableHideCm
-                                ? onHideCmChanged
-                                : null)
-                        .marginOnly(right: 5),
-                    Expanded(
-                      child: Text(
-                        translate('Hide connection management window'),
-                        style: TextStyle(
-                            color: disabledTextColor(
-                                context, enabled && enableHideCm)),
-                      ),
-                    ),
-                  ],
-                ),
-              ));
+            message: enableHideCm ? "" : translate('hide_cm_tip'),
+            child: SettingsRow(
+              label: translate('Hide connection management window'),
+              enabled: enabled && enableHideCm,
+              onTap: enableHideCm ? () => onHideCmChanged(!model.hideCm) : null,
+              control: LdSwitch(
+                value: model.hideCm,
+                onChanged:
+                    enabled && enableHideCm ? onHideCmChanged : null,
+              ),
+            ),
+          );
         }));
   }
 
@@ -1563,25 +1497,21 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
           child: _SubLabeledWidget(
             context,
             'Timeout in minutes',
-            Row(children: [
-              SizedBox(
-                width: 95,
-                child: TextField(
-                  controller: controller,
-                  enabled: enabled && !locked && !isOptFixed,
-                  onChanged: (_) => applyEnabled.value = true,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(
-                        r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
-                  ],
-                  decoration: const InputDecoration(
-                    hintText: '10',
-                    contentPadding:
-                        EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                  ),
-                ).workaroundFreezeLinuxMint().marginOnly(right: 15),
-              ),
-              Obx(() => ElevatedButton(
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              LdTextField(
+                controller: controller,
+                enabled: enabled && !locked && !isOptFixed,
+                width: 100,
+                hint: '10',
+                onChanged: (_) => applyEnabled.value = true,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(
+                      r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
+                ],
+              ).workaroundFreezeLinuxMint(),
+              const SizedBox(width: 10),
+              Obx(() => LdButton(
+                    label: translate('Apply'),
                     onPressed:
                         applyEnabled.value && enabled && !locked && !isOptFixed
                             ? () async {
@@ -1591,9 +1521,6 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
                                     value: controller.text);
                               }
                             : null,
-                    child: Text(
-                      translate('Apply'),
-                    ),
                   ))
             ]),
             enabled: enabled && !locked && !isOptFixed,
@@ -1615,26 +1542,15 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
     }
 
     final isOptFixed = isOptionFixed(kOptionWhitelist);
-    return GestureDetector(
-      child: Obx(() => Row(
-            children: [
-              Checkbox(
-                      value: unlockPin.isNotEmpty,
-                      onChanged: enabled && !isOptFixed ? onChanged : null)
-                  .marginOnly(right: 5),
-              Expanded(
-                  child: Text(
-                translate('Unlock with PIN'),
-                style: TextStyle(color: disabledTextColor(context, enabled)),
-              ))
-            ],
-          )),
-      onTap: enabled
-          ? () {
-              onChanged(!unlockPin.isNotEmpty);
-            }
-          : null,
-    ).marginOnly(left: _kCheckBoxLeftMargin);
+    return Obx(() => SettingsRow(
+          label: translate('Unlock with PIN'),
+          enabled: enabled,
+          onTap: enabled ? () => onChanged(!unlockPin.isNotEmpty) : null,
+          control: LdSwitch(
+            value: unlockPin.isNotEmpty,
+            onChanged: enabled && !isOptFixed ? onChanged : null,
+          ),
+        ));
   }
 }
 
@@ -1655,19 +1571,19 @@ class _NetworkState extends State<_Network> with AutomaticKeepAliveClientMixin {
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return ListView(controller: scrollController, children: [
+    return SettingsPage(controller: scrollController, children: [
       _lock(locked, 'Unlock Network Settings', () {
         locked = false;
         setState(() => {});
       }),
       preventMouseKeyBuilder(
         block: locked,
-        child: Column(children: [
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           network(context),
           serverProfiles(context),
         ]),
       ),
-    ]).marginOnly(bottom: _kListViewBottomMargin);
+    ]);
   }
 
   Widget serverProfiles(BuildContext context) {
@@ -1692,70 +1608,45 @@ class _NetworkState extends State<_Network> with AutomaticKeepAliveClientMixin {
       return Offstage();
     }
 
-    // Helper function to create network setting ListTiles
-    Widget listTile({
-      required IconData icon,
+    // One network setting. A row that opens a dialog says so with a chevron;
+    // a row that carries a switch carries nothing else. The Material ListTile
+    // these replaced brought a blue leading icon, a ripple and a 56-pixel
+    // leading well to a page with no icons in it.
+    Widget row({
       required String title,
       VoidCallback? onTap,
       Widget? trailing,
-      bool showTooltip = false,
       String tooltipMessage = '',
     }) {
-      final titleWidget = showTooltip
-          ? Row(
-              children: [
-                Tooltip(
-                  waitDuration: Duration(milliseconds: 1000),
-                  message: translate(tooltipMessage),
-                  child: Row(
-                    children: [
-                      Text(
-                        translate(title),
-                        style: TextStyle(fontSize: _kContentFontSize),
-                      ),
-                      SizedBox(width: 5),
-                      Icon(
-                        Icons.help_outline,
-                        size: 14,
-                        color: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.color
-                            ?.withOpacity(0.7),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            )
-          : Text(
-              translate(title),
-              style: TextStyle(fontSize: _kContentFontSize),
-            );
-
-      return ListTile(
-        leading: Icon(icon, color: _accentColor),
-        title: titleWidget,
+      final r = SettingsRow(
+        label: translate(title),
         enabled: !locked,
-        onTap: onTap,
-        trailing: trailing,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 16),
-        minLeadingWidth: 0,
-        horizontalTitleGap: 10,
+        onTap: locked ? null : onTap,
+        control: trailing ??
+            (onTap == null
+                ? null
+                : LdIcon(LdIcons.chevronRight,
+                    size: 15, color: locked ? C.textFaint : C.textMuted)),
+      );
+      if (tooltipMessage.isEmpty) return r;
+      return Tooltip(
+        waitDuration: Duration(milliseconds: 1000),
+        message: translate(tooltipMessage),
+        child: r,
       );
     }
 
-    Widget switchWidget(IconData icon, String title, String tooltipMessage,
-            String optionKey) =>
-        listTile(
-          icon: icon,
+    Widget switchWidget(String title, String tooltipMessage, String optionKey) =>
+        row(
           title: title,
-          showTooltip: true,
           tooltipMessage: tooltipMessage,
-          trailing: Switch(
+          onTap: locked || isOptionFixed(optionKey)
+              ? null
+              : () {
+                  mainSetBoolOption(optionKey, !mainGetBoolOptionSync(optionKey));
+                  setState(() {});
+                },
+          trailing: LdSwitch(
             value: mainGetBoolOptionSync(optionKey),
             onChanged: locked || isOptionFixed(optionKey)
                 ? null
@@ -1768,81 +1659,73 @@ class _NetworkState extends State<_Network> with AutomaticKeepAliveClientMixin {
 
     final outgoingOnly = bind.isOutgoingOnly();
 
-    final divider = const Divider(height: 1, indent: 16, endIndent: 16);
     return _Card(
       title: 'Network',
       children: [
-        Container(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (!hideServer)
-                listTile(
-                  icon: Icons.dns_outlined,
-                  title: 'ID/Relay Server',
-                  onTap: () => showServerSettings(gFFI.dialogManager, setState),
-                ),
-              if (!hideProxy && !hideServer) divider,
-              if (!hideProxy)
-                listTile(
-                  icon: Icons.network_ping_outlined,
-                  title: 'Socks5/Http(s) Proxy',
-                  onTap: changeSocks5Proxy,
-                ),
-              if (!hideWebSocket && (!hideServer || !hideProxy)) divider,
-              if (!hideWebSocket)
-                switchWidget(
-                    Icons.web_asset_outlined,
-                    'Use WebSocket',
-                    '${translate('websocket_tip')}\n\n${translate('server-oss-not-support-tip')}',
-                    kOptionAllowWebSocket),
-              if (!isWeb)
-                futureBuilder(
-                  future: bind.mainIsUsingPublicServer(),
-                  hasData: (isUsingPublicServer) {
-                    if (isUsingPublicServer) {
-                      return Offstage();
-                    } else {
-                      return Column(
-                        children: [
-                          if (!hideServer || !hideProxy || !hideWebSocket)
-                            divider,
-                          switchWidget(
-                              Icons.no_encryption_outlined,
-                              'Allow insecure TLS fallback',
-                              'allow-insecure-tls-fallback-tip',
-                              kOptionAllowInsecureTLSFallback),
-                          if (!outgoingOnly) divider,
-                          if (!outgoingOnly)
-                            listTile(
-                              icon: Icons.lan_outlined,
-                              title: 'Disable UDP',
-                              showTooltip: true,
-                              tooltipMessage:
-                                  '${translate('disable-udp-tip')}\n\n${translate('server-oss-not-support-tip')}',
-                              trailing: Switch(
-                                value: bind.mainGetOptionSync(
-                                        key: kOptionDisableUdp) ==
-                                    'Y',
-                                onChanged:
-                                    locked || isOptionFixed(kOptionDisableUdp)
-                                        ? null
-                                        : (value) async {
-                                            await bind.mainSetOption(
-                                                key: kOptionDisableUdp,
-                                                value: value ? 'Y' : 'N');
-                                            setState(() {});
-                                          },
-                              ),
-                            ),
-                        ],
-                      );
-                    }
-                  },
-                ),
-            ],
+        if (!hideServer)
+          row(
+            title: 'ID/Relay Server',
+            onTap: () => showServerSettings(gFFI.dialogManager, setState),
           ),
-        ),
+        if (!hideProxy)
+          row(
+            title: 'Socks5/Http(s) Proxy',
+            onTap: changeSocks5Proxy,
+          ),
+        if (!hideWebSocket)
+          switchWidget(
+              'Use WebSocket',
+              '${translate('websocket_tip')}\n\n${translate('server-oss-not-support-tip')}',
+              kOptionAllowWebSocket),
+        if (!isWeb)
+          futureBuilder(
+            future: bind.mainIsUsingPublicServer(),
+            hasData: (isUsingPublicServer) {
+              if (isUsingPublicServer) {
+                return Offstage();
+              } else {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    switchWidget(
+                        'Allow insecure TLS fallback',
+                        'allow-insecure-tls-fallback-tip',
+                        kOptionAllowInsecureTLSFallback),
+                    if (!outgoingOnly)
+                      row(
+                        title: 'Disable UDP',
+                        tooltipMessage:
+                            '${translate('disable-udp-tip')}\n\n${translate('server-oss-not-support-tip')}',
+                        onTap: locked || isOptionFixed(kOptionDisableUdp)
+                            ? null
+                            : () async {
+                                final on = bind.mainGetOptionSync(
+                                        key: kOptionDisableUdp) ==
+                                    'Y';
+                                await bind.mainSetOption(
+                                    key: kOptionDisableUdp,
+                                    value: on ? 'N' : 'Y');
+                                setState(() {});
+                              },
+                        trailing: LdSwitch(
+                          value:
+                              bind.mainGetOptionSync(key: kOptionDisableUdp) ==
+                                  'Y',
+                          onChanged: locked || isOptionFixed(kOptionDisableUdp)
+                              ? null
+                              : (value) async {
+                                  await bind.mainSetOption(
+                                      key: kOptionDisableUdp,
+                                      value: value ? 'Y' : 'N');
+                                  setState(() {});
+                                },
+                        ),
+                      ),
+                  ],
+                );
+              }
+            },
+          ),
       ],
     );
   }
@@ -1859,7 +1742,7 @@ class _DisplayState extends State<_Display> {
   @override
   Widget build(BuildContext context) {
     final scrollController = ScrollController();
-    return ListView(controller: scrollController, children: [
+    return SettingsPage(controller: scrollController, children: [
       viewStyle(context),
       scrollStyle(context),
       imageQuality(context),
@@ -1867,7 +1750,7 @@ class _DisplayState extends State<_Display> {
       if (isDesktop) trackpadSpeed(context),
       if (!isWeb) privacyModeImpl(context),
       other(context),
-    ]).marginOnly(bottom: _kListViewBottomMargin);
+    ]);
   }
 
   Widget viewStyle(BuildContext context) {
@@ -2101,19 +1984,14 @@ class _DisplayState extends State<_Display> {
       setState(() {});
     }
 
-    return GestureDetector(
-        child: Row(
-          children: [
-            Checkbox(
-                    value: value,
-                    onChanged: isOptFixed ? null : (_) => onChanged(!value))
-                .marginOnly(right: 5),
-            Expanded(
-              child: Text(translate(label)),
-            )
-          ],
-        ).marginOnly(left: _kCheckBoxLeftMargin),
-        onTap: isOptFixed ? null : () => onChanged(!value));
+    return SettingsRow(
+      label: translate(label),
+      onTap: isOptFixed ? null : () => onChanged(!value),
+      control: LdSwitch(
+        value: value,
+        onChanged: isOptFixed ? null : (_) => onChanged(!value),
+      ),
+    );
   }
 
   Widget other(BuildContext context) {
@@ -2134,12 +2012,12 @@ class _AccountState extends State<_Account> {
   @override
   Widget build(BuildContext context) {
     final scrollController = ScrollController();
-    return ListView(
+    return SettingsPage(
       controller: scrollController,
       children: [
-        _Card(title: 'Account', children: [accountAction(), useInfo()]),
+        _Card(title: 'Account', children: [useInfo(), accountAction()]),
       ],
-    ).marginOnly(bottom: _kListViewBottomMargin);
+    );
   }
 
   Widget accountAction() {
@@ -2151,17 +2029,22 @@ class _AccountState extends State<_Account> {
               gFFI.userModel.userName.value.isEmpty
                   ? loginDialog()
                   : logOutConfirmDialog()
-            }));
+            },
+        kind: gFFI.userModel.userName.value.isEmpty
+            ? LdButtonKind.primary
+            : LdButtonKind.quiet));
   }
 
   Widget useInfo() {
     return Obx(() => Offstage(
           offstage: gFFI.userModel.userName.value.isEmpty,
           child: Container(
-            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.fromLTRB(8, 4, 8, 10),
+            padding: const EdgeInsets.all(13),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(10),
+              color: C.surface,
+              borderRadius: C.rounded,
+              border: Border.all(color: C.hairline),
             ),
             child: Builder(builder: (context) {
               final avatarWidget = _buildUserAvatar();
@@ -2177,22 +2060,15 @@ class _AccountState extends State<_Account> {
                           gFFI.userModel.displayNameOrUserName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: C.h2(),
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 3),
                         SelectionArea(
                           child: Text(
                             '@${gFFI.userModel.userName.value}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color:
-                                  Theme.of(context).textTheme.bodySmall?.color,
-                            ),
+                            style: C.data(size: 12, color: C.textMuted),
                           ),
                         ),
                       ],
@@ -2202,7 +2078,7 @@ class _AccountState extends State<_Account> {
               );
             }),
           ),
-        )).marginOnly(left: 18, top: 16);
+        ));
   }
 
   Widget? _buildUserAvatar() {
@@ -2250,19 +2126,10 @@ class _CheckboxState extends State<_Checkbox> {
       });
     }
 
-    return GestureDetector(
-      child: Row(
-        children: [
-          Checkbox(
-            value: value,
-            onChanged: (_) => onChanged(!value),
-          ).marginOnly(right: 5),
-          Expanded(
-            child: Text(translate(widget.label)),
-          )
-        ],
-      ).marginOnly(left: _kCheckBoxLeftMargin),
+    return SettingsRow(
+      label: translate(widget.label),
       onTap: () => onChanged(!value),
+      control: LdSwitch(value: value, onChanged: onChanged),
     );
   }
 }
@@ -2282,10 +2149,10 @@ class _PluginState extends State<_Plugin> {
     return ChangeNotifierProvider.value(
       value: pluginManager,
       child: Consumer<PluginManager>(builder: (context, model, child) {
-        return ListView(
+        return SettingsPage(
           controller: scrollController,
           children: model.plugins.map((entry) => pluginCard(entry)).toList(),
-        ).marginOnly(bottom: _kListViewBottomMargin);
+        );
       }),
     );
   }
@@ -2323,10 +2190,10 @@ class __PrinterState extends State<_Printer> {
   @override
   Widget build(BuildContext context) {
     final scrollController = ScrollController();
-    return ListView(controller: scrollController, children: [
+    return SettingsPage(controller: scrollController, children: [
       outgoing(context),
       incoming(context),
-    ]).marginOnly(bottom: _kListViewBottomMargin);
+    ]);
   }
 
   Widget outgoing(BuildContext context) {
@@ -2334,18 +2201,12 @@ class __PrinterState extends State<_Printer> {
         bind.mainGetCommonSync(key: 'is-support-printer-driver') == 'true';
 
     Widget tipOsNotSupported() {
-      return Align(
-        alignment: Alignment.topLeft,
-        child: Text(translate('printer-os-requirement-tip')),
-      ).marginOnly(left: _kCardLeftMargin);
+      return SettingsNote(translate('printer-os-requirement-tip'));
     }
 
     Widget tipClientNotInstalled() {
-      return Align(
-        alignment: Alignment.topLeft,
-        child:
-            Text(translate('printer-requires-installed-{$appName}-client-tip')),
-      ).marginOnly(left: _kCardLeftMargin);
+      return SettingsNote(
+          translate('printer-requires-installed-{$appName}-client-tip'));
     }
 
     Widget tipPrinterNotInstalled() {
@@ -2358,39 +2219,26 @@ class __PrinterState extends State<_Printer> {
           failedMsg.value = evt['msg'] as String;
         }
       }, replace: true);
-      return Column(children: [
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Obx(
           () => failedMsg.value.isNotEmpty
               ? Offstage()
-              : Align(
-                  alignment: Alignment.topLeft,
-                  child: Text(translate('printer-{$appName}-not-installed-tip'))
-                      .marginOnly(bottom: 10.0),
-                ),
+              : SettingsNote(translate('printer-{$appName}-not-installed-tip')),
         ),
         Obx(
           () => failedMsg.value.isEmpty
               ? Offstage()
-              : Align(
-                  alignment: Alignment.topLeft,
-                  child: Text(failedMsg.value,
-                          style: DefaultTextStyle.of(context)
-                              .style
-                              .copyWith(color: Colors.red))
-                      .marginOnly(bottom: 10.0)),
+              : SettingsNote(failedMsg.value, tone: C.bad),
         ),
         _Button('Install {$appName} Printer', () {
           failedMsg.value = '';
           bind.mainSetCommon(key: 'install-printer', value: '');
-        })
-      ]).marginOnly(left: _kCardLeftMargin, bottom: 2.0);
+        }, kind: LdButtonKind.primary)
+      ]);
     }
 
     Widget tipReady() {
-      return Align(
-        alignment: Alignment.topLeft,
-        child: Text(translate('printer-{$appName}-ready-tip')),
-      ).marginOnly(left: _kCardLeftMargin);
+      return SettingsNote(translate('printer-{$appName}-ready-tip'));
     }
 
     final installed = bind.mainIsInstalled();
@@ -2437,17 +2285,21 @@ class __PrinterState extends State<_Printer> {
           label: 'use-the-selected-printer-tip',
           onChanged: onRadioChanged),
       if (printerOptions.printerNames.isNotEmpty)
-        ComboBox(
-          initialKey: printerOptions.printerName,
-          keys: printerOptions.printerNames,
-          values: printerOptions.printerNames,
-          enabled: printerOptions.action == kValuePrinterIncomingJobSelected,
-          onChanged: (value) async {
-            await bind.mainSetLocalOption(
-                key: kKeyPrinterSelected, value: value);
-            setState(() {});
-          },
-        ).marginOnly(left: 10),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(SettingsSkin.indent + 8, 4, 8, 6),
+          child: LdSelect(
+            initialKey: printerOptions.printerName,
+            keys: printerOptions.printerNames,
+            values: printerOptions.printerNames,
+            width: 320,
+            enabled: printerOptions.action == kValuePrinterIncomingJobSelected,
+            onChanged: (value) async {
+              await bind.mainSetLocalOption(
+                  key: kKeyPrinterSelected, value: value);
+              setState(() {});
+            },
+          ),
+        ),
       _OptionCheckBox(
         context,
         'auto-print-tip',
@@ -2488,77 +2340,51 @@ class _AboutState extends State<_About> {
       final buildDate = data['buildDate'].toString();
       final fingerprint = data['fingerprint'].toString();
       final myId = data['myId'].toString();
-      const linkStyle = TextStyle(decoration: TextDecoration.underline);
       final scrollController = ScrollController();
-      return SingleChildScrollView(
-        controller: scrollController,
-        child: _Card(title: translate('About RustDesk'), children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(
-                height: 8.0,
+      return SettingsPage(controller: scrollController, children: [
+        _Card(title: translate('About RustDesk'), children: [
+          // The build, read back. Every one of these is an identifier or a
+          // measured value, so every one of them is set in the data face and
+          // stays selectable — a fingerprint that cannot be copied is a
+          // fingerprint nobody can check.
+          SettingsFact(label: translate('Version'), value: version),
+          SettingsFact(label: translate('Build Date'), value: buildDate),
+          if (!isWeb)
+            SettingsFact(label: translate('Fingerprint'), value: fingerprint),
+          SettingsFact(label: translate('ID'), value: myId),
+          const SizedBox(height: 6),
+          SettingsLink(
+            label: translate('Privacy Statement'),
+            onTap: () => launchUrlString('https://rustdesk.com/privacy.html'),
+          ),
+          SettingsLink(
+            label: translate('Website'),
+            onTap: () => launchUrlString('https://rustdesk.com'),
+          ),
+          Container(
+            margin: const EdgeInsets.fromLTRB(8, 14, 8, 0),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: C.surface,
+              borderRadius: C.rounded,
+              border: Border.all(color: C.hairline),
+            ),
+            child: SelectionArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Copyright © ${DateTime.now().toString().substring(0, 4)} LabDesk contributors. Based on RustDesk, © Purslane Tech Pte. Ltd.\n$license',
+                    style: C.small(color: C.textMuted),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(translate('Slogan_tip'), style: C.body()),
+                ],
               ),
-              SelectionArea(
-                  child: Text('${translate('Version')}: $version')
-                      .marginSymmetric(vertical: 4.0)),
-              SelectionArea(
-                  child: Text('${translate('Build Date')}: $buildDate')
-                      .marginSymmetric(vertical: 4.0)),
-              if (!isWeb)
-                SelectionArea(
-                    child: Text('${translate('Fingerprint')}: $fingerprint')
-                        .marginSymmetric(vertical: 4.0)),
-              SelectionArea(
-                  child: Text('${translate('ID')}: $myId')
-                      .marginSymmetric(vertical: 4.0)),
-              InkWell(
-                  onTap: () {
-                    launchUrlString('https://rustdesk.com/privacy.html');
-                  },
-                  child: Text(
-                    translate('Privacy Statement'),
-                    style: linkStyle,
-                  ).marginSymmetric(vertical: 4.0)),
-              InkWell(
-                  onTap: () {
-                    launchUrlString('https://rustdesk.com');
-                  },
-                  child: Text(
-                    translate('Website'),
-                    style: linkStyle,
-                  ).marginSymmetric(vertical: 4.0)),
-              Container(
-                decoration: const BoxDecoration(color: Color(0xFF2c8cff)),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 24, horizontal: 8),
-                child: SelectionArea(
-                    child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Copyright © ${DateTime.now().toString().substring(0, 4)} LabDesk contributors. Based on RustDesk, © Purslane Tech Pte. Ltd.\n$license',
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          Text(
-                            translate('Slogan_tip'),
-                            style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white),
-                          )
-                        ],
-                      ),
-                    ),
-                  ],
-                )),
-              ).marginSymmetric(vertical: 4.0)
-            ],
-          ).marginOnly(left: _kContentHMargin)
+            ),
+          ),
         ]),
-      );
+      ]);
     });
   }
 }
@@ -2567,40 +2393,20 @@ class _AboutState extends State<_About> {
 
 //#region components
 
+/// One named set of settings.
+///
+/// Was a Material [Card] holding a fixed 540-pixel column, which is how a page
+/// of twelve permissions became twelve framed panels floating on a page. A
+/// group is now a rule, a title and its rows, at the page's own measure.
 // ignore: non_constant_identifier_names
 Widget _Card(
     {required String title,
     required List<Widget> children,
     List<Widget>? title_suffix}) {
-  return Row(
-    children: [
-      Flexible(
-        child: SizedBox(
-          width: _kCardFixedWidth,
-          child: Card(
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                        child: Text(
-                      translate(title),
-                      textAlign: TextAlign.start,
-                      style: const TextStyle(
-                        fontSize: _kTitleFontSize,
-                      ),
-                    )),
-                    ...?title_suffix
-                  ],
-                ).marginOnly(left: _kContentHMargin, top: 10, bottom: 10),
-                ...children
-                    .map((e) => e.marginOnly(top: 4, right: _kContentHMargin)),
-              ],
-            ).marginOnly(bottom: 10),
-          ).marginOnly(left: _kCardLeftMargin, top: 15),
-        ),
-      ),
-    ],
+  return SettingsGroup(
+    title: translate(title),
+    trailing: title_suffix,
+    children: children,
   );
 }
 
@@ -2617,6 +2423,8 @@ Widget _OptionCheckBox(
   bool isServer = true,
   bool Function()? optGetter,
   Future<void> Function(String, bool)? optSetter,
+  double indent = 0,
+  Widget? extra,
 }) {
   getOpt() => optGetter != null
       ? optGetter()
@@ -2648,32 +2456,26 @@ Widget _OptionCheckBox(
     enabled = false;
   }
 
-  return GestureDetector(
-    child: Obx(
-      () => Row(
-        children: [
-          Checkbox(
-                  value: ref.value,
-                  onChanged: enabled && !isOptFixed ? onChanged : null)
-              .marginOnly(right: 5),
-          Offstage(
-            offstage: !ref.value || checkedIcon == null,
-            child: checkedIcon?.marginOnly(right: 5),
-          ),
-          Expanded(
-              child: Text(
-            translate(label),
-            style: TextStyle(color: disabledTextColor(context, enabled)),
-          ))
-        ],
-      ),
-    ).marginOnly(left: _kCheckBoxLeftMargin),
-    onTap: enabled && !isOptFixed
-        ? () {
-            onChanged(!ref.value);
-          }
-        : null,
-  );
+  return Obx(() {
+    final on = enabled && !isOptFixed;
+    return SettingsRow(
+      label: translate(label),
+      enabled: enabled,
+      indent: indent,
+      leading: ref.value ? checkedIcon : null,
+      onTap: on ? () => onChanged(!ref.value) : null,
+      // The toggle is always the last thing in the row, so a column of options
+      // has one column of switches. Anything else the option carries — the
+      // wallpaper test — sits before it.
+      control: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (extra != null) ...[extra, const SizedBox(width: 12)],
+        LdSwitch(
+          value: ref.value,
+          onChanged: on ? onChanged : null,
+        ),
+      ]),
+    );
+  });
 }
 
 // ignore: non_constant_identifier_names
@@ -2690,21 +2492,11 @@ Widget _Radio<T>(BuildContext context,
           }
         }
       : null;
-  return GestureDetector(
-    child: Row(
-      children: [
-        Radio<T>(value: value, groupValue: groupValue, onChanged: onChange2),
-        Expanded(
-          child: Text(translate(label),
-                  overflow: autoNewLine ? null : TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: _kContentFontSize,
-                      color: disabledTextColor(context, onChange2 != null)))
-              .marginOnly(left: 5),
-        ),
-      ],
-    ).marginOnly(left: _kRadioLeftMargin),
-    onTap: () => onChange2?.call(value),
+  return LdRadioRow(
+    label: translate(label),
+    selected: value == groupValue,
+    softWrap: autoNewLine,
+    onTap: onChange2 == null ? null : () => onChange2(value),
   );
 }
 
@@ -2815,10 +2607,7 @@ class _WaylandCardState extends State<WaylandCard> {
       'Clear Wayland screen selection',
       showConfirmMsgBox,
       tip: 'clear_Wayland_screen_selection_tip',
-      style: ButtonStyle(
-        backgroundColor: MaterialStateProperty.all<Color>(
-            Theme.of(context).colorScheme.error.withOpacity(0.75)),
-      ),
+      kind: LdButtonKind.danger,
     );
   }
 
@@ -2842,81 +2631,122 @@ class _WaylandCardState extends State<WaylandCard> {
                   onPressed: () => gFFI.dialogManager.dismissAll())
             ]);
 
-    return Column(children: [
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Obx(
         () => _clearShortcutsInhibitorFailedMsg.value.isEmpty
             ? Offstage()
-            : Align(
-                alignment: Alignment.topLeft,
-                child: Text(_clearShortcutsInhibitorFailedMsg.value,
-                        style: DefaultTextStyle.of(context)
-                            .style
-                            .copyWith(color: Colors.red))
-                    .marginOnly(bottom: 10.0)),
+            : SettingsNote(_clearShortcutsInhibitorFailedMsg.value, tone: C.bad),
       ),
       _Button(
         'Reset keyboard shortcuts permission',
         showConfirmMsgBox,
         tip: 'clear-shortcuts-inhibitor-permission-tip',
-        style: ButtonStyle(
-          backgroundColor: MaterialStateProperty.all<Color>(
-              Theme.of(context).colorScheme.error.withOpacity(0.75)),
-        ),
+        kind: LdButtonKind.danger,
       ),
     ]);
   }
 }
 
+/// One option of a radio group that reads across rather than down.
+///
+/// The one-time password length is three numbers; stacking them would give
+/// three lines to a choice that is the width of a word.
+class _InlineRadio extends StatelessWidget {
+  const _InlineRadio({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return MouseRegion(
+      cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.only(right: 16),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            LdRadioMark(selected: selected, enabled: enabled),
+            const SizedBox(width: 8),
+            Text(label,
+                style: C.body(color: SettingsSkin.label(enabled))),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// A directory on this machine, which is data, so it is set in the data face.
+/// It opens the folder when there is one to open and says nothing when there
+/// is not, exactly as before.
+Widget _directoryPath(String dir, bool exists) {
+  final text = Text(
+    dir,
+    softWrap: true,
+    style: C.data(size: 12, color: exists ? C.text : C.textFaint),
+  );
+  if (!exists) return text;
+  return MouseRegion(
+    cursor: SystemMouseCursors.click,
+    child: GestureDetector(
+      onTap: () => launchUrl(Uri.file(dir)),
+      child: text,
+    ),
+  );
+}
+
 // ignore: non_constant_identifier_names
 Widget _Button(String label, Function() onPressed,
-    {bool enabled = true, String? tip, ButtonStyle? style}) {
-  var button = ElevatedButton(
-    onPressed: enabled ? onPressed : null,
-    child: Text(
-      translate(label),
-    ).marginSymmetric(horizontal: 15),
-    style: style,
+    {bool enabled = true,
+    String? tip,
+    LdButtonKind kind = LdButtonKind.quiet}) {
+  return Align(
+    alignment: Alignment.centerLeft,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+      child: LdButton(
+        label: translate(label),
+        kind: kind,
+        tooltip: tip == null ? null : translate(tip),
+        onPressed: enabled ? onPressed : null,
+      ),
+    ),
   );
-  StatefulWidget child;
-  if (tip == null) {
-    child = button;
-  } else {
-    child = Tooltip(message: translate(tip), child: button);
-  }
-  return Row(children: [
-    child,
-  ]).marginOnly(left: _kContentHMargin);
 }
 
 // ignore: non_constant_identifier_names
 Widget _SubButton(String label, Function() onPressed, [bool enabled = true]) {
-  return Row(
-    children: [
-      ElevatedButton(
+  return Align(
+    alignment: Alignment.centerLeft,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(SettingsSkin.indent + 8, 6, 8, 6),
+      child: LdButton(
+        label: translate(label),
         onPressed: enabled ? onPressed : null,
-        child: Text(
-          translate(label),
-        ).marginSymmetric(horizontal: 15),
       ),
-    ],
-  ).marginOnly(left: _kContentHSubMargin);
+    ),
+  );
 }
 
+/// A control that belongs to the row above it: the port behind direct access,
+/// the length of a one-time password.
 // ignore: non_constant_identifier_names
 Widget _SubLabeledWidget(BuildContext context, String label, Widget child,
     {bool enabled = true}) {
-  return Row(
-    children: [
-      Text(
-        '${translate(label)}: ',
-        style: TextStyle(color: disabledTextColor(context, enabled)),
-      ),
-      SizedBox(
-        width: 10,
-      ),
-      child,
-    ],
-  ).marginOnly(left: _kContentHSubMargin);
+  return SettingsRow(
+    label: translate(label),
+    enabled: enabled,
+    indent: SettingsSkin.indent,
+    control: child,
+  );
 }
 
 Widget _lock(
@@ -2925,42 +2755,22 @@ Widget _lock(
   Function() onUnlock,
 ) {
   return Offstage(
-      offstage: !locked,
-      child: Row(
-        children: [
-          Flexible(
-            child: SizedBox(
-              width: _kCardFixedWidth,
-              child: Card(
-                child: ElevatedButton(
-                  child: SizedBox(
-                      height: 25,
-                      child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              Icons.security_sharp,
-                              size: 20,
-                            ),
-                            Text(translate(label)).marginOnly(left: 5),
-                          ]).marginSymmetric(vertical: 2)),
-                  onPressed: () async {
-                    final unlockPin = bind.mainGetUnlockPin();
-                    if (unlockPin.isEmpty || isUnlockPinDisabled()) {
-                      bool checked = await callMainCheckSuperUserPermission();
-                      if (checked) {
-                        onUnlock();
-                      }
-                    } else {
-                      checkUnlockPinDialog(unlockPin, onUnlock);
-                    }
-                  },
-                ).marginSymmetric(horizontal: 2, vertical: 4),
-              ).marginOnly(left: _kCardLeftMargin),
-            ).marginOnly(top: 10),
-          ),
-        ],
-      ));
+    offstage: !locked,
+    child: SettingsLockBar(
+      label: translate(label),
+      onUnlock: () async {
+        final unlockPin = bind.mainGetUnlockPin();
+        if (unlockPin.isEmpty || isUnlockPinDisabled()) {
+          bool checked = await callMainCheckSuperUserPermission();
+          if (checked) {
+            onUnlock();
+          }
+        } else {
+          checkUnlockPinDialog(unlockPin, onUnlock);
+        }
+      },
+    ),
+  );
 }
 
 _LabeledTextField(
@@ -3053,7 +2863,8 @@ class _CountDownButtonState extends State<_CountDownButton> {
 
   @override
   Widget build(BuildContext context) {
-    return ElevatedButton(
+    return LdButton(
+      label: _isButtonDisabled ? '$_countdownSeconds s' : translate(widget.text),
       onPressed: _isButtonDisabled
           ? null
           : () {
@@ -3064,9 +2875,6 @@ class _CountDownButtonState extends State<_CountDownButton> {
               });
               _startCountdownTimer();
             },
-      child: Text(
-        _isButtonDisabled ? '$_countdownSeconds s' : translate(widget.text),
-      ),
     );
   }
 }

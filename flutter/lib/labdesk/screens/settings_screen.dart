@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../theme/console_theme.dart';
+import '../theme/ld_icons.dart';
+import '../theme/settings_skin.dart';
 
 /// A server profile as the settings screen renders it.
 ///
@@ -57,7 +59,7 @@ class SettingsScreen extends StatelessWidget {
             subtitle: 'Named ID, relay, API and key sets. Switching applies immediately.',
             padding: EdgeInsets.zero,
             actions: [
-              GhostButton(label: 'Add profile', icon: Icons.add_rounded, onPressed: onAdd),
+              GhostButton(label: 'Add profile', glyph: LdIcons.add, onPressed: onAdd),
             ],
             child: profiles.isEmpty
                 ? const _NoProfiles()
@@ -152,11 +154,12 @@ class _ProfileTileState extends State<_ProfileTile> {
               : (_hover ? C.surfaceHi : Colors.transparent),
           child: Row(
             children: [
+              // One profile is in force at a time, so the mark is the console's
+              // radio mark and not a tick: a tick says "done", and what this
+              // says is "this is the one".
               SizedBox(
-                width: 22,
-                child: p.active
-                    ? Icon(Icons.check_circle_rounded, size: 15, color: C.accent)
-                    : Icon(Icons.radio_button_unchecked_rounded, size: 15, color: C.textFaint),
+                width: 24,
+                child: LdRadioMark(selected: p.active),
               ),
               Expanded(
                 child: Column(
@@ -183,9 +186,9 @@ class _ProfileTileState extends State<_ProfileTile> {
                 ),
               ),
               if (p.hasKey)
-                Tooltip(
+                const Tooltip(
                   message: 'A server key is set for this profile',
-                  child: Icon(Icons.key_rounded, size: 14, color: C.textFaint),
+                  child: LdIcon(LdIcons.key, size: 15, color: C.textFaint),
                 ),
               const SizedBox(width: 14),
               AnimatedOpacity(
@@ -193,13 +196,16 @@ class _ProfileTileState extends State<_ProfileTile> {
                 opacity: _hover ? 1 : 0,
                 child: Row(
                   children: [
-                    GhostButton(
+                    LdButton(
                       label: 'Edit',
                       onPressed: _hover ? () => widget.onEdit?.call(p) : null,
                     ),
                     const SizedBox(width: 8),
-                    GhostButton(
+                    // Deleting a profile takes a set of servers away with it,
+                    // which is why this one is the page's only red control.
+                    LdButton(
                       label: 'Delete',
+                      kind: LdButtonKind.danger,
                       onPressed: _hover && !p.active ? () => widget.onDelete?.call(p) : null,
                     ),
                   ],
