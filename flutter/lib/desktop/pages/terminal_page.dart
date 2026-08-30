@@ -3,10 +3,47 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
+import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/terminal_model.dart';
 import 'package:xterm/xterm.dart';
 import 'terminal_connection_manager.dart';
+
+/// The terminal, in the console's colours.
+///
+/// xterm ships VS Code's dark palette, which is a fine palette and belongs to
+/// somebody else's product — it was the last surface in a LabDesk session still
+/// painting `#1E1E1E`. The sixteen slots keep their meanings, because a shell
+/// that colours its own output has every right to expect them: what changes is
+/// the temperature, so the plane behind the text is the console's plane, the
+/// bright/normal pairs sit on the console's ramp, and the two colours the
+/// product has already given a meaning to — [C.bad] for failure, [C.ok] for
+/// success — are the ones a build log will actually use for those.
+const _ldTerminalTheme = TerminalTheme(
+  cursor: C.accent,
+  selection: Color(0x598B7DF7),
+  foreground: C.text,
+  background: C.bg,
+  black: C.surface,
+  red: C.bad,
+  green: C.ok,
+  yellow: Color(0xFFE3B341),
+  blue: Color(0xFF6E9BF5),
+  magenta: C.accent,
+  cyan: Color(0xFF4DC4D6),
+  white: Color(0xFFC9C9D4),
+  brightBlack: C.textFaint,
+  brightRed: Color(0xFFFF8E8E),
+  brightGreen: Color(0xFF6BE0AC),
+  brightYellow: Color(0xFFF2CC60),
+  brightBlue: Color(0xFF8FB6FF),
+  brightMagenta: Color(0xFFA79CF9),
+  brightCyan: Color(0xFF7ADCE9),
+  brightWhite: Color(0xFFEDEDF2),
+  searchHitBackground: C.accentDim,
+  searchHitBackgroundCurrent: C.accent,
+  searchHitForeground: C.bg,
+);
 
 class TerminalPage extends StatefulWidget {
   TerminalPage({
@@ -193,7 +230,7 @@ class _TerminalPageState extends State<TerminalPage>
   Widget build(BuildContext context) {
     super.build(context);
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: C.bg,
       body: LayoutBuilder(
         builder: (context, constraints) {
           final heightPx = constraints.maxHeight;
@@ -201,6 +238,9 @@ class _TerminalPageState extends State<TerminalPage>
             _terminalModel.terminal,
             controller: _terminalModel.terminalController,
             focusNode: _terminalFocusNode,
+            theme: _ldTerminalTheme,
+            // The console's data face, which is what a terminal is.
+            textStyle: const TerminalStyle(fontFamily: 'JetBrainsMono'),
             // Note: autofocus is not used here because focus is managed manually
             // via _onTabStateChanged() to handle tab switching properly.
             backgroundOpacity: 0.7,

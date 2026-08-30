@@ -1,12 +1,14 @@
 // original cm window in Sciter version.
 
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common/widgets/audio_input.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
+import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
+import 'package:flutter_hbb/labdesk/theme/ld_icons.dart';
+import 'package:flutter_hbb/labdesk/theme/session_toolbar_skin.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:flutter_hbb/models/cm_file_model.dart';
 import 'package:flutter_hbb/utils/platform_channel.dart';
@@ -14,7 +16,6 @@ import 'package:get/get.dart';
 import 'package:percent_indicator/linear_percent_indicator.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../common.dart';
 import '../../common/widgets/chat_page.dart';
@@ -82,18 +83,22 @@ class _DesktopServerPageState extends State<DesktopServerPage>
       ],
       child: Consumer<ServerModel>(
         builder: (context, serverModel, child) {
-          final body = Scaffold(
-            backgroundColor: Theme.of(context).colorScheme.background,
-            body: ConnectionManager(),
+          // One theme over the whole window, so the chat page and the file
+          // transfer log it hosts speak the console's dialect too.
+          final body = Theme(
+            data: cmThemeData(context),
+            child: Scaffold(
+              backgroundColor: C.bg,
+              body: ConnectionManager(),
+            ),
           );
           return isLinux
               ? buildVirtualWindowFrame(context, body)
               : workaroundWindowBorder(
                   context,
                   Container(
-                    decoration: BoxDecoration(
-                        border:
-                            Border.all(color: MyTheme.color(context).border!)),
+                    decoration:
+                        BoxDecoration(border: Border.all(color: C.hairline)),
                     child: body,
                   ));
         },
@@ -178,7 +183,16 @@ class ConnectionManagerState extends State<ConnectionManager>
               buildTitleBar(),
               Expanded(
                 child: Center(
-                  child: Text(translate("Waiting")),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const LdIcon(LdIcons.connect,
+                          size: 26, color: C.textFaint),
+                      const SizedBox(height: 12),
+                      Text(translate("Waiting"),
+                          style: C.small(color: C.textMuted)),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -193,7 +207,7 @@ class ConnectionManagerState extends State<ConnectionManager>
               showClose: true,
               onWindowCloseButton: handleWindowCloseButton,
               controller: serverModel.tabController,
-              selectedBorderColor: MyTheme.accent,
+              selectedBorderColor: C.accent,
               maxLabelWidth: 100,
               tail: null, //buildScrollJumper(),
               tabBuilder: (key, icon, label, themeConf) {
@@ -255,10 +269,7 @@ class ConnectionManagerState extends State<ConnectionManager>
                                     mask: false,
                                   ))),
                   ]);
-                  return Container(
-                    color: Theme.of(context).scaffoldBackgroundColor,
-                    child: row,
-                  );
+                  return Container(color: C.bg, child: row);
                 },
               ),
             ),
@@ -283,8 +294,9 @@ class ConnectionManagerState extends State<ConnectionManager>
   }
 
   Widget buildTitleBar() {
-    return SizedBox(
+    return Container(
       height: kDesktopRemoteTabBarHeight,
+      color: C.chrome,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -294,9 +306,7 @@ class ConnectionManagerState extends State<ConnectionManager>
               onPanStart: (d) {
                 windowManager.startDragging();
               },
-              child: Container(
-                color: Theme.of(context).colorScheme.background,
-              ),
+              child: Container(color: C.chrome),
             ),
           ),
           const SizedBox(
@@ -347,26 +357,29 @@ class ConnectionManagerState extends State<ConnectionManager>
 
 Widget buildConnectionCard(Client client) {
   return Consumer<ServerModel>(
-    builder: (context, value, child) => Column(
-      mainAxisAlignment: MainAxisAlignment.start,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      key: ValueKey(client.id),
-      children: [
-        _CmHeader(client: client),
-        client.type_() == ClientType.file ||
-                client.type_() == ClientType.portForward ||
-                client.type_() == ClientType.terminal ||
-                client.disconnected
-            ? Offstage()
-            : _PrivilegeBoard(client: client),
-        Expanded(
-          child: Align(
-            alignment: Alignment.bottomCenter,
-            child: _CmControlPanel(client: client),
-          ),
-        )
-      ],
-    ).paddingSymmetric(vertical: 4.0, horizontal: 8.0),
+    builder: (context, value, child) {
+      final showPermissions = !(client.type_() == ClientType.file ||
+          client.type_() == ClientType.portForward ||
+          client.type_() == ClientType.terminal ||
+          client.disconnected);
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        key: ValueKey(client.id),
+        children: [
+          _CmHeader(client: client),
+          const SizedBox(height: CmSkin.pad),
+          // The permission set takes the height that is left, so the two
+          // answers stay pinned to the foot of the window whatever the set
+          // contains. Without a set there is nothing to give the height to.
+          if (showPermissions)
+            Expanded(child: _PrivilegeBoard(client: client))
+          else
+            const Spacer(),
+          _CmControlPanel(client: client),
+        ],
+      ).paddingSymmetric(vertical: CmSkin.pad, horizontal: CmSkin.pad);
+    },
   );
 }
 
@@ -376,27 +389,43 @@ class _AppIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: EdgeInsets.symmetric(horizontal: 4.0),
-      child: loadIcon(30),
+      margin: EdgeInsets.symmetric(horizontal: 8.0),
+      // The strip is 28 pixels tall; the mark has to live inside it.
+      child: loadIcon(16),
     );
   }
 }
 
-class _CloseButton extends StatelessWidget {
+/// The window's own close, wearing the same pad as every other control in
+/// every other session window.
+class _CloseButton extends StatefulWidget {
   const _CloseButton({Key? key}) : super(key: key);
 
   @override
+  State<_CloseButton> createState() => _CloseButtonState();
+}
+
+class _CloseButtonState extends State<_CloseButton> {
+  bool hover = false;
+
+  @override
   Widget build(BuildContext context) {
-    return IconButton(
-      onPressed: () {
-        windowManager.close();
-      },
-      icon: const Icon(
-        IconFont.close,
-        size: 18,
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => hover = true),
+      onExit: (_) => setState(() => hover = false),
+      child: GestureDetector(
+        onTap: () {
+          windowManager.close();
+        },
+        child: WindowButtonSurface(
+          hover: hover,
+          boxSize: kDesktopRemoteTabBarHeight,
+          color: C.textMuted,
+          hoverColor: C.bad,
+          iconBuilder: (fg) => LdIcon(LdIcons.close, size: 13, color: fg),
+        ),
       ),
-      splashColor: Colors.transparent,
-      hoverColor: Colors.transparent,
     );
   }
 }
@@ -437,131 +466,80 @@ class _CmHeaderState extends State<_CmHeader>
     super.dispose();
   }
 
+  /// What is being asked for, in words. Every string here already exists in the
+  /// product's dictionary; the window says which kind of access is on the table
+  /// rather than leaving the person to infer it from a tab icon.
+  ({String glyph, String label}) get _kind {
+    switch (client.type_()) {
+      case ClientType.terminal:
+        return (glyph: LdIcons.terminal, label: translate("Terminal"));
+      case ClientType.file:
+        return (glyph: LdIcons.fileTransfer, label: translate("Transfer file"));
+      case ClientType.camera:
+        return (glyph: LdIcons.camera, label: translate("View camera"));
+      case ClientType.portForward:
+        return (
+          glyph: LdIcons.portForward,
+          label: "Port Forward: ${client.portForward}"
+        );
+      case ClientType.remote:
+        return (
+          glyph: LdIcons.display,
+          label: translate("Control Remote Desktop")
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10.0),
-        gradient: LinearGradient(
-          begin: Alignment.topRight,
-          end: Alignment.bottomLeft,
-          colors: [
-            Color(0xff00bfe1),
-            Color(0xff0071ff),
-          ],
-        ),
-      ),
-      margin: EdgeInsets.symmetric(horizontal: 5.0, vertical: 10.0),
-      padding: EdgeInsets.only(
-        top: 10.0,
-        bottom: 10.0,
-        left: 10.0,
-        right: 5.0,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildClientAvatar().marginOnly(right: 10.0),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.start,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                FittedBox(
-                    child: Text(
-                  client.name,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 20,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  maxLines: 1,
-                )),
-                FittedBox(
-                  child: Text(
-                    "(${client.peerId})",
-                    style: TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                ),
-                if (client.type_() == ClientType.terminal)
-                  FittedBox(
-                    child: Text(
-                      translate("Terminal"),
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                  ),
-                if (client.type_() == ClientType.file)
-                  FittedBox(
-                    child: Text(
-                      translate("Transfer file"),
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                  ),
-                if (client.type_() == ClientType.camera)
-                  FittedBox(
-                    child: Text(
-                      translate("View camera"),
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                  ),
-                if (client.portForward.isNotEmpty)
-                  FittedBox(
-                    child: Text(
-                      "Port Forward: ${client.portForward}",
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                  ),
-                SizedBox(height: 10.0),
-                FittedBox(
-                    child: Row(
-                  children: [
-                    Text(
-                      client.authorized
-                          ? client.disconnected
-                              ? translate("Disconnected")
-                              : translate("Connected")
-                          : "${translate("Request access to your device")}...",
-                      style: TextStyle(color: Colors.white),
-                    ).marginOnly(right: 8.0),
-                    if (client.authorized)
-                      Obx(
-                        () => Text(
-                          formatDurationToTime(
-                            Duration(seconds: _time.value),
-                          ),
-                          style: TextStyle(color: Colors.white),
-                        ),
-                      )
-                  ],
-                ))
-              ],
-            ),
-          ),
-          Offstage(
-            offstage: !client.authorized ||
-                (client.type_() != ClientType.remote &&
-                    client.type_() != ClientType.file &&
-                    client.type_() != ClientType.camera),
-            child: IconButton(
-              onPressed: () => checkClickTime(client.id, () {
-                if (client.type_() == ClientType.file) {
-                  gFFI.chatModel.toggleCMFilePage();
-                } else {
-                  gFFI.chatModel
-                      .toggleCMChatPage(MessageKey(client.peerId, client.id));
-                }
-              }),
-              icon: SvgPicture.asset(client.type_() == ClientType.file
-                  ? 'assets/file_transfer.svg'
-                  : 'assets/chat2.svg'),
-              splashRadius: kDesktopIconButtonSplashRadius,
-            ),
-          )
-        ],
-      ),
-    );
+    final kind = _kind;
+    // Built outside the Obx: the panel below rebuilds once a second to move the
+    // clock, and the avatar is the one thing in it that decodes an image.
+    final avatar = _buildClientAvatar();
+    final showAction = client.authorized &&
+        (client.type_() == ClientType.remote ||
+            client.type_() == ClientType.file ||
+            client.type_() == ClientType.camera);
+    return Obx(() {
+      // Read unconditionally: an Obx that touches nothing observable throws,
+      // and this one is only allowed to show the figure once the session is up.
+      final seconds = _time.value;
+      return CmIdentity(
+        name: client.name,
+        peerId: client.peerId,
+        kindGlyph: kind.glyph,
+        kindLabel: kind.label,
+        pending: !client.authorized,
+        statusColor: client.authorized
+            ? (client.disconnected ? C.idle : C.ok)
+            : C.accent,
+        statusLabel: client.authorized
+            ? client.disconnected
+                ? translate("Disconnected")
+                : translate("Connected")
+            : "${translate("Request access to your device")}...",
+        elapsed: client.authorized
+            ? formatDurationToTime(Duration(seconds: seconds))
+            : null,
+        avatar: avatar,
+        action: !showAction
+            ? null
+            : _HeaderAction(
+                glyph: client.type_() == ClientType.file
+                    ? LdIcons.fileTransfer
+                    : LdIcons.chat,
+                onTap: () => checkClickTime(client.id, () {
+                  if (client.type_() == ClientType.file) {
+                    gFFI.chatModel.toggleCMFilePage();
+                  } else {
+                    gFFI.chatModel
+                        .toggleCMChatPage(MessageKey(client.peerId, client.id));
+                  }
+                }),
+              ),
+      );
+    });
   }
 
   @override
@@ -570,28 +548,50 @@ class _CmHeaderState extends State<_CmHeader>
   Widget _buildClientAvatar() {
     return buildAvatarWidget(
           avatar: client.avatar,
-          size: 70,
-          borderRadius: 15,
+          size: 40,
+          borderRadius: C.radius,
           fallback: _buildInitialAvatar(),
         ) ??
         _buildInitialAvatar();
   }
 
-  Widget _buildInitialAvatar() {
-    return Container(
-      width: 70,
-      height: 70,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: str2color(client.name),
-        borderRadius: BorderRadius.circular(15.0),
-      ),
-      child: Text(
-        client.name.isNotEmpty ? client.name[0] : '?',
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-          fontSize: 55,
+  /// The peer's initial. The colour the app derives from the name is spent on
+  /// the block's edge and its letter rather than on a filled tile, so a caller
+  /// whose name happens to hash to something loud cannot out-shout the consent
+  /// question sitting above it.
+  Widget _buildInitialAvatar() =>
+      CmInitialAvatar(name: client.name, color: str2color(client.name));
+}
+
+/// The header's one control: open the chat, or the file-transfer log.
+class _HeaderAction extends StatefulWidget {
+  const _HeaderAction({Key? key, required this.glyph, required this.onTap})
+      : super(key: key);
+
+  final String glyph;
+  final VoidCallback onTap;
+
+  @override
+  State<_HeaderAction> createState() => _HeaderActionState();
+}
+
+class _HeaderActionState extends State<_HeaderAction> {
+  bool hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => hover = true),
+      onExit: (_) => setState(() => hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: WindowButtonSurface(
+          hover: hover,
+          boxSize: 30,
+          color: C.textMuted,
+          hoverColor: C.text,
+          iconBuilder: (fg) => LdIcon(widget.glyph, size: 16, color: fg),
         ),
       ),
     );
@@ -609,84 +609,40 @@ class _PrivilegeBoard extends StatefulWidget {
 
 class _PrivilegeBoardState extends State<_PrivilegeBoard> {
   late final client = widget.client;
-  Widget buildPermissionIcon(bool enabled, IconData iconData,
-      Function(bool)? onTap, String tooltipText,
+
+  /// One permission, as a labelled row that states its own condition.
+  ///
+  /// The tooltip keeps the exact message the tile carried, because it is the
+  /// one place the full label survives when the row has to elide it.
+  Widget buildPermissionIcon(bool enabled, String glyph, Function(bool)? onTap,
+      String tooltipText,
       {required bool canModify}) {
-    return Tooltip(
-      message: "$tooltipText: ${enabled ? "ON" : "OFF"}",
-      waitDuration: Duration.zero,
-      child: Container(
-        decoration: BoxDecoration(
-          color: enabled
-              ? (canModify ? MyTheme.accent : MyTheme.accent.withOpacity(0.6))
-              : Colors.grey[700],
-          borderRadius: BorderRadius.circular(10.0),
-        ),
-        padding: EdgeInsets.all(8.0),
-        child: InkWell(
-          onTap: canModify
-              ? () =>
-                  checkClickTime(widget.client.id, () => onTap?.call(!enabled))
-              : null,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              Expanded(
-                child: Icon(
-                  iconData,
-                  color: Colors.white,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return CmPermissionRow(
+      glyph: glyph,
+      label: tooltipText,
+      tooltip: "$tooltipText: ${enabled ? "ON" : "OFF"}",
+      on: enabled,
+      canModify: canModify,
+      onChanged: (value) =>
+          checkClickTime(widget.client.id, () => onTap?.call(value)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final crossAxisCount = 4;
-    final spacing = 10.0;
     final canModifyPermission =
         bind.mainGetBuildinOption(key: kOptionEnablePermChangeInAcceptWindow) !=
             'N';
     return Container(
       width: double.infinity,
-      height: 160.0,
-      margin: EdgeInsets.all(5.0),
-      padding: EdgeInsets.all(5.0),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10.0),
-        color: Theme.of(context).colorScheme.background,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            spreadRadius: 1,
-            blurRadius: 1,
-            offset: Offset(0, 1.5),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Text(
-            translate("Permissions"),
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ).marginOnly(left: 4.0, bottom: 8.0),
-          Expanded(
-            child: GridView.count(
-              crossAxisCount: crossAxisCount,
-              padding: EdgeInsets.symmetric(horizontal: spacing),
-              mainAxisSpacing: spacing,
-              crossAxisSpacing: spacing,
-              children: client.type_() == ClientType.camera
+      child: CmPermissionPanel(
+        label: translate("Permissions"),
+        locked: !canModifyPermission,
+        rows: client.type_() == ClientType.camera
                   ? [
                       buildPermissionIcon(
                         client.audio,
-                        Icons.volume_up_rounded,
+                        LdIcons.audio,
                         (enabled) {
                           bind.cmSwitchPermission(
                               connId: client.id,
@@ -701,7 +657,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                       ),
                       buildPermissionIcon(
                         client.recording,
-                        Icons.videocam_rounded,
+                        LdIcons.record,
                         (enabled) {
                           bind.cmSwitchPermission(
                               connId: client.id,
@@ -718,7 +674,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                   : [
                       buildPermissionIcon(
                         client.keyboard,
-                        Icons.keyboard,
+                        LdIcons.keyboard,
                         (enabled) {
                           bind.cmSwitchPermission(
                               connId: client.id,
@@ -733,7 +689,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                       ),
                       buildPermissionIcon(
                         client.clipboard,
-                        Icons.assignment_rounded,
+                        LdIcons.clipboard,
                         (enabled) {
                           bind.cmSwitchPermission(
                               connId: client.id,
@@ -748,7 +704,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                       ),
                       buildPermissionIcon(
                         client.audio,
-                        Icons.volume_up_rounded,
+                        LdIcons.audio,
                         (enabled) {
                           bind.cmSwitchPermission(
                               connId: client.id,
@@ -763,7 +719,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                       ),
                       buildPermissionIcon(
                         client.file,
-                        Icons.upload_file_rounded,
+                        LdIcons.fileTransfer,
                         (enabled) {
                           bind.cmSwitchPermission(
                               connId: client.id,
@@ -778,7 +734,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                       ),
                       buildPermissionIcon(
                         client.restart,
-                        Icons.restart_alt_rounded,
+                        LdIcons.restart,
                         (enabled) {
                           bind.cmSwitchPermission(
                               connId: client.id,
@@ -793,7 +749,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                       ),
                       buildPermissionIcon(
                         client.recording,
-                        Icons.videocam_rounded,
+                        LdIcons.record,
                         (enabled) {
                           bind.cmSwitchPermission(
                               connId: client.id,
@@ -810,7 +766,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                       if (isWindows)
                         buildPermissionIcon(
                           client.blockInput,
-                          Icons.block,
+                          LdIcons.blockInput,
                           (enabled) {
                             bind.cmSwitchPermission(
                                 connId: client.id,
@@ -826,7 +782,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                       if (bind.mainSupportedPrivacyModeImpls() != '[]')
                         buildPermissionIcon(
                           client.privacyMode,
-                          Icons.visibility_off,
+                          LdIcons.privacy,
                           (enabled) {
                             bind.cmSwitchPermission(
                                 connId: client.id,
@@ -840,15 +796,16 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                           canModify: canModifyPermission,
                         )
                     ],
-            ),
-          ),
-        ],
       ),
     );
   }
 }
 
 const double buttonBottomMargin = 8;
+
+/// The gap between two answers. Wide enough that the hand cannot mistake one
+/// for the other on a 300-pixel window.
+const double buttonGap = 8;
 
 class _CmControlPanel extends StatelessWidget {
   final Client client;
@@ -871,7 +828,9 @@ class _CmControlPanel extends StatelessWidget {
         model.showElevation &&
         client.type_() == ClientType.remote;
     return Column(
+      mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Offstage(
           offstage: !client.inVoiceCall,
@@ -879,7 +838,8 @@ class _CmControlPanel extends StatelessWidget {
             children: [
               Expanded(
                 child: buildButton(context,
-                    color: MyTheme.accent,
+                    tone: CmTone.accent,
+                    glyph: LdIcons.mic,
                     onClick: null, onTapDown: (details) async {
                   final devicesInfo =
                       await AudioInput.getDevicesInfo(true, true);
@@ -933,31 +893,20 @@ class _CmControlPanel extends StatelessWidget {
                             ))
                         .toList(),
                   );
-                },
-                    icon: Icon(
-                      Icons.call_rounded,
-                      color: Colors.white,
-                      size: 14,
-                    ),
-                    text: "Audio input",
-                    textColor: Colors.white),
+                }, text: "Audio input"),
               ),
+              const SizedBox(width: buttonGap),
               Expanded(
                 child: buildButton(
                   context,
-                  color: Colors.red,
+                  tone: CmTone.danger,
+                  glyph: LdIcons.callEnd,
                   onClick: () => closeVoiceCall(),
-                  icon: Icon(
-                    Icons.call_end_rounded,
-                    color: Colors.white,
-                    size: 14,
-                  ),
                   text: "Stop voice call",
-                  textColor: Colors.white,
                 ),
               )
             ],
-          ),
+          ).marginOnly(bottom: buttonGap),
         ),
         Offstage(
           offstage: !client.incomingVoiceCall,
@@ -965,92 +914,61 @@ class _CmControlPanel extends StatelessWidget {
             children: [
               Expanded(
                 child: buildButton(context,
-                    color: MyTheme.accent,
+                    tone: CmTone.accent,
+                    glyph: LdIcons.call,
                     onClick: () => handleVoiceCall(true),
-                    icon: Icon(
-                      Icons.call_rounded,
-                      color: Colors.white,
-                      size: 14,
-                    ),
-                    text: "Accept",
-                    textColor: Colors.white),
+                    text: "Accept"),
               ),
+              const SizedBox(width: buttonGap),
               Expanded(
                 child: buildButton(
                   context,
-                  color: Colors.red,
+                  // Declining a call that has not started destroys nothing, so
+                  // it is not drawn in the colour that means something is being
+                  // ended. Stopping a call that is running, above, is.
+                  tone: CmTone.neutral,
                   onClick: () => handleVoiceCall(false),
-                  icon: Icon(
-                    Icons.phone_disabled_rounded,
-                    color: Colors.white,
-                    size: 14,
-                  ),
                   text: "Dismiss",
-                  textColor: Colors.white,
                 ),
               )
             ],
-          ),
+          ).marginOnly(bottom: buttonGap),
         ),
         Offstage(
           offstage: !client.fromSwitch,
           child: buildButton(context,
-              color: Colors.purple,
-              onClick: () => handleSwitchBack(context),
-              icon: Icon(Icons.reply, color: Colors.white),
-              text: "Switch Sides",
-              textColor: Colors.white),
+                  tone: CmTone.accent,
+                  glyph: LdIcons.switchSides,
+                  onClick: () => handleSwitchBack(context),
+                  text: "Switch Sides")
+              .marginOnly(bottom: buttonGap),
         ),
         Offstage(
           offstage: !showElevation,
           child: buildButton(
             context,
-            color: MyTheme.accent,
+            tone: CmTone.accent,
+            glyph: LdIcons.shield,
             onClick: () {
               handleElevate(context);
               windowManager.minimize();
             },
-            icon: Icon(
-              Icons.security_rounded,
-              color: Colors.white,
-              size: 14,
-            ),
             text: 'Elevate',
-            textColor: Colors.white,
-          ),
+          ).marginOnly(bottom: buttonGap),
         ),
-        Row(
-          children: [
-            Expanded(
-              child: buildButton(context,
-                  color: Colors.redAccent,
-                  onClick: handleDisconnect,
-                  text: 'Disconnect',
-                  icon: Icon(
-                    Icons.link_off_rounded,
-                    color: Colors.white,
-                    size: 14,
-                  ),
-                  textColor: Colors.white),
-            ),
-          ],
-        )
+        buildButton(context,
+            tone: CmTone.danger,
+            glyph: LdIcons.disconnect,
+            onClick: handleDisconnect,
+            text: 'Disconnect'),
       ],
     ).marginOnly(bottom: buttonBottomMargin);
   }
 
   buildDisconnected(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Expanded(
-            child: buildButton(context,
-                color: MyTheme.accent,
-                onClick: handleClose,
-                text: 'Close',
-                textColor: Colors.white)),
-      ],
-    ).marginOnly(bottom: buttonBottomMargin);
+    return buildButton(context,
+            tone: CmTone.neutral, onClick: handleClose, text: 'Close')
+        .marginOnly(bottom: buttonBottomMargin);
   }
 
   buildUnAuthorized(BuildContext context) {
@@ -1060,53 +978,53 @@ class _CmControlPanel extends StatelessWidget {
         model.showElevation &&
         client.type_() == ClientType.remote;
     final showAccept = model.approveMode != 'password';
+    // The two answers are the same size, the same type at the same weight, and
+    // both labels are set in the console's full-strength text. Accept is told
+    // apart by its accent frame and its lock, not by being the only one that
+    // looks like a button — a person deciding under time pressure should have
+    // to aim at it, not fall into it.
     return Column(
+      mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Offstage(
           offstage: !showElevation || !showAccept,
-          child: buildButton(context, color: Colors.green[700], onClick: () {
+          child: buildButton(context, tone: CmTone.accent, onClick: () {
             handleAccept(context);
             handleElevate(context);
             windowManager.minimize();
           },
-              text: 'Accept and Elevate',
-              icon: Icon(
-                Icons.security_rounded,
-                color: Colors.white,
-                size: 14,
-              ),
-              textColor: Colors.white,
-              tooltip: 'accept_and_elevate_btn_tooltip'),
+                  text: 'Accept and Elevate',
+                  glyph: LdIcons.shield,
+                  tooltip: 'accept_and_elevate_btn_tooltip')
+              .marginOnly(bottom: buttonGap),
         ),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (showAccept)
+            if (showAccept) ...[
               Expanded(
-                child: Column(
-                  children: [
-                    buildButton(
-                      context,
-                      color: MyTheme.accent,
-                      onClick: () {
-                        handleAccept(context);
-                        windowManager.minimize();
-                      },
-                      text: 'Accept',
-                      textColor: Colors.white,
-                    ),
-                  ],
+                child: buildButton(
+                  context,
+                  tone: CmTone.accent,
+                  glyph: LdIcons.check,
+                  onClick: () {
+                    handleAccept(context);
+                    windowManager.minimize();
+                  },
+                  text: 'Accept',
                 ),
               ),
+              const SizedBox(width: buttonGap),
+            ],
             Expanded(
               child: buildButton(
                 context,
-                color: Colors.transparent,
-                border: Border.all(color: Colors.grey),
+                tone: CmTone.neutral,
+                glyph: LdIcons.close,
                 onClick: handleDisconnect,
                 text: 'Cancel',
-                textColor: null,
               ),
             ),
           ],
@@ -1115,65 +1033,37 @@ class _CmControlPanel extends StatelessWidget {
     ).marginOnly(bottom: buttonBottomMargin);
   }
 
+  /// Every answer this window offers, drawn by what it means.
+  ///
+  /// The click still goes through [checkClickTime]: the guard against a click
+  /// that arrived before the person could have read what they were clicking is
+  /// the reason this window is safe, and it is untouched.
   Widget buildButton(BuildContext context,
-      {required Color? color,
+      {required CmTone tone,
       GestureTapCallback? onClick,
-      Widget? icon,
-      BoxBorder? border,
+      String? glyph,
       required String text,
-      required Color? textColor,
       String? tooltip,
       GestureTapDownCallback? onTapDown}) {
     assert(!(onClick == null && onTapDown == null));
-    Widget textWidget;
-    if (icon != null) {
-      textWidget = Text(
-        translate(text),
-        style: TextStyle(color: textColor),
-        textAlign: TextAlign.center,
-      );
-    } else {
-      textWidget = Expanded(
-        child: Text(
-          translate(text),
-          style: TextStyle(color: textColor),
-          textAlign: TextAlign.center,
-        ),
-      );
-    }
-    final borderRadius = BorderRadius.circular(10.0);
-    final btn = Container(
-      height: 28,
-      decoration: BoxDecoration(
-          color: color, borderRadius: borderRadius, border: border),
-      child: InkWell(
-        borderRadius: borderRadius,
-        onTap: () {
-          if (onClick == null) return;
-          checkClickTime(client.id, onClick);
-        },
-        onTapDown: (details) {
-          if (onTapDown == null) return;
-          checkClickTime(client.id, () {
-            onTapDown.call(details);
-          });
-        },
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Offstage(offstage: icon == null, child: icon).marginOnly(right: 5),
-            textWidget,
-          ],
-        ),
-      ),
+    return CmActionButton(
+      label: translate(text),
+      tone: tone,
+      glyph: glyph,
+      tooltip: tooltip == null ? null : translate(tooltip),
+      onPressed: onClick == null
+          ? null
+          : () {
+              checkClickTime(client.id, onClick);
+            },
+      onTapDown: onTapDown == null
+          ? null
+          : (details) {
+              checkClickTime(client.id, () {
+                onTapDown.call(details);
+              });
+            },
     );
-    return (tooltip != null
-            ? Tooltip(
-                message: translate(tooltip),
-                child: btn,
-              )
-            : btn)
-        .marginAll(4);
   }
 
   void handleDisconnect() {
@@ -1243,16 +1133,23 @@ class __FileTransferLogPageState extends State<_FileTransferLogPage> {
   }
 
   Widget generateCard(Widget child) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.all(
-          Radius.circular(15.0),
-        ),
-      ),
-      child: child,
-    );
+    return Container(decoration: CmSkin.panel, child: child);
   }
+
+  /// What the far end did, glyph over word. The direction of a transfer is the
+  /// whole point of the entry, so it is an arrow rather than a chevron.
+  Widget _actionLabel(String glyph, String label) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LdIcon(glyph, size: 17, color: C.textMuted),
+          const SizedBox(height: 5),
+          Text(label,
+              textAlign: TextAlign.center,
+              style: C.micro(color: C.textMuted),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+        ],
+      );
 
   iconLabel(CmFileLog item) {
     switch (item.action) {
@@ -1260,50 +1157,19 @@ class __FileTransferLogPageState extends State<_FileTransferLogPage> {
         return Container();
       case CmFileAction.localToRemote:
       case CmFileAction.remoteToLocal:
-        return Column(
-          children: [
-            Transform.rotate(
-              angle: item.action == CmFileAction.remoteToLocal ? 0 : pi,
-              child: SvgPicture.asset(
-                "assets/arrow.svg",
-                colorFilter: svgColor(Theme.of(context).tabBarTheme.labelColor),
-              ),
-            ),
-            Text(item.action == CmFileAction.remoteToLocal
+        return _actionLabel(
+            item.action == CmFileAction.remoteToLocal
+                ? LdIcons.arrowUp
+                : LdIcons.arrowDown,
+            item.action == CmFileAction.remoteToLocal
                 ? translate('Send')
-                : translate('Receive'))
-          ],
-        );
+                : translate('Receive'));
       case CmFileAction.remove:
-        return Column(
-          children: [
-            Icon(
-              Icons.delete,
-              color: Theme.of(context).tabBarTheme.labelColor,
-            ),
-            Text(translate('Delete'))
-          ],
-        );
+        return _actionLabel(LdIcons.trash, translate('Delete'));
       case CmFileAction.createDir:
-        return Column(
-          children: [
-            Icon(
-              Icons.create_new_folder,
-              color: Theme.of(context).tabBarTheme.labelColor,
-            ),
-            Text(translate('Create Folder'))
-          ],
-        );
+        return _actionLabel(LdIcons.folderAdd, translate('Create Folder'));
       case CmFileAction.rename:
-        return Column(
-          children: [
-            Icon(
-              Icons.drive_file_move_outlined,
-              color: Theme.of(context).tabBarTheme.labelColor,
-            ),
-            Text(translate('Rename'))
-          ],
-        );
+        return _actionLabel(LdIcons.rename, translate('Rename'));
     }
   }
 
@@ -1343,14 +1209,15 @@ class __FileTransferLogPageState extends State<_FileTransferLogPage> {
                                       children: [
                                         Text(
                                           item.fileName,
-                                        ).paddingSymmetric(vertical: 10),
+                                          style: C.small(
+                                              color: C.text,
+                                              w: FontWeight.w600),
+                                        ).paddingSymmetric(vertical: 8),
                                         if (item.totalSize > 0)
                                           Text(
                                             '${translate("Total")} ${readableFileSize(item.totalSize.toDouble())}',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: MyTheme.darkGray,
-                                            ),
+                                            style: C.data(
+                                                size: 11, color: C.textMuted),
                                           ),
                                         if (item.totalSize > 0)
                                           Offstage(
@@ -1358,10 +1225,8 @@ class __FileTransferLogPageState extends State<_FileTransferLogPage> {
                                                 JobState.inProgress,
                                             child: Text(
                                               '${translate("Speed")} ${readableFileSize(item.speed)}/s',
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: MyTheme.darkGray,
-                                              ),
+                                              style: C.data(
+                                                  size: 11, color: C.textMuted),
                                             ),
                                           ),
                                         Offstage(
@@ -1372,10 +1237,7 @@ class __FileTransferLogPageState extends State<_FileTransferLogPage> {
                                             translate(
                                               item.display(),
                                             ),
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: MyTheme.darkGray,
-                                            ),
+                                            style: C.small(color: C.textMuted),
                                           ),
                                         ),
                                         if (item.totalSize > 0)
@@ -1388,16 +1250,17 @@ class __FileTransferLogPageState extends State<_FileTransferLogPage> {
                                               animateFromLastPercent: true,
                                               center: Text(
                                                 '${(item.finishedSize / item.totalSize * 100).toStringAsFixed(0)}%',
+                                                style: C.data(
+                                                    size: 11, color: C.text),
                                               ),
-                                              barRadius: Radius.circular(15),
+                                              barRadius:
+                                                  Radius.circular(C.radiusSm),
                                               percent: item.finishedSize /
                                                   item.totalSize,
-                                              progressColor: MyTheme.accent,
-                                              backgroundColor:
-                                                  Theme.of(context).hoverColor,
-                                              lineHeight:
-                                                  kDesktopFileTransferRowHeight,
-                                            ).paddingSymmetric(vertical: 15),
+                                              progressColor: C.accent,
+                                              backgroundColor: C.surfaceHi,
+                                              lineHeight: 18,
+                                            ).paddingSymmetric(vertical: 12),
                                           ),
                                       ],
                                     ),
@@ -1422,19 +1285,13 @@ class __FileTransferLogPageState extends State<_FileTransferLogPage> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            SvgPicture.asset(
-                              "assets/transfer.svg",
-                              colorFilter: svgColor(
-                                  Theme.of(context).tabBarTheme.labelColor),
-                              height: 40,
-                            ).paddingOnly(bottom: 10),
+                            const LdIcon(LdIcons.fileTransfer,
+                                    size: 28, color: C.textFaint)
+                                .paddingOnly(bottom: 12),
                             Text(
                               translate("No transfers in progress"),
                               textAlign: TextAlign.center,
-                              textScaler: TextScaler.linear(1.20),
-                              style: TextStyle(
-                                  color:
-                                      Theme.of(context).tabBarTheme.labelColor),
+                              style: C.small(color: C.textMuted),
                             ),
                           ],
                         ),

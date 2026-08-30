@@ -4,14 +4,39 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
+import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
+import 'package:flutter_hbb/labdesk/theme/ld_icons.dart';
+import 'package:flutter_hbb/labdesk/theme/session_toolbar_skin.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:get/get.dart';
 
-const double _kColumn1Width = 30;
-const double _kColumn4Width = 100;
-const double _kRowHeight = 60;
-const double _kTextLeftMargin = 20;
+const double _kColumn1Width = 34;
+const double _kColumn4Width = 64;
+const double _kRowHeight = 46;
+const double _kTextLeftMargin = 14;
+
+/// A port is a number and a host is an address, so both are set in the
+/// console's data face rather than in the interface face at display size.
+TextStyle _cellStyle() => C.data(size: 13.5, color: C.text);
+
+InputDecoration _fieldDecoration(String? hint) => InputDecoration(
+      hintText: hint,
+      hintStyle: C.data(size: 13, color: C.textFaint),
+      isDense: true,
+      filled: true,
+      fillColor: C.bg,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+      enabledBorder: OutlineInputBorder(
+          borderRadius: C.roundedSm,
+          borderSide: const BorderSide(color: C.hairline)),
+      focusedBorder: OutlineInputBorder(
+          borderRadius: C.roundedSm,
+          borderSide: const BorderSide(color: C.accent, width: 1.4)),
+      border: OutlineInputBorder(
+          borderRadius: C.roundedSm,
+          borderSide: const BorderSide(color: C.hairline)),
+    );
 
 class _PortForward {
   int localPort;
@@ -92,95 +117,124 @@ class _PortForwardPageState extends State<PortForwardPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: FutureBuilder(future: () async {
-        if (!widget.isRDP) {
-          refreshTunnelConfig();
-        }
-      }(), builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.done) {
-          return Container(
-            decoration: BoxDecoration(
-                border: Border.all(
-                    width: 20,
-                    color: Theme.of(context).scaffoldBackgroundColor)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                buildPrompt(context),
-                Flexible(
-                  child: Container(
-                    decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.background,
-                        border: Border.all(width: 1, color: MyTheme.border)),
-                    child:
-                        widget.isRDP ? buildRdp(context) : buildTunnel(context),
+    return Theme(
+      data: cmThemeData(context),
+      child: Scaffold(
+        backgroundColor: C.bg,
+        body: FutureBuilder(future: () async {
+          if (!widget.isRDP) {
+            refreshTunnelConfig();
+          }
+        }(), builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.done) {
+            return Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  buildPrompt(context),
+                  Flexible(
+                    child: Container(
+                      clipBehavior: Clip.antiAlias,
+                      decoration: BoxDecoration(
+                        color: C.surface,
+                        borderRadius: C.rounded,
+                        border: Border.all(color: C.hairline),
+                      ),
+                      child: widget.isRDP
+                          ? buildRdp(context)
+                          : buildTunnel(context),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          );
-        }
-        return const Offstage();
-      }),
+                ],
+              ),
+            );
+          }
+          return const Offstage();
+        }),
+      ),
     );
   }
 
+  /// The tunnel is up and has to stay up. The old banner said so in a filled
+  /// green bar, which is the loudest thing the product can draw and it was
+  /// spent on a state that is simply *normal*. A running state is a status
+  /// line: the semantic dot, the word, and the warning underneath it in the
+  /// voice it deserves.
   buildPrompt(BuildContext context) {
     return Obx(() => Offstage(
           offstage: pfs.isEmpty && !widget.isRDP,
           child: Container(
-              height: 45,
-              color: const Color(0xFF007F00),
-              child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      translate('Listening ...'),
-                      style: const TextStyle(fontSize: 16, color: Colors.white),
-                    ),
-                    Text(
-                      translate('not_close_tcp_tip'),
-                      style: const TextStyle(
-                          fontSize: 10, color: Color(0xFFDDDDDD), height: 1.2),
-                    )
-                  ])).marginOnly(bottom: 8),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 13),
+            decoration: BoxDecoration(
+              color: C.surface,
+              borderRadius: C.rounded,
+              border: Border.all(color: C.hairline),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(top: 5),
+                  child: CmStatusDot(color: C.ok),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(translate('Listening ...'), style: C.h2()),
+                      const SizedBox(height: 3),
+                      Text(translate('not_close_tcp_tip'),
+                          style: C.small(color: C.textMuted)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ).marginOnly(bottom: 12),
         ));
   }
 
-  buildTunnel(BuildContext context) {
-    text(String label) => Expanded(
-        child: Text(translate(label)).marginOnly(left: _kTextLeftMargin));
+  /// One column head. Set as a label, not as body text: a column head that
+  /// looks like data is a row the eye tries to read.
+  Widget _head(String label) => Expanded(
+      child: Text(translate(label).toUpperCase(),
+              style: C.micro(color: C.textFaint).copyWith(letterSpacing: 0.8))
+          .marginOnly(left: _kTextLeftMargin));
 
-    return Theme(
-      data: Theme.of(context).copyWith(
-        colorScheme: Theme.of(context).colorScheme,
-      ),
-      child: Obx(() => ListView.builder(
-          controller: ScrollController(),
-          itemCount: pfs.length + 2,
-          itemBuilder: ((context, index) {
-            if (index == 0) {
-              return Container(
-                height: 25,
-                color: Theme.of(context).scaffoldBackgroundColor,
-                child: Row(children: [
-                  text('Local Port'),
-                  const SizedBox(width: _kColumn1Width),
-                  text('Remote Host'),
-                  text('Remote Port'),
-                  SizedBox(
-                      width: _kColumn4Width, child: Text(translate('Action')))
-                ]),
-              );
-            } else if (index == 1) {
-              return buildTunnelAddRow(context);
-            } else {
-              return buildTunnelDataRow(context, pfs[index - 2], index - 2);
-            }
-          }))),
-    );
+  buildTunnel(BuildContext context) {
+    return Obx(() => ListView.builder(
+        controller: ScrollController(),
+        itemCount: pfs.length + 2,
+        itemBuilder: ((context, index) {
+          if (index == 0) {
+            return Container(
+              height: 30,
+              alignment: Alignment.centerLeft,
+              decoration: const BoxDecoration(
+                color: C.chrome,
+                border: Border(bottom: BorderSide(color: C.hairline)),
+              ),
+              child: Row(children: [
+                _head('Local Port'),
+                const SizedBox(width: _kColumn1Width),
+                _head('Remote Host'),
+                _head('Remote Port'),
+                SizedBox(
+                    width: _kColumn4Width,
+                    child: Text(translate('Action').toUpperCase(),
+                        style: C
+                            .micro(color: C.textFaint)
+                            .copyWith(letterSpacing: 0.8))),
+              ]),
+            );
+          } else if (index == 1) {
+            return buildTunnelAddRow(context);
+          } else {
+            return buildTunnelDataRow(context, pfs[index - 2], index - 2);
+          }
+        })));
   }
 
   buildTunnelAddRow(BuildContext context) {
@@ -191,20 +245,27 @@ class _PortForwardPageState extends State<PortForwardPage>
 
     return Container(
       height: _kRowHeight,
-      decoration:
-          BoxDecoration(color: Theme.of(context).colorScheme.background),
+      decoration: const BoxDecoration(
+        color: C.surfaceHi,
+        border: Border(bottom: BorderSide(color: C.hairline)),
+      ),
       child: Row(children: [
         buildTunnelInputCell(context,
             controller: localPortController,
             inputFormatters: portInputFormatter),
         const SizedBox(
-            width: _kColumn1Width, child: Icon(Icons.arrow_forward_sharp)),
+            width: _kColumn1Width,
+            child: Center(
+                child:
+                    LdIcon(LdIcons.arrowRight, size: 16, color: C.textFaint))),
         buildTunnelInputCell(context,
             controller: remoteHostController, hint: 'localhost'),
         buildTunnelInputCell(context,
             controller: remotePortController,
             inputFormatters: portInputFormatter),
-        ElevatedButton(
+        GhostButton(
+          glyph: LdIcons.add,
+          label: translate('Add'),
           onPressed: () async {
             int? localPort = int.tryParse(localPortController.text);
             int? remotePort = int.tryParse(remotePortController.text);
@@ -225,9 +286,6 @@ class _PortForwardPageState extends State<PortForwardPage>
               refreshTunnelConfig();
             }
           },
-          child: Text(
-            translate('Add'),
-          ),
         ).marginSymmetric(horizontal: 10),
       ]),
     );
@@ -239,43 +297,51 @@ class _PortForwardPageState extends State<PortForwardPage>
       String? hint}) {
     return Expanded(
       child: Padding(
-          padding: const EdgeInsets.all(10.0),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
           child: TextField(
               controller: controller,
               inputFormatters: inputFormatters,
-              decoration: InputDecoration(
-                hintText: hint,
-              )).workaroundFreezeLinuxMint()),
+              style: _cellStyle(),
+              cursorColor: C.accent,
+              cursorWidth: 1.6,
+              decoration: _fieldDecoration(hint)).workaroundFreezeLinuxMint()),
     );
   }
 
+  /// One live tunnel.
+  ///
+  /// The zebra stripe is gone: a hairline under each row separates them at a
+  /// tenth of the cost, and the stripe was the only place in the product where
+  /// a surface changed colour for a reason that was not a state.
   Widget buildTunnelDataRow(BuildContext context, _PortForward pf, int index) {
     text(String label) => Expanded(
-        child: Text(label, style: const TextStyle(fontSize: 20))
+        child: Text(label, style: _cellStyle())
             .marginOnly(left: _kTextLeftMargin));
 
     return Container(
       height: _kRowHeight,
-      decoration: BoxDecoration(
-          color: index % 2 == 0
-              ? MyTheme.currentThemeMode() == ThemeMode.dark
-                  ? const Color(0xFF202020)
-                  : const Color(0xFFF4F5F6)
-              : Theme.of(context).colorScheme.background),
+      decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: C.hairline))),
       child: Row(children: [
         text(pf.localPort.toString()),
-        const SizedBox(width: _kColumn1Width),
+        const SizedBox(
+            width: _kColumn1Width,
+            child: Center(
+                child:
+                    LdIcon(LdIcons.arrowRight, size: 16, color: C.textFaint))),
         text(pf.remoteHost),
         text(pf.remotePort.toString()),
         SizedBox(
           width: _kColumn4Width,
-          child: IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () async {
-              await bind.sessionRemovePortForward(
-                  sessionId: _ffi.sessionId, localPort: pf.localPort);
-              refreshTunnelConfig();
-            },
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _RemoveTunnelButton(
+              onRemove: () async {
+                await bind.sessionRemovePortForward(
+                    sessionId: _ffi.sessionId, localPort: pf.localPort);
+                refreshTunnelConfig();
+              },
+            ),
           ),
         ),
       ]),
@@ -294,64 +360,96 @@ class _PortForwardPageState extends State<PortForwardPage>
   }
 
   buildRdp(BuildContext context) {
-    text1(String label) => Expanded(
-        child: Text(translate(label)).marginOnly(left: _kTextLeftMargin));
     text2(String label) => Expanded(
-            child: Text(
-          label,
-          style: const TextStyle(fontSize: 20),
-        ).marginOnly(left: _kTextLeftMargin));
-    return Theme(
-      data: Theme.of(context)
-          .copyWith(colorScheme: Theme.of(context).colorScheme),
-      child: ListView.builder(
-          controller: ScrollController(),
-          itemCount: 2,
-          itemBuilder: ((context, index) {
-            if (index == 0) {
-              return Container(
-                height: 25,
-                color: Theme.of(context).scaffoldBackgroundColor,
-                child: Row(children: [
-                  text1('Local Port'),
-                  const SizedBox(width: _kColumn1Width),
-                  text1('Remote Host'),
-                  text1('Remote Port'),
-                ]),
-              );
-            } else {
-              return Container(
-                height: _kRowHeight,
-                decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.background),
-                child: Row(children: [
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: SizedBox(
-                        width: 120,
-                        child: ElevatedButton(
-                          onPressed: () =>
-                              bind.sessionNewRdp(sessionId: _ffi.sessionId),
-                          child: Text(
-                            translate('New RDP'),
-                          ),
-                        ).marginSymmetric(vertical: 10),
-                      ).marginOnly(left: 20),
-                    ),
+        child:
+            Text(label, style: _cellStyle()).marginOnly(left: _kTextLeftMargin));
+    return ListView.builder(
+        controller: ScrollController(),
+        itemCount: 2,
+        itemBuilder: ((context, index) {
+          if (index == 0) {
+            return Container(
+              height: 30,
+              alignment: Alignment.centerLeft,
+              decoration: const BoxDecoration(
+                color: C.chrome,
+                border: Border(bottom: BorderSide(color: C.hairline)),
+              ),
+              child: Row(children: [
+                _head('Local Port'),
+                const SizedBox(width: _kColumn1Width),
+                _head('Remote Host'),
+                _head('Remote Port'),
+              ]),
+            );
+          } else {
+            return Container(
+              height: _kRowHeight,
+              decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: C.hairline))),
+              child: Row(children: [
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: GhostButton(
+                      glyph: LdIcons.portForward,
+                      label: translate('New RDP'),
+                      onPressed: () =>
+                          bind.sessionNewRdp(sessionId: _ffi.sessionId),
+                    ).marginOnly(left: _kTextLeftMargin),
                   ),
-                  const SizedBox(
-                      width: _kColumn1Width,
-                      child: Icon(Icons.arrow_forward_sharp)),
-                  text2('localhost'),
-                  text2('RDP'),
-                ]),
-              );
-            }
-          })),
-    );
+                ),
+                const SizedBox(
+                    width: _kColumn1Width,
+                    child: Center(
+                        child: LdIcon(LdIcons.arrowRight,
+                            size: 16, color: C.textFaint))),
+                text2('localhost'),
+                text2('RDP'),
+              ]),
+            );
+          }
+        }));
   }
 
   @override
   bool get wantKeepAlive => true;
+}
+
+/// Ending one tunnel.
+///
+/// Red only once the cursor is on the control itself, never on every row the
+/// pointer crosses: the same rule the session tab's close obeys, because it is
+/// the same act.
+class _RemoveTunnelButton extends StatefulWidget {
+  const _RemoveTunnelButton({Key? key, required this.onRemove})
+      : super(key: key);
+
+  final VoidCallback onRemove;
+
+  @override
+  State<_RemoveTunnelButton> createState() => _RemoveTunnelButtonState();
+}
+
+class _RemoveTunnelButtonState extends State<_RemoveTunnelButton> {
+  bool hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => hover = true),
+      onExit: (_) => setState(() => hover = false),
+      child: GestureDetector(
+        onTap: widget.onRemove,
+        child: WindowButtonSurface(
+          hover: hover,
+          boxSize: 30,
+          color: C.textFaint,
+          hoverColor: C.bad,
+          iconBuilder: (fg) => LdIcon(LdIcons.close, size: 13, color: fg),
+        ),
+      ),
+    );
+  }
 }
