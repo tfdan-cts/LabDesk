@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../charts/reachability_chart.dart';
 import '../models/machine_metrics.dart';
@@ -384,18 +385,11 @@ class _Sidebar extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
             child: Row(
               children: [
-                Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [C.accent, C.accentDim],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: C.roundedSm,
-                  ),
-                ),
+                // The application's own icon, not an approximation of it. A
+                // gradient square stood in here before, which meant the mark
+                // in the product and the mark on the taskbar were two
+                // different things.
+                SvgPicture.asset('assets/icon.svg', width: 24, height: 24),
                 const SizedBox(width: 10),
                 Text('LabDesk', style: C.h1()),
               ],
