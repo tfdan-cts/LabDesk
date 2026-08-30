@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'ld_icons.dart';
+
 /// LabDesk console design language.
 ///
 /// This is an Operate surface: the operator is in a task, so the interface
@@ -34,6 +36,23 @@ class C {
   /// behind data all day. Primary actions and current selection only.
   static const accent = Color(0xFF8B7DF7);
   static const accentDim = Color(0xFF5B4FBE);
+
+  /// The filled primary button. One tint, one foreground, everywhere.
+  ///
+  /// The console had two: the installer painted its confirm in the light accent
+  /// under a near-black label while Connect and Send painted theirs in the dark
+  /// accent under a white one, so the same rank arrived in two colours with
+  /// opposite foregrounds and neither read as the more important. The fill is
+  /// the accent, the label is the page background, and the dim accent is the
+  /// pressed state rather than a second rank.
+  ///
+  /// Any surface still drawing its own filled primary — the session toolbar,
+  /// the connection manager, the file manager's Send — should switch to these
+  /// four values rather than pick its own.
+  static const primaryFill = accent;
+  static const primaryFillHover = Color(0xFF9C90F8);
+  static const primaryFillDown = accentDim;
+  static const primaryFg = bg;
 
   /// Semantic status. Never used as decoration.
   static const ok = Color(0xFF3FCF8E);
@@ -232,12 +251,18 @@ class GhostButton extends StatefulWidget {
     super.key,
     required this.label,
     this.icon,
+    this.glyph,
     this.onPressed,
     this.busy = false,
   });
 
   final String label;
   final IconData? icon;
+
+  /// A path from [LdIcons]. Preferred over [icon]: the console draws its own
+  /// glyphs, and a Material icon on a button is the one place the borrowed set
+  /// is most visible.
+  final String? glyph;
   final VoidCallback? onPressed;
   final bool busy;
 
@@ -283,14 +308,196 @@ class _GhostButtonState extends State<GhostButton> {
                   height: 12,
                   child: CircularProgressIndicator(strokeWidth: 1.6, color: C.accent),
                 )
+              else if (widget.glyph != null)
+                LdIcon(widget.glyph!, size: 15, color: fg)
               else if (widget.icon != null)
                 Icon(widget.icon, size: 14, color: fg),
-              if (widget.busy || widget.icon != null) const SizedBox(width: 7),
+              if (widget.busy || widget.glyph != null || widget.icon != null)
+                const SizedBox(width: 7),
               Text(widget.label, style: C.small(color: fg, w: FontWeight.w600)),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The console's toggle. One size, one palette, drawn once.
+///
+/// There used to be three. The settings page drew a 34x20 pill in the light
+/// accent with a near-black knob, a menu row drew a smaller one in the dim
+/// accent with a white knob, and the connection manager drew a third. A control
+/// that means "this is on" cannot be three different objects, because then none
+/// of them is the one the operator has learned.
+///
+/// Drawn rather than themed: a Material Switch carries a 48-pixel tap target, a
+/// ripple and an M3 outline that no amount of theming brings onto the console's
+/// ramp.
+///
+/// [enabled] paints the control; [onChanged] decides whether the pill itself is
+/// the hit area. They are separate because a toggle sitting in a menu row is
+/// live but driven by the row around it, and painting that one as disabled
+/// would be a lie.
+///
+/// [stateLabel] puts the state in a word beside the pill. Off by default: a
+/// column of them is noise. It exists because the connection manager states
+/// every permission twice on purpose — a caption that survives when the two
+/// track colours do not separate for the operator reading them — and that
+/// surface should be able to take this widget without giving that up.
+class LdToggle extends StatefulWidget {
+  const LdToggle({
+    super.key,
+    required this.value,
+    this.onChanged,
+    this.enabled = true,
+    this.stateLabel = false,
+  });
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final bool enabled;
+  final bool stateLabel;
+
+  @override
+  State<LdToggle> createState() => _LdToggleState();
+}
+
+class _LdToggleState extends State<LdToggle> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.enabled;
+    final tappable = widget.onChanged != null && enabled;
+    final on = widget.value;
+    final track = !enabled
+        ? (on ? C.accentDim.withOpacity(0.35) : C.surface)
+        : (on ? C.accent : C.surfaceHi);
+    final knob = !enabled ? C.textFaint : (on ? C.bg : C.textMuted);
+
+    Widget pill = AnimatedContainer(
+      duration: C.fast,
+      curve: Curves.easeOut,
+      width: 34,
+      height: 20,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: track,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: on
+              ? Colors.transparent
+              : (_hover && tappable ? C.textFaint : C.hairline),
+        ),
+      ),
+      child: AnimatedAlign(
+        duration: C.fast,
+        curve: Curves.easeOut,
+        alignment: on ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(color: knob, shape: BoxShape.circle),
+        ),
+      ),
+    );
+
+    if (widget.stateLabel) {
+      pill = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // A fixed box, right-aligned: ON is narrower than OFF, and a pill
+          // that shifts sideways as the state changes reads as two controls.
+          SizedBox(
+            width: 24,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                on ? 'ON' : 'OFF',
+                style: C.data(
+                  size: 10,
+                  w: FontWeight.w700,
+                  color: !enabled ? C.textFaint : (on ? C.text : C.textMuted),
+                ).copyWith(letterSpacing: 0.6),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          pill,
+        ],
+      );
+    }
+
+    return MouseRegion(
+      cursor: tappable ? SystemMouseCursors.click : MouseCursor.defer,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: tappable ? () => widget.onChanged!(!on) : null,
+        child: pill,
+      ),
+    );
+  }
+}
+
+/// The console's checkbox. One size, one palette, drawn once.
+///
+/// There used to be three, at three sizes and two radii, and the two that
+/// carried a tick disagreed about which way round it went: the table drew a dim
+/// fill under a white tick, the installer a light fill under a dark one. This
+/// is the installer's reading — the accent is the fill and the tick is cut out
+/// of it — at one size for both.
+///
+/// A mark rather than a control. Every place a checkbox appears in this
+/// console, the row around it is the hit area and already knows whether it is
+/// hovered, focused and enabled; a box that took the tap as well would fight
+/// its own row for it.
+class LdCheckbox extends StatelessWidget {
+  const LdCheckbox({
+    super.key,
+    required this.on,
+    this.enabled = true,
+    this.hover = false,
+    this.focused = false,
+  });
+
+  final bool on;
+  final bool enabled;
+  final bool hover;
+  final bool focused;
+
+  static const size = 16.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final fill = on
+        ? (enabled ? C.accent : C.accentDim)
+        : Colors.transparent;
+    final border = on
+        ? Colors.transparent
+        : !enabled
+            ? C.hairline.withOpacity(0.6)
+            : focused
+                ? C.accent
+                : (hover ? C.textFaint : C.hairline);
+
+    return AnimatedContainer(
+      duration: C.fast,
+      curve: Curves.easeOut,
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: border),
+      ),
+      // The tick stays the near-black cut-out even when the box is disabled.
+      // Greying it as well put a #6B6B7A mark on a #5B4FBE fill, which is a
+      // tick nobody can see: a locked option still has to say which way it is.
+      child: on
+          ? const Center(child: LdIcon(LdIcons.check, size: 12, color: C.bg))
+          : null,
     );
   }
 }

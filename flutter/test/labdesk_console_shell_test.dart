@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_hbb/common/formatter/id_formatter.dart';
+import 'package:flutter_hbb/common/labdesk_peer_status.dart';
+import 'package:flutter_hbb/labdesk/models/machine_row.dart';
 import 'package:flutter_hbb/labdesk/screens/console_shell.dart';
 import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
 
@@ -114,6 +117,162 @@ void main() {
       )));
 
       expect(find.text('REAL SETTINGS'), findsOneWidget);
+    });
+  });
+
+  group('refreshing reachability', () {
+    // The peer list is where an operator reads whether a machine is up, and
+    // reachability is polled, not pushed. Without a control to ask again, a
+    // stale dot is indistinguishable from a machine that is really down, and
+    // the only recourse is restarting the application. The old home screen had
+    // this control; the console must not have lost it.
+    testWidgets('Connect offers a refresh, and it calls back', (tester) async {
+      var refreshed = 0;
+
+      await tester.pumpWidget(_wrap(ConsoleShell(
+        machines: const [],
+        initialSection: ConsoleSection.connect,
+        hosted: {
+          ConsoleSection.connect: (_) => const Text('peer list'),
+        },
+        onRefresh: () => refreshed++,
+      )));
+
+      expect(find.text('Refresh'), findsOneWidget);
+      await tester.tap(find.text('Refresh'));
+      await tester.pump();
+
+      expect(refreshed, 1);
+    });
+
+    testWidgets('Fleet keeps its refresh', (tester) async {
+      var refreshed = 0;
+
+      await tester.pumpWidget(_wrap(ConsoleShell(
+        machines: const [],
+        initialSection: ConsoleSection.fleet,
+        onRefresh: () => refreshed++,
+      )));
+
+      await tester.tap(find.text('Refresh'));
+      await tester.pump();
+
+      expect(refreshed, 1);
+    });
+
+    testWidgets('a section that shows no reachability offers no refresh',
+        (tester) async {
+      await tester.pumpWidget(_wrap(ConsoleShell(
+        machines: const [],
+        initialSection: ConsoleSection.terminal,
+        onRefresh: () {},
+      )));
+
+      expect(find.text('Refresh'), findsNothing);
+    });
+
+    testWidgets('with nothing wired to refresh, no control is offered',
+        (tester) async {
+      await tester.pumpWidget(_wrap(const ConsoleShell(
+        machines: [],
+        initialSection: ConsoleSection.connect,
+      )));
+
+      expect(find.text('Refresh'), findsNothing);
+    });
+  });
+
+  // A blind audit of fifteen rendered surfaces found Fleet was the one that
+  // disagreed with the rest of the product: raw ids where every other surface
+  // groups them, and a second set of words for the three states the same card
+  // had already named. Both are pinned here, because both are the kind of
+  // drift that returns the moment nobody is looking at two screens at once.
+  group('Fleet speaks the product\'s language', () {
+    const machines = [
+      MachineRow(
+        id: '914203771',
+        alias: 'trapLab-Foundry',
+        hostname: 'traplab-foundry',
+        platform: 'Windows',
+        status: LabDeskPeerStatus.online,
+      ),
+      MachineRow(
+        id: '1117890352',
+        alias: 'trapLab-Forge_Laptop',
+        hostname: 'traplab_forge',
+        platform: 'Windows',
+        status: LabDeskPeerStatus.offline,
+      ),
+      MachineRow(
+        id: '168828561',
+        alias: 'CTS Hosted Server',
+        hostname: 'cts-hosted-server',
+        platform: 'Linux',
+        status: LabDeskPeerStatus.unknown,
+      ),
+    ];
+
+    Future<void> openFleet(WidgetTester tester) async {
+      // A desktop surface. The machine table is six columns wide; on the
+      // 800x600 test default the name column is 74 pixels and every machine
+      // name wraps, which is a measurement of the test window and not of the
+      // screen.
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(_wrap(const ConsoleShell(
+        machines: machines,
+        initialSection: ConsoleSection.fleet,
+      )));
+    }
+
+    testWidgets('an id is printed through the one formatter the product has',
+        (tester) async {
+      await openFleet(tester);
+
+      for (final m in machines) {
+        expect(find.text(formatID(m.id)), findsOneWidget,
+            reason: '${m.id} must be grouped the way Connect and the consent '
+                'prompt group it');
+        expect(find.text(m.id), findsNothing,
+            reason: 'a raw run of digits here makes the same number look like '
+                'a different field to the one on Connect');
+      }
+    });
+
+    testWidgets('the ids are grouped in triplets, not merely reformatted',
+        (tester) async {
+      await openFleet(tester);
+
+      // Guards the assertion above against a formatter that silently starts
+      // returning its input: 914203771 has to reach the row as 914 203 771.
+      expect(find.text('914 203 771'), findsOneWidget);
+    });
+
+    testWidgets('the three states are named once, and named Online, Offline '
+        'and Unknown', (tester) async {
+      await openFleet(tester);
+
+      // Twice each: the count in the Reachability band, and the legend over
+      // the machine list. Both are the same three states, so both say it the
+      // same way.
+      for (final word in ['Online', 'Offline', 'Unknown']) {
+        expect(find.text(word), findsNWidgets(2),
+            reason: '$word must be the word in the band and in the legend');
+      }
+
+      for (final other in [
+        'reachable',
+        'unreachable',
+        'not checked',
+        'Not yet checked',
+      ]) {
+        expect(find.text(other), findsNothing,
+            reason: '"$other" is a second name for a state this screen has '
+                'already named');
+      }
     });
   });
 }

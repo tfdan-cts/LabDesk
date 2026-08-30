@@ -6,6 +6,7 @@ import '../charts/reachability_chart.dart';
 import '../models/machine_metrics.dart';
 import '../models/machine_row.dart';
 import '../theme/console_theme.dart';
+import '../theme/ld_icons.dart';
 import 'actions_screen.dart';
 import 'fleet_console.dart';
 import 'health_screen.dart';
@@ -33,14 +34,14 @@ extension ConsoleSectionInfo on ConsoleSection {
         ConsoleSection.settings => 'Settings',
       };
 
-  IconData get icon => switch (this) {
-        ConsoleSection.connect => Icons.cast_connected_rounded,
-        ConsoleSection.thisMachine => Icons.badge_outlined,
-        ConsoleSection.fleet => Icons.grid_view_rounded,
-        ConsoleSection.health => Icons.monitor_heart_outlined,
-        ConsoleSection.terminal => Icons.terminal_rounded,
-        ConsoleSection.actions => Icons.bolt_outlined,
-        ConsoleSection.settings => Icons.tune_rounded,
+  String get glyph => switch (this) {
+        ConsoleSection.connect => LdIcons.connect,
+        ConsoleSection.thisMachine => LdIcons.machine,
+        ConsoleSection.fleet => LdIcons.fleet,
+        ConsoleSection.health => LdIcons.health,
+        ConsoleSection.terminal => LdIcons.terminal,
+        ConsoleSection.actions => LdIcons.actions,
+        ConsoleSection.settings => LdIcons.settings,
       };
 
   /// Sections that act on one machine show which machine in the title bar, and
@@ -336,7 +337,7 @@ class _HostedElsewhere extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(section.icon, size: 28, color: C.textFaint),
+            LdIcon(section.glyph, size: 28, color: C.textFaint),
             const SizedBox(height: 12),
             Text('${section.label} is part of the running client',
                 style: C.h2(), textAlign: TextAlign.center),
@@ -457,7 +458,7 @@ class _Sidebar extends StatelessWidget {
                       child: Text(profileName,
                           overflow: TextOverflow.ellipsis, style: C.body()),
                     ),
-                    Icon(Icons.unfold_more_rounded, size: 15, color: C.textFaint),
+                    LdIcon(LdIcons.chevronDown, size: 15, color: C.textFaint),
                   ],
                 ),
               ],
@@ -497,7 +498,7 @@ class _NavItemState extends State<_NavItem> {
           child: AnimatedContainer(
             duration: C.fast,
             height: 34,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: const EdgeInsets.only(right: 10),
             decoration: BoxDecoration(
               color: widget.active
                   ? C.accent.withOpacity(0.14)
@@ -506,7 +507,20 @@ class _NavItemState extends State<_NavItem> {
             ),
             child: Row(
               children: [
-                Icon(widget.section.icon,
+                // Fill plus a leading accent bar. One way of saying "this is
+                // the current thing", shared with the selected row in every
+                // table in the product, rather than a fill here and a bar
+                // there and a bottom border somewhere else.
+                Container(
+                  width: 2,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: widget.active ? C.accent : Colors.transparent,
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                LdIcon(widget.section.glyph,
                     size: 16, color: widget.active ? C.accent : fg),
                 const SizedBox(width: 10),
                 Text(
@@ -569,12 +583,17 @@ class _TitleBar extends StatelessWidget {
             ),
           ],
           const Spacer(),
-          if (section == ConsoleSection.fleet) ...[
+          // Both surfaces that show whether a machine is reachable can ask
+          // again. Reachability is polled, so without this the operator cannot
+          // tell a stale dot from a machine that is genuinely down.
+          if (onRefresh != null &&
+              (section == ConsoleSection.fleet ||
+                  section == ConsoleSection.connect)) ...[
             Text(_stamp(lastRefreshed, now), style: C.small(color: C.textFaint)),
             const SizedBox(width: 12),
             GhostButton(
               label: 'Refresh',
-              icon: Icons.refresh_rounded,
+              glyph: LdIcons.refresh,
               busy: isRefreshing,
               onPressed: onRefresh,
             ),

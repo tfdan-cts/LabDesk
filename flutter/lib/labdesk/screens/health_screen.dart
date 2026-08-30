@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/machine_metrics.dart';
 import '../models/machine_row.dart';
 import '../theme/console_theme.dart';
+import '../theme/ld_icons.dart';
 
 /// Health for one machine.
 ///
@@ -316,7 +317,11 @@ class _PickAMachine extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.monitor_heart_outlined, size: 26, color: C.textFaint),
+          // The set's own health glyph, a bare pulse. Material's monitor_heart
+          // draws that pulse inside a rounded box, which is a second health
+          // mark for the same idea sitting one sidebar item away from the
+          // first.
+          const LdIcon(LdIcons.health, size: 26, color: C.textFaint),
           const SizedBox(height: 14),
           Text('No machine selected', style: C.h2()),
           const SizedBox(height: 6),
