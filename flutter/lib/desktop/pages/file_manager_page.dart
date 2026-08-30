@@ -5,15 +5,17 @@ import 'dart:math';
 import 'package:extended_text/extended_text.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
 import 'package:flutter_hbb/desktop/widgets/dragable_divider.dart';
-import 'package:percent_indicator/percent_indicator.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_breadcrumb/flutter_breadcrumb.dart';
 import 'package:flutter_hbb/desktop/widgets/list_search_action_listener.dart';
-import 'package:flutter_hbb/desktop/widgets/menu_button.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
+import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
+import 'package:flutter_hbb/labdesk/theme/file_manager_skin.dart';
+import 'package:flutter_hbb/labdesk/theme/ld_icons.dart';
+import 'package:flutter_hbb/labdesk/theme/session_toolbar_skin.dart';
 import 'package:flutter_hbb/models/file_model.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
@@ -162,21 +164,32 @@ class _FileManagerPageState extends State<FileManagerPage>
     super.build(context);
     return Overlay(key: _overlayKeyState.key, initialEntries: [
       OverlayEntry(builder: (_) {
-        return willPopScope(Scaffold(
-          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          body: Row(
-            children: [
-              if (!isWeb)
-                Flexible(
-                    flex: 3,
-                    child: dropArea(FileManagerView(
-                        model.localController, _ffi, _mouseFocusScope))),
-              Flexible(
-                  flex: 3,
-                  child: dropArea(FileManagerView(
-                      model.remoteController, _ffi, _mouseFocusScope))),
-              Flexible(flex: 2, child: statusList())
-            ],
+        // The window runs on the console's own theme rather than the app's, so
+        // the two panes, the queue and everything Material would otherwise draw
+        // inside them sit on one dark surface ramp. It is applied under the
+        // overlay, not over it: the dialogs this page raises — the overwrite
+        // prompt above all — are unchanged.
+        return willPopScope(Theme(
+          data: cmThemeData(context),
+          child: Scaffold(
+            backgroundColor: C.bg,
+            body: Padding(
+              padding: const EdgeInsets.all(FmSkin.gap),
+              child: Row(
+                children: [
+                  if (!isWeb)
+                    Flexible(
+                        flex: 3,
+                        child: dropArea(FileManagerView(
+                            model.localController, _ffi, _mouseFocusScope))),
+                  Flexible(
+                      flex: 3,
+                      child: dropArea(FileManagerView(
+                          model.remoteController, _ffi, _mouseFocusScope))),
+                  Flexible(flex: 2, child: statusList())
+                ],
+              ),
+            ),
           ),
         ));
       })
@@ -196,174 +209,128 @@ class _FileManagerPageState extends State<FileManagerPage>
         child: fileView);
   }
 
-  Widget generateCard(Widget child) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.all(
-          Radius.circular(15.0),
-        ),
-      ),
-      child: child,
-    );
-  }
-
   /// transfer status list
   /// watch transfer status
+  ///
+  /// The queue is the part of this window people actually watch, so every state
+  /// the model can be in is drawn as itself: waiting, running with a bar and a
+  /// rate, paused, finished, failed. The reason a job failed is on the tile
+  /// rather than behind a tooltip — a transfer that broke overnight is the
+  /// whole reason anybody opens this panel in the morning.
   Widget statusList() {
-    Widget getIcon(JobProgress job) {
-      final color = Theme.of(context).tabBarTheme.labelColor;
-      switch (job.type) {
-        case JobType.deleteDir:
-        case JobType.deleteFile:
-          return Icon(Icons.delete_outline, color: color);
-        default:
-          return Transform.rotate(
-            angle: isWeb
-                ? job.isRemoteToLocal
-                    ? pi / 2
-                    : pi / 2 * 3
-                : job.isRemoteToLocal
-                    ? pi
-                    : 0,
-            child: Icon(Icons.arrow_forward_ios, color: color),
-          );
+    FmJobState stateOf(JobProgress job) {
+      switch (job.state) {
+        case JobState.inProgress:
+          return FmJobState.running;
+        case JobState.paused:
+          return FmJobState.paused;
+        case JobState.error:
+          return FmJobState.failed;
+        case JobState.done:
+          return FmJobState.done;
+        case JobState.none:
+          return FmJobState.queued;
       }
+    }
+
+    // The arrow points the way the two panes are laid out: left and right on
+    // the desktop, up and down on the web, exactly as before.
+    int directionTurns(JobProgress job) => isWeb
+        ? (job.isRemoteToLocal ? 1 : 3)
+        : (job.isRemoteToLocal ? 2 : 0);
+
+    Widget jobTile(JobProgress item, int index) {
+      final running =
+          item.type == JobType.transfer && item.state == JobState.inProgress;
+      final deleting =
+          item.type == JobType.deleteDir || item.type == JobType.deleteFile;
+      // `display()` already resolves cancelled and skipped jobs; only the
+      // paused state has no word of its own in the model.
+      final label = item.display().isNotEmpty
+          ? item.display()
+          : translate(item.state == JobState.paused ? 'Paused' : 'Waiting');
+      final err = item.err;
+      return FmJobTile(
+        name: Tooltip(
+          waitDuration: Duration(milliseconds: 500),
+          message: item.jobName,
+          // Elided from the front: the tail of a path is the part that says
+          // which file this is.
+          child: ExtendedText(
+            item.jobName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: C.body(color: C.text).copyWith(fontWeight: FontWeight.w600),
+            overflowWidget: TextOverflowWidget(
+                child: Text("...", style: C.body(color: C.textFaint)),
+                position: TextOverflowPosition.start),
+          ),
+        ),
+        state: stateOf(item),
+        stateLabel: label,
+        detail: item.getStatus(),
+        directionGlyph: deleting ? LdIcons.trash : LdIcons.arrowRight,
+        directionTurns: deleting ? 0 : directionTurns(item),
+        percent: running ? item.percent : null,
+        percentText: running ? item.percentText : null,
+        speed: running && item.speed > 0
+            ? '${readableFileSize(item.speed)}/s'
+            : null,
+        error: item.state == JobState.error &&
+                err.isNotEmpty &&
+                err != 'cancel' &&
+                err != 'skipped'
+            ? err
+            : null,
+        actions: [
+          Offstage(
+            offstage: item.state != JobState.paused,
+            child: FmToolButton(
+              glyph: FmGlyphs.resume,
+              tooltip: translate("Resume"),
+              onPressed: () {
+                jobController.resumeJob(item.id);
+              },
+            ),
+          ),
+          FmToolButton(
+            glyph: LdIcons.close,
+            tooltip: translate("Delete"),
+            danger: true,
+            onPressed: () {
+              jobController.jobTable.removeAt(index);
+              jobController.cancelJob(item.id);
+            },
+          ),
+        ],
+      );
     }
 
     statusListView(List<JobProgress> jobs) => ListView.builder(
           controller: ScrollController(),
-          itemBuilder: (BuildContext context, int index) {
-            final item = jobs[index];
-            final status = item.getStatus();
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 5),
-              child: generateCard(
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        getIcon(item)
-                            .marginSymmetric(horizontal: 10, vertical: 12),
-                        Expanded(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Tooltip(
-                                waitDuration: Duration(milliseconds: 500),
-                                message: item.jobName,
-                                child: ExtendedText(
-                                  item.jobName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  overflowWidget: TextOverflowWidget(
-                                      child: Text("..."),
-                                      position: TextOverflowPosition.start),
-                                ),
-                              ),
-                              Tooltip(
-                                waitDuration: Duration(milliseconds: 500),
-                                message: status,
-                                child: Text(status,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: MyTheme.darkGray,
-                                    )).marginOnly(top: 6),
-                              ),
-                              Offstage(
-                                offstage: item.type != JobType.transfer ||
-                                    item.state != JobState.inProgress,
-                                child: LinearPercentIndicator(
-                                  animateFromLastPercent: true,
-                                  center: Text(item.percentText),
-                                  barRadius: Radius.circular(15),
-                                  percent: item.percent,
-                                  progressColor: MyTheme.accent,
-                                  backgroundColor: Theme.of(context).hoverColor,
-                                  lineHeight: kDesktopFileTransferRowHeight,
-                                ).paddingSymmetric(vertical: 8),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Offstage(
-                              offstage: item.state != JobState.paused,
-                              child: MenuButton(
-                                tooltip: translate("Resume"),
-                                onPressed: () {
-                                  jobController.resumeJob(item.id);
-                                },
-                                child: SvgPicture.asset(
-                                  "assets/refresh.svg",
-                                  colorFilter: svgColor(Colors.white),
-                                ),
-                                color: MyTheme.accent,
-                                hoverColor: MyTheme.accent80,
-                              ),
-                            ),
-                            MenuButton(
-                              tooltip: translate("Delete"),
-                              child: SvgPicture.asset(
-                                "assets/close.svg",
-                                colorFilter: svgColor(Colors.white),
-                              ),
-                              onPressed: () {
-                                jobController.jobTable.removeAt(index);
-                                jobController.cancelJob(item.id);
-                              },
-                              color: MyTheme.accent,
-                              hoverColor: MyTheme.accent80,
-                            ),
-                          ],
-                        ).marginAll(12),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
+          itemBuilder: (BuildContext context, int index) =>
+              jobTile(jobs[index], index),
           itemCount: jobController.jobTable.length,
         );
 
-    return PreferredSize(
-      preferredSize: const Size(200, double.infinity),
-      child: Container(
-          margin: const EdgeInsets.only(top: 16.0, bottom: 16.0, right: 16.0),
-          padding: const EdgeInsets.all(8.0),
+    return FmPane(
+      children: [
+        FmPaneHeader(
+          title: translate('Transfer file'),
+          trailing: Obx(() => Text('${jobController.jobTable.length}',
+              style: C.data(size: 12, color: C.textFaint))),
+        ),
+        Expanded(
           child: Obx(
             () => jobController.jobTable.isEmpty
-                ? generateCard(
-                    Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          SvgPicture.asset(
-                            "assets/transfer.svg",
-                            colorFilter: svgColor(
-                                Theme.of(context).tabBarTheme.labelColor),
-                            height: 40,
-                          ).paddingOnly(bottom: 10),
-                          Text(
-                            translate("No transfers in progress"),
-                            textAlign: TextAlign.center,
-                            textScaler: TextScaler.linear(1.20),
-                            style: TextStyle(
-                                color:
-                                    Theme.of(context).tabBarTheme.labelColor),
-                          ),
-                        ],
-                      ),
-                    ),
+                ? FmEmpty(
+                    glyph: LdIcons.fileTransfer,
+                    line: translate("No transfers in progress"),
                   )
                 : statusListView(jobController.jobTable),
-          )),
+          ),
+        ),
+      ],
     );
   }
 
@@ -444,34 +411,22 @@ class _FileManagerViewState extends State<FileManagerView> {
   @override
   Widget build(BuildContext context) {
     _handleColumnPorportions();
-    return Container(
-      margin: const EdgeInsets.all(16.0),
-      padding: const EdgeInsets.all(8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          headTools(),
-          Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                    child: MouseRegion(
-                  onEnter: (evt) {
-                    widget._mouseFocusScope.value = isLocal
-                        ? MouseFocusScope.local
-                        : MouseFocusScope.remote;
-                    _keyboardNode.requestFocus();
-                  },
-                  onExit: (evt) =>
-                      widget._mouseFocusScope.value = MouseFocusScope.none,
-                  child: _buildFileList(context, _fileListScrollController),
-                ))
-              ],
-            ),
+    return FmPane(
+      children: [
+        headTools(),
+        Expanded(
+          child: MouseRegion(
+            onEnter: (evt) {
+              widget._mouseFocusScope.value =
+                  isLocal ? MouseFocusScope.local : MouseFocusScope.remote;
+              _keyboardNode.requestFocus();
+            },
+            onExit: (evt) =>
+                widget._mouseFocusScope.value = MouseFocusScope.none,
+            child: _buildFileList(context, _fileListScrollController),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -481,9 +436,12 @@ class _FileManagerViewState extends State<FileManagerView> {
       _windowWidthPrev = windowWidthNow;
       final defaultColumnWidth = windowWidthNow * 0.115;
       _fileTransferMinimumWidth = defaultColumnWidth / 3;
-      _nameColWidth.value = defaultColumnWidth;
-      _modifiedColWidth.value = defaultColumnWidth;
-      _sizeColWidth.value = defaultColumnWidth;
+      // The same three columns of space as before, apportioned by what each one
+      // holds: the name is what the eye scans and was the column that ran out
+      // of room first, while the size never needs more than eight characters.
+      _nameColWidth.value = defaultColumnWidth * 1.5;
+      _modifiedColWidth.value = defaultColumnWidth * 1.05;
+      _sizeColWidth.value = defaultColumnWidth * 0.45;
     }
 
     if (_windowWidthPrev != windowWidthNow) {
@@ -512,118 +470,74 @@ class _FileManagerViewState extends State<FileManagerView> {
     var uploadButtonTapPosition = RelativeRect.fill;
     RxBool isUploadFolder =
         (bind.mainGetLocalOption(key: 'upload-folder-button') == 'Y').obs;
-    return Container(
-      child: Column(
-        children: [
-          // symbols
-          PreferredSize(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Container(
-                          width: 50,
-                          height: 50,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.all(Radius.circular(8)),
-                            color: MyTheme.accent,
-                          ),
-                          padding: EdgeInsets.all(8.0),
-                          child: FutureBuilder<String>(
-                              future: bind.sessionGetPlatform(
-                                  sessionId: _ffi.sessionId,
-                                  isRemote: !isLocal),
-                              builder: (context, snapshot) {
-                                if (snapshot.hasData &&
-                                    snapshot.data!.isNotEmpty) {
-                                  return getPlatformImage('${snapshot.data}');
-                                } else {
-                                  return CircularProgressIndicator(
-                                    color: Theme.of(context)
-                                        .tabBarTheme
-                                        .labelColor,
-                                  );
-                                }
-                              })),
-                      Text(isLocal
-                              ? translate("Local Computer")
-                              : translate("Remote Computer"))
-                          .marginOnly(left: 8.0)
-                    ],
-                  ),
-                  preferredSize: Size(double.infinity, 70))
-              .paddingOnly(bottom: 15),
-          // buttons
-          Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Which machine this pane is showing. The platform mark is the
+        // console's own glyph rather than the borrowed logo, and it sits on the
+        // surface ramp instead of inside a filled accent square — the accent in
+        // this window means "this is the action".
+        FmPaneHeader(
+          title: isLocal
+              ? translate("Local Computer")
+              : translate("Remote Computer"),
+          badge: FutureBuilder<String>(
+              future: bind.sessionGetPlatform(
+                  sessionId: _ffi.sessionId, isRemote: !isLocal),
+              builder: (context, snapshot) {
+                if (snapshot.hasData && snapshot.data!.isNotEmpty) {
+                  return LdIcon(_platformGlyph(snapshot.data!),
+                      size: 18, color: C.textMuted);
+                } else {
+                  return CircularProgressIndicator(
+                      strokeWidth: 1.6, color: C.textFaint);
+                }
+              }),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+          child: Column(
             children: [
+              // Where the pane is, and how to get somewhere else.
               Row(
                 children: [
-                  MenuButton(
+                  FmToolButton(
+                    glyph: LdIcons.chevronLeft,
                     tooltip: translate('Back'),
-                    padding: EdgeInsets.only(
-                      right: 3,
-                    ),
-                    child: RotatedBox(
-                      quarterTurns: 2,
-                      child: SvgPicture.asset(
-                        "assets/arrow.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                    ),
-                    color: Theme.of(context).cardColor,
-                    hoverColor: Theme.of(context).hoverColor,
                     onPressed: () {
                       selectedItems.clear();
                       controller.goBack();
                     },
                   ),
-                  MenuButton(
+                  FmToolButton(
+                    glyph: LdIcons.arrowUp,
                     tooltip: translate('Parent directory'),
-                    child: RotatedBox(
-                      quarterTurns: 3,
-                      child: SvgPicture.asset(
-                        "assets/arrow.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                    ),
-                    color: Theme.of(context).cardColor,
-                    hoverColor: Theme.of(context).hoverColor,
                     onPressed: () {
                       selectedItems.clear();
                       controller.goToParentDirectory();
                     },
                   ),
-                ],
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 3.0),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.all(
-                        Radius.circular(8.0),
-                      ),
-                    ),
+                  Expanded(
                     child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 2.5),
-                      child: GestureDetector(
-                        onTap: () {
-                          _locationStatus.value =
-                              _locationStatus.value == LocationStatus.bread
-                                  ? LocationStatus.pathLocation
-                                  : LocationStatus.bread;
-                          Future.delayed(Duration.zero, () {
-                            if (_locationStatus.value ==
-                                LocationStatus.pathLocation) {
-                              _locationNode.requestFocus();
-                            }
-                          });
-                        },
-                        child: Obx(
-                          () => Container(
-                            child: Row(
+                      padding: const EdgeInsets.symmetric(horizontal: 6.0),
+                      child: Container(
+                        height: FmSkin.toolButtonSize,
+                        decoration: FmSkin.field,
+                        child: GestureDetector(
+                          onTap: () {
+                            _locationStatus.value =
+                                _locationStatus.value == LocationStatus.bread
+                                    ? LocationStatus.pathLocation
+                                    : LocationStatus.bread;
+                            Future.delayed(Duration.zero, () {
+                              if (_locationStatus.value ==
+                                  LocationStatus.pathLocation) {
+                                _locationNode.requestFocus();
+                              }
+                            });
+                          },
+                          child: Obx(
+                            () => Row(
                               children: [
                                 Expanded(
                                     child: _locationStatus.value ==
@@ -637,99 +551,69 @@ class _FileManagerViewState extends State<FileManagerView> {
                       ),
                     ),
                   ),
-                ),
+                  Obx(() {
+                    switch (_locationStatus.value) {
+                      case LocationStatus.bread:
+                        return FmToolButton(
+                          glyph: LdIcons.search,
+                          tooltip: translate('Search'),
+                          onPressed: () {
+                            _locationStatus.value =
+                                LocationStatus.fileSearchBar;
+                            Future.delayed(Duration.zero,
+                                () => _locationNode.requestFocus());
+                          },
+                        );
+                      case LocationStatus.pathLocation:
+                        return FmToolButton(
+                          glyph: LdIcons.close,
+                          tooltip: '',
+                          onPressed: null,
+                        );
+                      case LocationStatus.fileSearchBar:
+                        return FmToolButton(
+                          glyph: LdIcons.close,
+                          tooltip: translate('Clear'),
+                          onPressed: () {
+                            onSearchText("", isLocal);
+                            _locationStatus.value = LocationStatus.bread;
+                          },
+                        );
+                    }
+                  }),
+                  FmToolButton(
+                    glyph: LdIcons.refresh,
+                    tooltip: translate('Refresh File'),
+                    onPressed: () {
+                      controller.refresh();
+                    },
+                  ),
+                ],
               ),
-              Obx(() {
-                switch (_locationStatus.value) {
-                  case LocationStatus.bread:
-                    return MenuButton(
-                      tooltip: translate('Search'),
-                      onPressed: () {
-                        _locationStatus.value = LocationStatus.fileSearchBar;
-                        Future.delayed(
-                            Duration.zero, () => _locationNode.requestFocus());
-                      },
-                      child: SvgPicture.asset(
-                        "assets/search.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                      color: Theme.of(context).cardColor,
-                      hoverColor: Theme.of(context).hoverColor,
-                    );
-                  case LocationStatus.pathLocation:
-                    return MenuButton(
-                      onPressed: null,
-                      child: SvgPicture.asset(
-                        "assets/close.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                      color: Theme.of(context).disabledColor,
-                      hoverColor: Theme.of(context).hoverColor,
-                    );
-                  case LocationStatus.fileSearchBar:
-                    return MenuButton(
-                      tooltip: translate('Clear'),
-                      onPressed: () {
-                        onSearchText("", isLocal);
-                        _locationStatus.value = LocationStatus.bread;
-                      },
-                      child: SvgPicture.asset(
-                        "assets/close.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                      color: Theme.of(context).cardColor,
-                      hoverColor: Theme.of(context).hoverColor,
-                    );
-                }
-              }),
-              MenuButton(
-                tooltip: translate('Refresh File'),
-                padding: EdgeInsets.only(
-                  left: 3,
-                ),
-                onPressed: () {
-                  controller.refresh();
-                },
-                child: SvgPicture.asset(
-                  "assets/refresh.svg",
-                  colorFilter:
-                      svgColor(Theme.of(context).tabBarTheme.labelColor),
-                ),
-                color: Theme.of(context).cardColor,
-                hoverColor: Theme.of(context).hoverColor,
-              ),
-            ],
-          ),
-          Row(
-            textDirection: isLocal ? TextDirection.ltr : TextDirection.rtl,
-            children: [
-              Expanded(
-                child: Row(
-                  mainAxisAlignment:
-                      isLocal ? MainAxisAlignment.start : MainAxisAlignment.end,
-                  children: [
-                    MenuButton(
-                      tooltip: translate('Home'),
-                      padding: EdgeInsets.only(
-                        right: 3,
-                      ),
-                      onPressed: () {
-                        controller.goToHomeDirectory();
-                      },
-                      child: SvgPicture.asset(
-                        "assets/home.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                      color: Theme.of(context).cardColor,
-                      hoverColor: Theme.of(context).hoverColor,
-                    ),
-                    MenuButton(
-                      tooltip: translate('Create Folder'),
-                      onPressed: () {
+              const SizedBox(height: 6),
+              // What can be done to what is in it. The two panes mirror each
+              // other, so the send button always sits on the side the files
+              // leave by.
+              Row(
+                textDirection: isLocal ? TextDirection.ltr : TextDirection.rtl,
+                children: [
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: isLocal
+                          ? MainAxisAlignment.start
+                          : MainAxisAlignment.end,
+                      children: [
+                        FmToolButton(
+                          glyph: FmGlyphs.home,
+                          tooltip: translate('Home'),
+                          onPressed: () {
+                            controller.goToHomeDirectory();
+                          },
+                        ),
+                        FmToolButton(
+                          glyph: LdIcons.folderAdd,
+                          tooltip: translate('Create Folder'),
+                          onPressed: () {
                         final name = TextEditingController();
                         String? errorText;
                         _ffi.dialogManager.show((setState, close, context) {
@@ -805,171 +689,110 @@ class _FileManagerViewState extends State<FileManagerView> {
                           );
                         });
                       },
-                      child: SvgPicture.asset(
-                        "assets/folder_new.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                      color: Theme.of(context).cardColor,
-                      hoverColor: Theme.of(context).hoverColor,
+                        ),
+                        Obx(() => FmToolButton(
+                              glyph: LdIcons.trash,
+                              tooltip: translate('Delete'),
+                              danger: true,
+                              onPressed:
+                                  SelectedItems.valid(selectedItems.items)
+                                      ? () async {
+                                          await (controller
+                                              .removeAction(selectedItems));
+                                          selectedItems.clear();
+                                        }
+                                      : null,
+                            )),
+                        menu(isLocal: isLocal),
+                      ],
                     ),
-                    Obx(() => MenuButton(
-                          tooltip: translate('Delete'),
-                          onPressed: SelectedItems.valid(selectedItems.items)
-                              ? () async {
-                                  await (controller
-                                      .removeAction(selectedItems));
-                                  selectedItems.clear();
+                  ),
+                  if (isWeb)
+                    Obx(() => Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            FmSendButton(
+                              label: translate(isUploadFolder.isTrue
+                                  ? 'Upload folder'
+                                  : 'Upload files'),
+                              glyph: LdIcons.arrowUp,
+                              onPressed: () =>
+                                  {webselectFiles(is_folder: isUploadFolder.value)},
+                            ),
+                            InkWell(
+                              hoverColor: Colors.transparent,
+                              splashColor: Colors.transparent,
+                              highlightColor: Colors.transparent,
+                              focusColor: Colors.transparent,
+                              onTapDown: (e) {
+                                final x = e.globalPosition.dx;
+                                final y = e.globalPosition.dy;
+                                uploadButtonTapPosition =
+                                    RelativeRect.fromLTRB(x, y, x, y);
+                              },
+                              onTap: () async {
+                                final value = await showMenu<bool>(
+                                    context: context,
+                                    position: uploadButtonTapPosition,
+                                    items: [
+                                      PopupMenuItem<bool>(
+                                        value: false,
+                                        child: Text(translate('Upload files')),
+                                      ),
+                                      PopupMenuItem<bool>(
+                                        value: true,
+                                        child: Text(translate('Upload folder')),
+                                      ),
+                                    ]);
+                                if (value != null) {
+                                  isUploadFolder.value = value;
+                                  bind.mainSetLocalOption(
+                                      key: 'upload-folder-button',
+                                      value: value ? 'Y' : '');
+                                  webselectFiles(is_folder: value);
                                 }
-                              : null,
-                          child: SvgPicture.asset(
-                            "assets/trash.svg",
-                            colorFilter: svgColor(
-                                Theme.of(context).tabBarTheme.labelColor),
-                          ),
-                          color: Theme.of(context).cardColor,
-                          hoverColor: Theme.of(context).hoverColor,
+                              },
+                              child: const LdIcon(LdIcons.chevronDown,
+                                  size: 16, color: C.textMuted),
+                            ),
+                          ]),
                         )),
-                    menu(isLocal: isLocal),
-                  ],
-                ),
+                  Obx(() => FmSendButton(
+                        label: isLocal
+                            ? translate('Send')
+                            : translate(isWeb ? 'Download' : 'Receive'),
+                        glyph: LdIcons.arrowRight,
+                        // The arrow points at the machine the files are going
+                        // to, which is the other pane.
+                        quarterTurns: isLocal ? 0 : 2,
+                        reversed: !isLocal,
+                        onPressed: SelectedItems.valid(selectedItems.items)
+                            ? () {
+                                final otherSideData =
+                                    controller.getOtherSideDirectoryData();
+                                controller.sendFiles(
+                                    selectedItems, otherSideData);
+                                selectedItems.clear();
+                              }
+                            : null,
+                      )),
+                ],
               ),
-              if (isWeb)
-                Obx(() => ElevatedButton.icon(
-                      style: ButtonStyle(
-                        padding: MaterialStateProperty.all<EdgeInsetsGeometry>(
-                            isLocal
-                                ? EdgeInsets.only(left: 10)
-                                : EdgeInsets.only(right: 10)),
-                        backgroundColor: MaterialStateProperty.all(
-                          selectedItems.items.isEmpty
-                              ? MyTheme.accent80
-                              : MyTheme.accent,
-                        ),
-                      ),
-                      onPressed: () =>
-                          {webselectFiles(is_folder: isUploadFolder.value)},
-                      label: InkWell(
-                        hoverColor: Colors.transparent,
-                        splashColor: Colors.transparent,
-                        highlightColor: Colors.transparent,
-                        focusColor: Colors.transparent,
-                        onTapDown: (e) {
-                          final x = e.globalPosition.dx;
-                          final y = e.globalPosition.dy;
-                          uploadButtonTapPosition =
-                              RelativeRect.fromLTRB(x, y, x, y);
-                        },
-                        onTap: () async {
-                          final value = await showMenu<bool>(
-                              context: context,
-                              position: uploadButtonTapPosition,
-                              items: [
-                                PopupMenuItem<bool>(
-                                  value: false,
-                                  child: Text(translate('Upload files')),
-                                ),
-                                PopupMenuItem<bool>(
-                                  value: true,
-                                  child: Text(translate('Upload folder')),
-                                ),
-                              ]);
-                          if (value != null) {
-                            isUploadFolder.value = value;
-                            bind.mainSetLocalOption(
-                                key: 'upload-folder-button',
-                                value: value ? 'Y' : '');
-                            webselectFiles(is_folder: value);
-                          }
-                        },
-                        child: Icon(Icons.arrow_drop_down),
-                      ),
-                      icon: Text(
-                        translate(isUploadFolder.isTrue
-                            ? 'Upload folder'
-                            : 'Upload files'),
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          color: Colors.white,
-                        ),
-                      ).marginOnly(left: 8),
-                    )).marginOnly(left: 16),
-              Obx(() => ElevatedButton.icon(
-                    style: ButtonStyle(
-                      padding: MaterialStateProperty.all<EdgeInsetsGeometry>(
-                          isLocal
-                              ? EdgeInsets.only(left: 10)
-                              : EdgeInsets.only(right: 10)),
-                      backgroundColor: MaterialStateProperty.all(
-                        selectedItems.items.isEmpty
-                            ? MyTheme.accent80
-                            : MyTheme.accent,
-                      ),
-                    ),
-                    onPressed: SelectedItems.valid(selectedItems.items)
-                        ? () {
-                            final otherSideData =
-                                controller.getOtherSideDirectoryData();
-                            controller.sendFiles(selectedItems, otherSideData);
-                            selectedItems.clear();
-                          }
-                        : null,
-                    icon: isLocal
-                        ? Text(
-                            translate('Send'),
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                              color: selectedItems.items.isEmpty
-                                  ? Theme.of(context).brightness ==
-                                          Brightness.light
-                                      ? MyTheme.grayBg
-                                      : MyTheme.darkGray
-                                  : Colors.white,
-                            ),
-                          )
-                        : isWeb
-                            ? Offstage()
-                            : RotatedBox(
-                                quarterTurns: 2,
-                                child: SvgPicture.asset(
-                                  "assets/arrow.svg",
-                                  colorFilter: svgColor(
-                                      selectedItems.items.isEmpty
-                                          ? Theme.of(context).brightness ==
-                                                  Brightness.light
-                                              ? MyTheme.grayBg
-                                              : MyTheme.darkGray
-                                          : Colors.white),
-                                  alignment: Alignment.bottomRight,
-                                ),
-                              ),
-                    label: isLocal
-                        ? SvgPicture.asset(
-                            "assets/arrow.svg",
-                            colorFilter: svgColor(selectedItems.items.isEmpty
-                                ? Theme.of(context).brightness ==
-                                        Brightness.light
-                                    ? MyTheme.grayBg
-                                    : MyTheme.darkGray
-                                : Colors.white),
-                          )
-                        : Text(
-                            translate(isWeb ? 'Download' : 'Receive'),
-                            style: TextStyle(
-                              color: selectedItems.items.isEmpty
-                                  ? Theme.of(context).brightness ==
-                                          Brightness.light
-                                      ? MyTheme.grayBg
-                                      : MyTheme.darkGray
-                                  : Colors.white,
-                            ),
-                          ),
-                  )),
             ],
-          ).marginOnly(top: 8.0)
-        ],
-      ),
+          ),
+        ),
+      ],
     );
+  }
+
+  /// The console draws its own platform marks, so the pane header uses those
+  /// rather than the borrowed logos. The branching matches `getPlatformImage`'s
+  /// exactly: anything that is not macOS, Linux or Android is Windows.
+  String _platformGlyph(String platform) {
+    if (platform == kPeerPlatformMacOS) return LdIcons.macos;
+    if (platform == kPeerPlatformLinux) return LdIcons.linux;
+    if (platform == kPeerPlatformAndroid) return LdIcons.android;
+    return LdIcons.windows;
   }
 
   Widget menu({bool isLocal = false}) {
@@ -1008,7 +831,8 @@ class _FileManagerViewState extends State<FileManagerView> {
         final y = e.position.dy;
         menuPos = RelativeRect.fromLTRB(x, y, x, y);
       },
-      child: MenuButton(
+      child: FmToolButton(
+        glyph: LdIcons.more,
         tooltip: translate('More'),
         onPressed: () => mod_menu.showMenu(
           context: context,
@@ -1027,12 +851,6 @@ class _FileManagerViewState extends State<FileManagerView> {
               .toList(),
           elevation: 8,
         ),
-        child: SvgPicture.asset(
-          "assets/dots.svg",
-          colorFilter: svgColor(Theme.of(context).tabBarTheme.labelColor),
-        ),
-        color: Theme.of(context).cardColor,
-        hoverColor: Theme.of(context).hoverColor,
       ),
     );
   }
@@ -1072,7 +890,7 @@ class _FileManagerViewState extends State<FileManagerView> {
           return;
         }
         _jumpToEntry(isLocal, searchResult.first, scrollController,
-            kDesktopFileTransferRowHeight);
+            FmSkin.rowHeight);
       },
       onSearch: (buffer) {
         debugPrint("searching for $buffer");
@@ -1085,7 +903,7 @@ class _FileManagerViewState extends State<FileManagerView> {
           return;
         }
         _jumpToEntry(isLocal, searchResult.first, scrollController,
-            kDesktopFileTransferRowHeight);
+            FmSkin.rowHeight);
       },
       child: Obx(() {
         final entries = controller.directory.value.entries;
@@ -1148,154 +966,42 @@ class _FileManagerViewState extends State<FileManagerView> {
                 details.globalPosition.dy);
           }
 
-          return Padding(
-            padding: EdgeInsets.symmetric(vertical: 1),
-            child: Obx(() => Container(
-                decoration: BoxDecoration(
-                  color: selectedItems.items.contains(entry)
-                      ? MyTheme.button
-                      : Theme.of(context).cardColor,
-                  borderRadius: BorderRadius.all(
-                    Radius.circular(5.0),
-                  ),
-                  border: rightClickEntry.value == entry
-                      ? Border.all(
-                          color: MyTheme.button,
-                          width: 1.0,
-                        )
-                      : null,
-                ),
+          return Obx(() => FmFileRow(
                 key: ValueKey(entry.name),
-                height: kDesktopFileTransferRowHeight,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    Expanded(
-                      child: InkWell(
-                        child: Row(
-                          children: [
-                            GestureDetector(
-                              child: Obx(
-                                () => Container(
-                                    width: _nameColWidth.value,
-                                    child: Tooltip(
-                                      waitDuration: Duration(milliseconds: 500),
-                                      message: entry.name,
-                                      child: Row(children: [
-                                        entry.isDrive
-                                            ? Image(
-                                                    image: iconHardDrive,
-                                                    fit: BoxFit.scaleDown,
-                                                    color: Theme.of(context)
-                                                        .iconTheme
-                                                        .color
-                                                        ?.withOpacity(0.7))
-                                                .paddingAll(4)
-                                            : SvgPicture.asset(
-                                                entry.isFile
-                                                    ? "assets/file.svg"
-                                                    : "assets/folder.svg",
-                                                colorFilter: svgColor(
-                                                    Theme.of(context)
-                                                        .tabBarTheme
-                                                        .labelColor),
-                                              ),
-                                        Expanded(
-                                            child: Text(entry.name.nonBreaking,
-                                                style: TextStyle(
-                                                    color: selectedItems.items
-                                                            .contains(entry)
-                                                        ? Colors.white
-                                                        : null),
-                                                overflow:
-                                                    TextOverflow.ellipsis))
-                                      ]),
-                                    )),
-                              ),
-                              onTap: onTap,
-                              onSecondaryTap: onSecondaryTap,
-                              onSecondaryTapDown: onSecondaryTapDown,
-                            ),
-                            SizedBox(
-                              width: 2.0,
-                            ),
-                            GestureDetector(
-                              child: Obx(
-                                () => SizedBox(
-                                  width: _modifiedColWidth.value,
-                                  child: Tooltip(
-                                      waitDuration: Duration(milliseconds: 500),
-                                      message: lastModifiedStr,
-                                      child: Text(
-                                        lastModifiedStr,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: selectedItems.items
-                                                  .contains(entry)
-                                              ? Colors.white70
-                                              : MyTheme.darkGray,
-                                        ),
-                                      )),
-                                ),
-                              ),
-                              onTap: onTap,
-                              onSecondaryTap: onSecondaryTap,
-                              onSecondaryTapDown: onSecondaryTapDown,
-                            ),
-                            // Divider from header.
-                            SizedBox(
-                              width: 2.0,
-                            ),
-                            Expanded(
-                              // width: 100,
-                              child: GestureDetector(
-                                child: Tooltip(
-                                  waitDuration: Duration(milliseconds: 500),
-                                  message: sizeStr,
-                                  child: Text(
-                                    sizeStr,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        fontSize: 10,
-                                        color:
-                                            selectedItems.items.contains(entry)
-                                                ? Colors.white70
-                                                : MyTheme.darkGray),
-                                  ),
-                                ),
-                                onTap: onTap,
-                                onSecondaryTap: onSecondaryTap,
-                                onSecondaryTapDown: onSecondaryTapDown,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ))),
-          );
+                name: entry.name.nonBreaking,
+                kind: entry.isDrive
+                    ? FmEntryKind.drive
+                    : (entry.isFile ? FmEntryKind.file : FmEntryKind.folder),
+                modified: lastModifiedStr,
+                size: sizeStr,
+                selected: selectedItems.items.contains(entry),
+                contextTarget: rightClickEntry.value == entry,
+                nameWidth: _nameColWidth.value,
+                modifiedWidth: _modifiedColWidth.value,
+                onTap: onTap,
+                onSecondaryTap: onSecondaryTap,
+                onSecondaryTapDown: onSecondaryTapDown,
+              ));
         }).toList(growable: false);
 
         return Column(
           children: [
-            // Header
-            Row(
-              children: [
-                Expanded(child: _buildFileBrowserHeader(context)),
-              ],
-            ),
+            _buildFileBrowserHeader(context),
             // Body
             Expanded(
-              child: ListView.builder(
-                controller: scrollController,
-                itemExtent: kDesktopFileTransferRowHeight,
-                itemBuilder: (context, index) {
-                  return rows[index];
-                },
-                itemCount: rows.length,
-              ),
+              child: rows.isEmpty
+                  ? FmEmpty(
+                      glyph: FmGlyphs.folder,
+                      line: translate('Empty'),
+                    )
+                  : ListView.builder(
+                      controller: scrollController,
+                      itemExtent: FmSkin.rowHeight,
+                      itemBuilder: (context, index) {
+                        return rows[index];
+                      },
+                      itemCount: rows.length,
+                    ),
             ),
           ],
         );
@@ -1391,19 +1097,35 @@ class _FileManagerViewState extends State<FileManagerView> {
     column2.value = max(_fileTransferMinimumWidth, column2.value);
   }
 
+  /// The column heads, on the chrome plane so the band reads as a rule over the
+  /// listing rather than as its first row.
+  ///
+  /// The leading 2 and the trailing 10 are the row's own selection rule and its
+  /// right margin: the heads sit exactly over the columns they name, which the
+  /// old header did not.
   Widget _buildFileBrowserHeader(BuildContext context) {
-    final padding = EdgeInsets.all(1.0);
-    return SizedBox(
+    const padding = EdgeInsets.symmetric(horizontal: 0.5);
+    return Container(
       key: _globalHeaderKey,
-      height: kDesktopFileTransferHeaderHeight,
+      height: FmSkin.headerHeight,
+      decoration: const BoxDecoration(
+        color: C.chrome,
+        border: Border(
+          top: BorderSide(color: C.hairline),
+          bottom: BorderSide(color: C.hairline),
+        ),
+      ),
       child: Row(
         children: [
+          const SizedBox(width: 2),
           Obx(
             () => headerItemFunc(
-                _nameColWidth.value, SortBy.name, translate("Name")),
+                _nameColWidth.value, SortBy.name, translate("Name"),
+                leading: 10),
           ),
           DraggableDivider(
             axis: Axis.vertical,
+            color: C.hairline,
             onPointerMove: (dx) =>
                 _onDrag(dx, _nameColWidth, _modifiedColWidth),
             padding: padding,
@@ -1414,51 +1136,39 @@ class _FileManagerViewState extends State<FileManagerView> {
           ),
           DraggableDivider(
               axis: Axis.vertical,
+              color: C.hairline,
               onPointerMove: (dx) =>
                   _onDrag(dx, _modifiedColWidth, _sizeColWidth),
               padding: padding),
           Expanded(
-              child: headerItemFunc(
-                  _sizeColWidth.value, SortBy.size, translate("Size")))
+              child: headerItemFunc(null, SortBy.size, translate("Size"),
+                  alignEnd: true)),
+          const SizedBox(width: 10),
         ],
       ),
     );
   }
 
-  Widget headerItemFunc(double? width, SortBy sortBy, String name) {
-    final headerTextStyle =
-        Theme.of(context).dataTableTheme.headingTextStyle ?? TextStyle();
+  Widget headerItemFunc(double? width, SortBy sortBy, String name,
+      {double leading = 0, bool alignEnd = false}) {
     return ObxValue<Rx<bool?>>(
-        (ascending) => InkWell(
-              onTap: () {
-                if (ascending.value == null) {
-                  ascending.value = true;
-                } else {
-                  ascending.value = !ascending.value!;
-                }
-                controller.changeSortStyle(sortBy,
-                    isLocal: isLocal, ascending: ascending.value!);
-              },
-              child: SizedBox(
-                width: width,
-                height: kDesktopFileTransferHeaderHeight,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        name,
-                        style: headerTextStyle,
-                        overflow: TextOverflow.ellipsis,
-                      ).marginOnly(left: 4),
-                    ),
-                    ascending.value != null
-                        ? Icon(
-                            ascending.value!
-                                ? Icons.keyboard_arrow_up_rounded
-                                : Icons.keyboard_arrow_down_rounded,
-                          )
-                        : SizedBox()
-                  ],
+        (ascending) => SizedBox(
+              width: width,
+              child: Padding(
+                padding: EdgeInsets.only(left: leading),
+                child: FmColumnHead(
+                  label: name,
+                  ascending: ascending.value,
+                  alignEnd: alignEnd,
+                  onTap: () {
+                    if (ascending.value == null) {
+                      ascending.value = true;
+                    } else {
+                      ascending.value = !ascending.value!;
+                    }
+                    controller.changeSortStyle(sortBy,
+                        isLocal: isLocal, ascending: ascending.value!);
+                  },
                 ),
               ),
             ), () {
@@ -1497,17 +1207,19 @@ class _FileManagerViewState extends State<FileManagerView> {
                     },
                     child: BreadCrumb(
                       items: items,
-                      divider: const Icon(Icons.keyboard_arrow_right_rounded),
+                      divider: const LdIcon(LdIcons.chevronRight,
+                          size: 12, color: C.textFaint),
                       overflow: ScrollableOverflow(
                         controller: _breadCrumbScroller,
                       ),
                     ),
                   ),
                 ),
-                ActionIcon(
-                  message: "",
-                  icon: Icons.keyboard_arrow_down_rounded,
-                  onTap: () async {
+                FmToolButton(
+                  glyph: LdIcons.chevronDown,
+                  tooltip: "",
+                  glyphSize: 15,
+                  onPressed: () async {
                     final renderBox = _locationBarKey.currentContext
                         ?.findRenderObject() as RenderBox;
                     _locationBarKey.currentContext?.size;
@@ -1546,13 +1258,8 @@ class _FileManagerViewState extends State<FileManagerView> {
                           menuItems.add(MenuEntryButton(
                               childBuilder: (TextStyle? style) =>
                                   Row(children: [
-                                    Image(
-                                        image: iconHardDrive,
-                                        fit: BoxFit.scaleDown,
-                                        color: Theme.of(context)
-                                            .iconTheme
-                                            .color
-                                            ?.withOpacity(0.7)),
+                                    const LdIcon(FmGlyphs.drive,
+                                        size: 16, color: C.textMuted),
                                     SizedBox(width: 10),
                                     Text(
                                       entry.name,
@@ -1590,7 +1297,6 @@ class _FileManagerViewState extends State<FileManagerView> {
                             .expand((i) => i)
                             .toList());
                   },
-                  iconSize: 20,
                 )
               ]);
   }
@@ -1602,28 +1308,31 @@ class _FileManagerViewState extends State<FileManagerView> {
     final isWindows = controller.options.value.isWindows;
     if (isWindows && path == '/') {
       breadCrumbList.add(BreadCrumbItem(
-          content: TextButton(
-                  child: buildWindowsThisPC(context),
-                  style: ButtonStyle(
-                      minimumSize: MaterialStateProperty.all(Size(0, 0))),
-                  onPressed: () => onPressed(['/']))
-              .marginSymmetric(horizontal: 4)));
+          content: GestureDetector(
+        onTap: () => onPressed(['/']),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 5),
+            child: buildWindowsThisPC(context),
+          ),
+        ),
+      )));
     } else {
       final list = PathUtil.split(path, isWindows);
       breadCrumbList.addAll(
+        // The last crumb is where the pane actually is, so it is the only one
+        // at full strength; the ones behind it are a way back, which is a
+        // quieter job.
         list.asMap().entries.map(
               (e) => BreadCrumbItem(
-                content: TextButton(
-                  child: Text(e.value),
-                  style: ButtonStyle(
-                    minimumSize: MaterialStateProperty.all(
-                      Size(0, 0),
-                    ),
-                  ),
-                  onPressed: () => onPressed(
+                content: FmCrumb(
+                  label: e.value,
+                  current: e.key == list.length - 1,
+                  onTap: () => onPressed(
                     list.sublist(0, e.key + 1),
                   ),
-                ).marginSymmetric(horizontal: 4),
+                ),
               ),
             ),
       );
@@ -1650,21 +1359,28 @@ class _FileManagerViewState extends State<FileManagerView> {
       ..selection = TextSelection.collapsed(offset: text.length);
     return Row(
       children: [
-        SvgPicture.asset(
-          _locationStatus.value == LocationStatus.pathLocation
-              ? "assets/folder.svg"
-              : "assets/search.svg",
-          colorFilter: svgColor(Theme.of(context).tabBarTheme.labelColor),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: LdIcon(
+            _locationStatus.value == LocationStatus.pathLocation
+                ? FmGlyphs.folder
+                : LdIcons.search,
+            size: 15,
+            color: C.textFaint,
+          ),
         ),
         Expanded(
           child: TextField(
             focusNode: _locationNode,
+            // A path is an identifier, so it is typed and read in the console's
+            // data face.
+            style: C.data(size: 12.5, color: C.text),
+            cursorColor: C.accent,
+            cursorWidth: 1.6,
             decoration: InputDecoration(
               border: InputBorder.none,
               isDense: true,
-              prefix: Padding(
-                padding: EdgeInsets.only(left: 4.0),
-              ),
+              contentPadding: const EdgeInsets.symmetric(vertical: 6),
             ),
             controller: textController,
             onSubmitted: (path) {
@@ -1685,10 +1401,10 @@ class _FileManagerViewState extends State<FileManagerView> {
 }
 
 Widget buildWindowsThisPC(BuildContext context, [TextStyle? textStyle]) {
-  final color = Theme.of(context).iconTheme.color?.withOpacity(0.7);
-  return Row(children: [
-    Icon(Icons.computer, size: 20, color: color),
+  return Row(mainAxisSize: MainAxisSize.min, children: [
+    const LdIcon(LdIcons.machine, size: 16, color: C.textMuted),
     SizedBox(width: 10),
-    Text(translate('This PC'), style: textStyle)
+    Text(translate('This PC'),
+        style: textStyle ?? C.small(color: C.text, w: FontWeight.w700))
   ]);
 }
