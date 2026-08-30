@@ -1,14 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/widgets/dialog.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/common/labdesk_profiles.dart';
 import 'package:flutter_hbb/common/labdesk_status_binding.dart';
 import 'package:flutter_hbb/common/widgets/labdesk_groups.dart';
-import 'package:flutter_hbb/desktop/pages/connection_page.dart';
+import 'package:flutter_hbb/common/widgets/peer_card.dart' show showRdpDialog;
+import 'package:flutter_hbb/desktop/pages/connection_page.dart' show OnlineStatusWidget;
 import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/widgets/server_profile_switcher.dart';
+import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
 import 'package:provider/provider.dart';
@@ -16,10 +21,12 @@ import 'package:provider/provider.dart';
 import 'console_data.dart';
 import 'models/machine_row.dart';
 import 'screens/actions_screen.dart';
+import 'screens/connect_screen.dart';
 import 'screens/console_shell.dart';
 import 'screens/settings_screen.dart';
 import 'screens/this_machine_screen.dart';
 import 'theme/console_theme.dart';
+import 'theme/ld_icons.dart';
 
 /// The console, driven by the real client.
 ///
@@ -56,6 +63,16 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   var _settingsTab = SettingsTabKey.general;
   var _section = ConsoleSection.connect;
 
+  /// The machine last connected to, so the id field opens where the operator
+  /// left it. Read once, exactly as the page this replaces did.
+  var _lastRemoteId = '';
+
+  /// Machines this client has a password saved for. The bridge answers one id
+  /// at a time and only asynchronously, so the answer is read with the rest of
+  /// the fleet rather than during a build, and the row menu offers "Forget
+  /// saved password" against this.
+  final _savedPasswords = <String>{};
+
 
   void _goToSettings(SettingsTabKey tab) {
     // A page this build does not offer must not become reachable through the
@@ -80,11 +97,25 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     // second, and rebuilding the hosted connect page or a settings page once a
     // second is work nobody asked for.
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && _section == ConsoleSection.fleet) setState(() {});
+      if (mounted &&
+          (_section == ConsoleSection.fleet ||
+              _section == ConsoleSection.connect)) {
+        setState(() {});
+      }
     });
+    // The peer stores fill from events, not from a getter, so the load has to
+    // be asked for. Recent and favourites are local reads. LAN discovery is a
+    // broadcast and is not run until the operator asks for that set.
+    bind.mainLoadRecentPeers();
+    bind.mainLoadFavPeers();
+    bind.mainLoadLanPeers();
     // Ask once on open so the fleet is not blank while waiting for the client's
     // own poll to come round.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final id = await bind.mainGetLastRemoteId();
+      if (mounted && id.isNotEmpty) setState(() => _lastRemoteId = id);
+      await _refresh();
+    });
   }
 
   @override
@@ -99,6 +130,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     setState(() => _refreshing = true);
     try {
       await labdeskRefreshStatus();
+      await _readSavedPasswords();
     } finally {
       if (mounted) {
         setState(() {
@@ -109,12 +141,30 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     }
   }
 
-  /// Recent sessions, favourites and whichever peer tab is open. Three stores
-  /// that overlap; the adapter folds them.
+  Future<void> _readSavedPasswords() async {
+    final found = <String>{};
+    for (final id in {for (final p in _peers) p.id}) {
+      if (await bind.mainPeerHasPassword(id: id)) found.add(id);
+    }
+    if (!mounted) return;
+    setState(() => _savedPasswords
+      ..clear()
+      ..addAll(found));
+  }
+
+  /// Every store the client keeps peers in: recent sessions, favourites, the
+  /// address book, whatever LAN discovery has found, and whichever peer tab is
+  /// open. They overlap; the adapter folds them by id.
+  ///
+  /// All five are read rather than only the first three, because Connect offers
+  /// each of them as a filter, and a filter over a list that never contained
+  /// the set would return nothing and look like an answer.
   Iterable<ConsolePeer> get _peers sync* {
     for (final list in [
       gFFI.recentPeersModel.peers,
       gFFI.favoritePeersModel.peers,
+      gFFI.abModel.peersModel.peers,
+      gFFI.lanPeersModel.peers,
       gFFI.peerTabModel.currentTabCachedPeers,
     ]) {
       for (final p in list) {
@@ -174,10 +224,313 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     }
   }
 
-  /// The application's own connect surface: the remote-id card and every peer
-  /// tab, including LabDesk's groups. Mounted whole rather than reimplemented,
-  /// so none of the behaviour behind those ~200 controls is lost in the move.
-  Widget _connect(BuildContext context) => ConnectionPage();
+  /// The peer sets the old tab strip exposed, sourced from the stores the
+  /// client already keeps.
+  ///
+  /// A set this build cannot source carries its reason instead of an id list,
+  /// and the chip renders disabled with that reason on it. Faking the list
+  /// would be worse than not offering it.
+  List<PeerSetChip> get _peerSets {
+    final abOff = bind.isDisableAb();
+    final accountOff = bind.isDisableAccount();
+    final discoveryOff =
+        bind.mainGetLocalOption(key: 'disable-discovery-panel') == 'Y';
+    Set<String> ids(Iterable peers) => {for (final p in peers) p.id as String};
+
+    return [
+      PeerSetChip(
+        id: kSetRecent,
+        label: 'Recent',
+        icon: LdIcons.recent,
+        ids: ids(gFFI.recentPeersModel.peers),
+      ),
+      PeerSetChip(
+        id: kSetFavourite,
+        label: 'Favourites',
+        icon: LdIcons.favourite,
+        ids: ids(gFFI.favoritePeersModel.peers),
+      ),
+      PeerSetChip(
+        id: kSetAddressBook,
+        label: 'Address book',
+        icon: LdIcons.addressBook,
+        ids: abOff || accountOff ? null : ids(gFFI.abModel.peersModel.peers),
+        unavailable: abOff
+            ? 'The address book is turned off in this build.'
+            : accountOff
+                ? 'The address book needs an account, and accounts are turned '
+                    'off in this build.'
+                : null,
+      ),
+      PeerSetChip(
+        id: kSetDiscovered,
+        label: 'Discovered',
+        icon: LdIcons.discovered,
+        ids: discoveryOff ? null : ids(gFFI.lanPeersModel.peers),
+        unavailable:
+            discoveryOff ? 'LAN discovery is turned off in Settings.' : null,
+      ),
+    ];
+  }
+
+  /// LabDesk's own connect surface.
+  ///
+  /// This used to mount the peer page the application was derived from, which
+  /// meant the section the product opens on was that product's interface: its
+  /// tab strip, its peer cards, its search row. The screen behind this keeps
+  /// what that page did - the same id formatting, the same four session types,
+  /// the same peer sets - and says it in this console's language.
+  Widget _connect(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: _connectScreen(context)),
+          // The client's own service line, kept where it was: it is the only
+          // place that says whether this machine can be reached at all, and
+          // whether the service needs starting. Losing it in the move would
+          // have left the console unable to explain a fleet that is entirely
+          // unreachable because nothing is running here.
+          if (!bind.isOutgoingOnly()) ...[
+            Divider(height: 1, thickness: 1, color: C.hairline),
+            const OnlineStatusWidget(),
+          ],
+        ],
+      );
+
+  /// The peer the client holds for an id, wherever it is kept.
+  ///
+  /// Two of the address book dialogs take the whole peer rather than its id,
+  /// so the console has to hand them one.
+  Peer? _peerOf(String id) {
+    for (final list in [
+      gFFI.abModel.peersModel.peers,
+      gFFI.recentPeersModel.peers,
+      gFFI.favoritePeersModel.peers,
+      gFFI.lanPeersModel.peers,
+    ]) {
+      for (final p in list) {
+        if (p.id == id) return p;
+      }
+    }
+    return null;
+  }
+
+  /// What the client can act on right now, which is what decides the shape of
+  /// a row's menu. Every one of these was read off the bridge by the peer card
+  /// as it built its own menu.
+  ConnectCapabilities _capabilities(List<MachineRow> machines) =>
+      ConnectCapabilities(
+        hostIsWindows: isWindows,
+        canAddToAddressBook: gFFI.userModel.userName.value.isNotEmpty &&
+            gFFI.abModel.addressBooksCanWrite().isNotEmpty,
+        addressBookWritable: gFFI.abModel.current.canWrite(),
+        addressBookIsPersonal: gFFI.abModel.current.isPersonal(),
+        addressBookHasTags: gFFI.abModel.currentAbTags.isNotEmpty,
+        savedPasswords: _savedPasswords,
+        alwaysRelay: {
+          for (final m in machines)
+            if (mainGetPeerBoolOptionSync(m.id, kOptionForceAlwaysRelay)) m.id
+        },
+      );
+
+  /// Everything the peer cards could do to a machine that is not opening a
+  /// session, wired to the same calls they made.
+  ///
+  /// The screen has already asked before anything destructive, so by the time
+  /// one of those arrives here the operator has said yes.
+  Future<void> _rowAction(String id, RowAction action) async {
+    void done() {
+      if (mounted) setState(() {});
+    }
+
+    switch (action) {
+      case RowAction.rename:
+        final inAb = gFFI.abModel.find(id);
+        final oldName = inAb != null && inAb.alias.isNotEmpty
+            ? inAb.alias
+            : await bind.mainGetPeerOption(id: id, key: 'alias');
+        renameDialog(
+          oldName: oldName,
+          onSubmit: (newName) async {
+            if (newName == oldName) return;
+            if (inAb != null) {
+              await gFFI.abModel.changeAlias(id: id, alias: newName);
+            }
+            await bind.mainSetPeerAlias(id: id, alias: newName);
+            // The stores are filled from events, so the rename only reaches
+            // the table once they are re-read. Without this the row keeps the
+            // old name until something else happens to reload them.
+            await bind.mainLoadRecentPeers();
+            await bind.mainLoadFavPeers();
+            done();
+          },
+        );
+
+      case RowAction.alwaysRelay:
+        final on = mainGetPeerBoolOptionSync(id, kOptionForceAlwaysRelay);
+        await bind.mainSetPeerOption(
+          id: id,
+          key: kOptionForceAlwaysRelay,
+          value: bool2option(kOptionForceAlwaysRelay, !on),
+        );
+        done();
+
+      case RowAction.rdpSettings:
+        // The peer card's own dialog, unchanged. It was library-private, so
+        // the port, username and password it edits were reachable from the
+        // card's RDP entry and nowhere else.
+        showRdpDialog(id);
+
+      case RowAction.chooseIcon:
+        await showLabDeskIconPicker(context, id);
+        done();
+
+      case RowAction.assignGroups:
+        await showLabDeskAssignDialog(context, id);
+        done();
+
+      case RowAction.wakeOnLan:
+        await bind.mainWol(id: id);
+
+      case RowAction.desktopShortcut:
+        await bind.mainCreateShortcut(id: id);
+        showToast(translate('Successful'));
+
+      case RowAction.copyId:
+        await Clipboard.setData(ClipboardData(text: id));
+        showToast(translate('Successful'));
+
+      case RowAction.addToFavourites:
+        final favs = (await bind.mainGetFav()).toList();
+        if (!favs.contains(id)) {
+          favs.add(id);
+          await bind.mainStoreFav(favs: favs);
+          await bind.mainLoadFavPeers();
+        }
+        done();
+
+      case RowAction.removeFromFavourites:
+        final favs = (await bind.mainGetFav()).toList();
+        if (favs.remove(id)) {
+          await bind.mainStoreFav(favs: favs);
+          await bind.mainLoadFavPeers();
+        }
+        done();
+
+      case RowAction.addToAddressBook:
+        final peer = _peerOf(id);
+        if (peer != null) addPeersToAbDialog([Peer.copy(peer)]);
+
+      case RowAction.editTags:
+        editAbTagDialog(gFFI.abModel.getPeerTags(id), (tags) async {
+          await gFFI.abModel.changeTagForPeers([id], tags);
+          done();
+        });
+
+      case RowAction.editNote:
+        editAbPeerNoteDialog(id);
+
+      case RowAction.sharedPassword:
+        final peer = _peerOf(id);
+        if (peer != null) {
+          setSharedAbPasswordDialog(gFFI.abModel.currentName.value, peer);
+        }
+
+      case RowAction.existIn:
+        _showExistIn(id);
+
+      case RowAction.forgetPassword:
+        await gFFI.abModel.changePersonalHashPassword(id, '');
+        await bind.mainForgetPassword(id: id);
+        await _readSavedPasswords();
+        done();
+
+      case RowAction.removeFromAddressBook:
+        await gFFI.abModel.deletePeers([id]);
+        done();
+
+      case RowAction.forgetMachine:
+        // The old menu did one of these depending on which tab the card was
+        // drawn on. One table has no tabs, and the confirmation the operator
+        // agreed to says the machine leaves the list, so all of them run.
+        await bind.mainRemovePeer(id: id);
+        await bind.mainRemoveDiscovered(id: id);
+        final favs = (await bind.mainGetFav()).toList();
+        if (favs.remove(id)) await bind.mainStoreFav(favs: favs);
+        for (final g in LabDeskGroupsModel.groups) {
+          g.peers.remove(id);
+        }
+        LabDeskGroupsModel.peerIcons.remove(id);
+        await LabDeskGroupsModel.saveGroups();
+        await LabDeskGroupsModel.savePeerIcons();
+        await bind.mainLoadRecentPeers();
+        await bind.mainLoadFavPeers();
+        await bind.mainLoadLanPeers();
+        _savedPasswords.remove(id);
+        done();
+    }
+  }
+
+  /// Which address books already hold this machine. The peer card put this
+  /// behind an "Exist in" entry, and the answer is only ever a list of names.
+  void _showExistIn(String id) {
+    final names = gFFI.abModel.idExistIn(id);
+    gFFI.dialogManager.show((setState, close, context) => CustomAlertDialog(
+          title: Text(translate('Exist in')),
+          content: Text(names.isEmpty ? translate('Empty') : names.join(', ')),
+          actions: [dialogButton('OK', onPressed: close)],
+          onSubmit: close,
+          onCancel: close,
+        ));
+  }
+
+  Widget _connectScreen(BuildContext context) {
+    final machines = _machines;
+    return ConnectScreen(
+        machines: machines,
+        capabilities: _capabilities(machines),
+        onAction: _rowAction,
+        // Same signal Fleet uses: genuinely loading only before anything has
+        // been asked for.
+        isLoading: machines.isEmpty && _lastRefreshed == null,
+        groups: [
+          for (final g in LabDeskGroupsModel.groups)
+            (name: g.name, collapsed: g.collapsed)
+        ],
+        sets: _peerSets,
+        initialId: _lastRemoteId,
+        // The same call the peer page made, with the same three alternates.
+        onConnect: (id, mode) {
+          // An administrator terminal is an ordinary terminal session opened
+          // with one environment variable set, which is how the peer card
+          // asked for it too.
+          if (mode == ConnectMode.terminalAdmin) setEnvTerminalAdmin();
+          connect(
+            context,
+            id,
+            isFileTransfer: mode == ConnectMode.fileTransfer,
+            isViewCamera: mode == ConnectMode.viewCamera,
+            isTerminal: mode == ConnectMode.terminal ||
+                mode == ConnectMode.terminalAdmin,
+            isTcpTunneling: mode == ConnectMode.tcpTunneling,
+            isRDP: mode == ConnectMode.rdp,
+          );
+        },
+        onGroupCollapsed: (name, collapsed) {
+          for (final g in LabDeskGroupsModel.groups) {
+            if (g.name == name) {
+              g.collapsed = collapsed;
+              LabDeskGroupsModel.saveGroups();
+              break;
+            }
+          }
+        },
+        // Discovery is a broadcast on the local network, so it goes out when
+        // the operator asks for that set and not on every open.
+        onPeerSetSelected: (id) {
+          if (id == kSetDiscovered) bind.mainDiscover();
+        },
+    );
+  }
 
   /// One settings page, with no navigation of its own.
   ///
