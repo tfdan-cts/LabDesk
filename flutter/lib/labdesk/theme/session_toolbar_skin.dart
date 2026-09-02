@@ -1193,9 +1193,11 @@ class _CmPermissionPanelState extends State<CmPermissionPanel> {
 /// covered the *label* of the two under it, so pointing at one line of a consent
 /// list hid two others. The string is still handed to [Semantics], where a
 /// screen reader can have it without anything being painted over. And below 240
-/// the ON/OFF word steps aside and the label drops a point, because at that
-/// width the label is the part that cannot be guessed — the knob beside it is
-/// still saying the same thing by its position.
+/// the label drops a point and the ON/OFF word moves under it rather than
+/// beside it — the row is 26 tall either way, and the state stays a word at
+/// every width the window can be handed. It used to be dropped at that width on
+/// the grounds that the knob still says the same thing by its position, which
+/// is exactly the reasoning the tile this row replaced was built on.
 class CmPermissionRow extends StatefulWidget {
   const CmPermissionRow({
     super.key,
@@ -1222,6 +1224,11 @@ class CmPermissionRow extends StatefulWidget {
   @override
   State<CmPermissionRow> createState() => _CmPermissionRowState();
 }
+
+/// The ON/OFF word's colour, so the wide row and the narrow one cannot drift.
+Color _stateColor(bool live, bool on) => live
+    ? (on ? C.text : C.textFaint)
+    : (on ? C.textMuted : C.textFaint);
 
 class _CmPermissionRowState extends State<CmPermissionRow> {
   bool _hover = false;
@@ -1279,12 +1286,42 @@ class _CmPermissionRowState extends State<CmPermissionRow> {
                   LdIcon(widget.glyph, size: 15, color: glyphColor),
                   SizedBox(width: tight ? 7 : 9),
                   Expanded(
-                    child: Text(widget.label,
-                        style: C
-                            .small(color: labelColor, w: FontWeight.w600)
-                            .copyWith(fontSize: tight ? 11 : null),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                    child: tight
+                        // No room for the word beside the label, so it goes
+                        // under it. It does not go away: the knob's position
+                        // is the one part of this row a person cannot name,
+                        // and a consent list that stops saying ON at the width
+                        // it is most often opened at is a consent list that
+                        // stops being read.
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(widget.label,
+                                  style: C
+                                      .small(
+                                          color: labelColor,
+                                          w: FontWeight.w600)
+                                      .copyWith(fontSize: 11, height: 1.15),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
+                              Text(
+                                widget.on ? 'ON' : 'OFF',
+                                style: C
+                                    .data(
+                                      size: 9,
+                                      color: _stateColor(live, widget.on),
+                                      w: FontWeight.w700,
+                                    )
+                                    .copyWith(height: 1.1),
+                              ),
+                            ],
+                          )
+                        : Text(widget.label,
+                            style: C.small(
+                                color: labelColor, w: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
                   ),
                   if (!tight) ...[
                     const SizedBox(width: 6),
@@ -1295,9 +1332,7 @@ class _CmPermissionRowState extends State<CmPermissionRow> {
                         textAlign: TextAlign.right,
                         style: C.data(
                           size: 10,
-                          color: live
-                              ? (widget.on ? C.text : C.textFaint)
-                              : (widget.on ? C.textMuted : C.textFaint),
+                          color: _stateColor(live, widget.on),
                           w: FontWeight.w700,
                         ),
                       ),
@@ -1457,11 +1492,17 @@ class _CmActionButtonState extends State<CmActionButton> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           alignment: Alignment.center,
           decoration: BoxDecoration(
+            // Hover raises the fill, focus does not. Both used to, which left
+            // the keyboard's button and the pointer's button painted the same
+            // and put a second, brighter version of a tone next to the resting
+            // one — read as "this is the default answer" rather than "this is
+            // the one being pointed at". The ring says where the keyboard is
+            // and nothing else does.
             color: !live
                 ? Colors.transparent
                 : neutral
-                    ? (_hover || _focus ? C.surfaceHi : Colors.transparent)
-                    : tint.withOpacity(_hover || _focus ? 0.22 : 0.12),
+                    ? (_hover ? C.surfaceHi : Colors.transparent)
+                    : tint.withOpacity(_hover ? 0.22 : 0.12),
             borderRadius: C.roundedSm,
             border: Border.all(
               // The ring is [C.focusRing] at [C.focusRingWidth], the one the

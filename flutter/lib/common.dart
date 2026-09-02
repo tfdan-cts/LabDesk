@@ -1385,7 +1385,11 @@ Widget msgboxIcon(String type) {
     return (LdIcons.lock, C.accent);
   }
   if (type.contains('info')) return (DialogGlyphs.info, C.accent);
-  return (null, C.accent);
+  // Everything else — the `custom-*` types the session window raises, and any
+  // type this table has never heard of — is a statement, so it gets the
+  // statement's mark. A header with no glyph at all was the one dialog in the
+  // product whose title started on a different column from every other one.
+  return (DialogGlyphs.info, C.accent);
 }
 
 /// `msgboxContent`'s own translation rules, unchanged so that not one string

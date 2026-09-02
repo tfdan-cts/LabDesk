@@ -42,7 +42,10 @@ Future<void> _loadFonts() async {
 ///
 /// The conditional controls are all present at once here on purpose: this is
 /// the widest the toolbar ever gets (multi-monitor, Android peer, voice call
-/// connected, recording running), which is the case worth judging.
+/// connected), which is the case worth judging. Every control is at rest; the
+/// two states that recolour a control — the cursor on one, a recording running
+/// — are drawn separately beside the row so neither can be mistaken for the
+/// colour the control simply is.
 Widget _toolbarRow({required Key displayMenuKey}) {
   final items = <Widget>[
     // Pinned — one of the two controls allowed to wear the accent.
@@ -111,13 +114,16 @@ Widget _toolbarRow({required Key displayMenuKey}) {
       hoverColor: ToolbarSkin.hoverRestColor,
       menuChildrenGetter: (_) => [const SizedBox.shrink()],
     ),
-    // Recording is running, so the control says so in the one semantic colour
-    // that means it.
+    // Not recording, which is what this control looks like almost all of the
+    // time: the same resting glyph as everything else on the row. Red is what
+    // it turns while a session is actually being written, and that state is
+    // rendered on its own beside the row rather than being left standing here
+    // where it reads as the control's permanent colour.
     ToolbarIconButton(
       glyph: LdIcons.record,
-      tooltip: 'Stop session recording',
-      color: ToolbarSkin.redColor,
-      hoverColor: ToolbarSkin.hoverRedColor,
+      tooltip: 'Record session',
+      color: ToolbarSkin.restColor,
+      hoverColor: ToolbarSkin.hoverRestColor,
       onPressed: () {},
     ),
     ToolbarIconButton(
@@ -311,6 +317,21 @@ void main() {
                               hoverColor: ToolbarSkin.hoverRestColor,
                               onPressed: () {},
                             ),
+                          ),
+                        ),
+                        const SizedBox(height: 34),
+                        Text('recording running',
+                            style: C.micro(color: C.textFaint)),
+                        const SizedBox(height: 6),
+                        DecoratedBox(
+                          decoration: ToolbarSkin.containerDecoration(
+                              BorderRadius.circular(C.radius)),
+                          child: ToolbarIconButton(
+                            glyph: LdIcons.record,
+                            tooltip: 'Stop session recording',
+                            color: ToolbarSkin.redColor,
+                            hoverColor: ToolbarSkin.hoverRedColor,
+                            onPressed: () {},
                           ),
                         ),
                         const SizedBox(height: 34),

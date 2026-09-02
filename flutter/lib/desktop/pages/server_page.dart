@@ -518,7 +518,10 @@ class _CmHeaderState extends State<_CmHeader>
             ? client.disconnected
                 ? translate("Disconnected")
                 : translate("Connected")
-            : "${translate("Request access to your device")}...",
+            // No trailing dots. They were appended here, not by the language
+            // file, and at the width this panel gets they read as a title that
+            // had been cut off rather than as a sentence trailing away.
+            : translate("Request access to your device"),
         elapsed: client.authorized
             ? formatDurationToTime(Duration(seconds: seconds))
             : null,

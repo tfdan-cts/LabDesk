@@ -62,69 +62,85 @@ class ThisMachineScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _Field(
-                  label: 'Machine ID',
-                  value: machineId,
-                  mono: true,
-                  large: true,
-                  onCopy: machineId.isEmpty
-                      ? null
-                      : () => Clipboard.setData(ClipboardData(text: machineId)),
-                  trailing: onOpenIdMenu == null
-                      ? null
-                      : _IconButton(
-                          glyph: LdIcons.more,
-                          tooltip: 'ID options',
-                          onTap: onOpenIdMenu!,
+                // The id is the one thing on this screen somebody reads out
+                // over the phone, so it gets the console's data plane — the
+                // same box the installer puts its path in and a dialog puts a
+                // machine's name in — and nothing else shares its row but the
+                // controls that act on it.
+                Text('MACHINE ID',
+                    style: C.micro().copyWith(letterSpacing: 0.8)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 46,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        alignment: Alignment.centerLeft,
+                        decoration: BoxDecoration(
+                          color: C.bg,
+                          borderRadius: C.roundedSm,
+                          border: Border.all(color: C.hairline),
                         ),
+                        child: SelectableText(
+                          machineId,
+                          maxLines: 1,
+                          style: C.data(size: 20, w: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    GhostButton(
+                      label: 'Copy',
+                      glyph: LdIcons.clipboard,
+                      onPressed: machineId.isEmpty
+                          ? null
+                          : () => Clipboard.setData(
+                              ClipboardData(text: machineId)),
+                    ),
+                    if (onOpenIdMenu != null) ...[
+                      const SizedBox(width: 8),
+                      GhostButton(
+                        label: 'ID options',
+                        glyph: LdIcons.more,
+                        onPressed: onOpenIdMenu,
+                      ),
+                    ],
+                  ],
                 ),
+                const SizedBox(height: 20),
+                Container(height: 1, color: C.hairline),
                 const SizedBox(height: 18),
-                _Field(
-                  label: passwordIsTemporary
-                      ? 'One-time password'
-                      : 'Permanent password',
-                  // A permanent password is never handed back to the interface,
-                  // so the client renders a dash for it. Printing that dash
-                  // under a label claiming to be the password reads as an
-                  // empty value rather than a withheld one.
-                  value: passwordIsTemporary
-                      ? password
-                      : (password.isEmpty || password == '-'
-                          ? 'Not shown here'
-                          : password),
-                  mono: passwordIsTemporary,
-                  onCopy: !passwordIsTemporary || password.isEmpty || password == '-'
-                      ? null
-                      : () => Clipboard.setData(ClipboardData(text: password)),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
+                // The password is a sentence rather than a second field: it is
+                // one fact about how this machine is secured, and the value
+                // itself is only present in the temporary case. Selectable, so
+                // it can still be copied without a control saying so.
+                _passwordLine(),
+                if (onRefreshPassword != null || onEditPassword != null) ...[
+                  const SizedBox(height: 14),
+                  Row(
                     children: [
-                      if (onRefreshPassword != null && passwordIsTemporary)
-                        _IconButton(
+                      if (passwordIsTemporary && onRefreshPassword != null)
+                        GhostButton(
+                          label: 'New password',
                           glyph: LdIcons.refresh,
-                          tooltip: 'Generate a new one',
-                          onTap: onRefreshPassword!,
+                          onPressed: onRefreshPassword,
                         ),
+                      if (passwordIsTemporary &&
+                          onRefreshPassword != null &&
+                          onEditPassword != null)
+                        const SizedBox(width: 8),
                       if (onEditPassword != null)
-                        _IconButton(
-                          glyph: LdIcons.rename,
-                          tooltip: 'Change how this machine is secured',
-                          onTap: onEditPassword!,
+                        GhostButton(
+                          label: passwordIsTemporary
+                              ? 'Use a permanent password'
+                              : 'Change password',
+                          glyph: LdIcons.lock,
+                          onPressed: onEditPassword,
                         ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  passwordIsTemporary
-                      ? 'A one-time password changes whenever it is '
-                          'regenerated, so unattended access needs a permanent '
-                          'one instead.'
-                      : 'This machine uses a permanent password. It is not '
-                          'displayed here; set or change it in Security '
-                          'settings.',
-                  style: C.small(),
-                ),
+                ],
               ],
             ),
           ),
@@ -174,6 +190,43 @@ class ThisMachineScreen extends StatelessWidget {
       ),
     );
   }
+
+  /// What a caller is asked for, in a sentence.
+  ///
+  /// A permanent password is never handed back to the interface, so there is
+  /// no value to print for it — which is why it is stated rather than drawn as
+  /// an empty field.
+  Widget _passwordLine() {
+    if (!passwordIsTemporary) {
+      return SelectableText(
+        'This machine uses a permanent password. It is not shown here; set or '
+        'change it in Security settings.',
+        style: C.body(color: C.textMuted),
+      );
+    }
+    if (password.isEmpty || password == '-') {
+      return SelectableText(
+        'A one-time password changes whenever it is regenerated, so '
+        'unattended access needs a permanent one instead.',
+        style: C.body(color: C.textMuted),
+      );
+    }
+    return SelectableText.rich(
+      TextSpan(
+        style: C.body(color: C.textMuted),
+        children: [
+          const TextSpan(text: 'A caller is asked for the one-time password '),
+          TextSpan(
+            text: password,
+            style: C.data(size: 14, color: C.text, w: FontWeight.w700),
+          ),
+          const TextSpan(
+              text: ', which changes whenever it is regenerated. Unattended '
+                  'access needs a permanent password instead.'),
+        ],
+      ),
+    );
+  }
 }
 
 class _Card extends StatelessWidget {
@@ -203,104 +256,6 @@ class _Card extends StatelessWidget {
           const SizedBox(height: 16),
           child,
         ],
-      ),
-    );
-  }
-}
-
-class _Field extends StatelessWidget {
-  const _Field({
-    required this.label,
-    required this.value,
-    this.mono = false,
-    this.large = false,
-    this.onCopy,
-    this.trailing,
-  });
-
-  final String label;
-  final String value;
-  final bool mono;
-  final bool large;
-  final VoidCallback? onCopy;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    final style = mono
-        ? C.data(size: large ? 22 : 14, w: large ? FontWeight.w600 : FontWeight.w500)
-        : C.body();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Container(width: 2, height: large ? 40 : 30, color: C.accent),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: C.micro()),
-              const SizedBox(height: 2),
-              SelectableText(value, style: style),
-            ],
-          ),
-        ),
-        if (onCopy != null)
-          _IconButton(
-            glyph: LdIcons.clipboard,
-            tooltip: 'Copy',
-            onTap: onCopy!,
-          ),
-        if (trailing != null) trailing!,
-      ],
-    );
-  }
-}
-
-class _IconButton extends StatefulWidget {
-  const _IconButton({
-    required this.glyph,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  /// A path from [LdIcons]. Four Material glyphs used to sit on this card —
-  /// the copy, the refresh, the pencil and the overflow — which is every icon
-  /// the screen draws.
-  final String glyph;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  @override
-  State<_IconButton> createState() => _IconButtonState();
-}
-
-class _IconButtonState extends State<_IconButton> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: widget.tooltip,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: C.fast,
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: _hover ? C.surfaceHi : Colors.transparent,
-              borderRadius: C.roundedSm,
-            ),
-            alignment: Alignment.center,
-            child: LdIcon(widget.glyph,
-                size: 16, color: _hover ? C.text : C.textMuted),
-          ),
-        ),
       ),
     );
   }

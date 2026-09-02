@@ -904,7 +904,14 @@ class _LdDialogButtonState extends State<LdDialogButton> {
     final fg = !enabled
         ? C.textFaint
         : (widget.tone == LdDialogTone.danger ? C.bad : C.text);
-    final lit = (_hover || _focus) && enabled;
+    // Hover raises the fill; focus does not. They used to do the same thing,
+    // which left a keyboard-focused answer and a pointed-at answer painted
+    // identically apart from the ring — and next to a resting answer of the
+    // same tone the brighter fill read as "this one is the default" rather
+    // than "this one is under something". The ring is now the only thing that
+    // says where the keyboard is, and the fill the only thing that says where
+    // the pointer is.
+    final lit = _hover && enabled;
 
     return FocusableActionDetector(
       enabled: enabled,

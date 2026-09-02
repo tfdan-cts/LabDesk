@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/console_theme.dart';
+import '../theme/dialog_skin.dart';
 import '../theme/ld_icons.dart';
 
 /// The install screen as it draws, with nothing behind it.
@@ -139,7 +140,7 @@ class InstallView extends StatelessWidget {
                 child: Container(
                   // Matches the button beside it exactly; a one-pixel
                   // difference in a pair like this is all anyone sees.
-                  height: 36,
+                  height: DialogSkin.buttonHeight,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   alignment: Alignment.centerLeft,
                   decoration: BoxDecoration(
@@ -157,9 +158,9 @@ class InstallView extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              _Button(
+              LdDialogButton(
                 label: t('Change Path'),
-                icon: LdIcons.fileTransfer,
+                glyph: LdIcons.fileTransfer,
                 onPressed: enabled ? onChangePath : null,
               ),
             ],
@@ -231,35 +232,53 @@ class InstallView extends StatelessWidget {
             child: busy
                 ? Padding(
                     padding: const EdgeInsets.only(right: 16),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(2),
-                      child: LinearProgressIndicator(
-                        minHeight: 3,
-                        backgroundColor: C.surfaceHi,
-                        color: C.accent,
-                      ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // A bar on its own says something is happening and
+                        // nothing about what. The page knows only that the
+                        // install has started, so that is what it says — no
+                        // percentage, because none is measured.
+                        Text(t('Installing'),
+                            style: C.small(color: C.textMuted)),
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: LinearProgressIndicator(
+                            minHeight: 3,
+                            backgroundColor: C.surfaceHi,
+                            color: C.accent,
+                          ),
+                        ),
+                      ],
                     ),
                   )
                 : const SizedBox.shrink(),
           ),
+          // The same answers a dialog puts at its foot, and the same objects:
+          // a tinted frame and wash on the one the screen was raised to do, a
+          // hairline outline and the close glyph on the way out.
           Offstage(
             offstage: hideRunWithoutInstall,
             child: Padding(
               padding: const EdgeInsets.only(right: 10),
-              child: _Button(
+              child: LdDialogButton(
                 label: t('Run without install'),
                 onPressed: enabled ? onRunWithoutInstall : null,
               ),
             ),
           ),
-          _Button(
+          LdDialogButton(
             label: t('Cancel'),
+            glyph: LdIcons.close,
             onPressed: enabled ? onCancel : null,
           ),
           const SizedBox(width: 10),
-          _Button(
+          LdDialogButton(
             label: t('Accept and Install'),
-            primary: true,
+            tone: LdDialogTone.primary,
+            glyph: LdIcons.check,
             onPressed: enabled ? onInstall : null,
           ),
         ],
@@ -334,111 +353,6 @@ class _OptionRowState extends State<_OptionRow> {
                   style: C.body(color: enabled ? C.text : C.textFaint),
                 ),
               ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The two button ranks this screen needs: one accented primary, and a quiet
-/// outline for everything that is not the point.
-class _Button extends StatefulWidget {
-  const _Button({
-    required this.label,
-    required this.onPressed,
-    this.icon,
-    this.primary = false,
-  });
-
-  final String label;
-  final VoidCallback? onPressed;
-
-  /// A path from [LdIcons].
-  final String? icon;
-  final bool primary;
-
-  @override
-  State<_Button> createState() => _ButtonState();
-}
-
-class _ButtonState extends State<_Button> {
-  bool _hover = false;
-  bool _focus = false;
-  bool _down = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = widget.onPressed != null;
-    final Color bg;
-    final Color fg;
-    final Color border;
-
-    if (widget.primary) {
-      // The shared filled primary: one accent tint and one foreground for
-      // every confirm in the product. This screen used to invert it — the
-      // light accent under a near-black label, against Connect's dark accent
-      // under a white one — so the installer's confirm and the console's read
-      // as two different ranks of the same action.
-      bg = !enabled
-          ? C.surfaceHi
-          : _down
-              ? C.primaryFillDown
-              : (_hover ? C.primaryFillHover : C.primaryFill);
-      fg = enabled ? C.primaryFg : C.textFaint;
-      border = Colors.transparent;
-    } else {
-      bg = _hover && enabled ? C.surfaceHi : Colors.transparent;
-      fg = !enabled ? C.textFaint : (_hover ? C.text : C.textMuted);
-      border = enabled && _hover ? C.hairline : C.hairline.withOpacity(0.6);
-    }
-
-    return FocusableActionDetector(
-      enabled: enabled,
-      mouseCursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-      onShowHoverHighlight: (v) => setState(() => _hover = v),
-      onShowFocusHighlight: (v) => setState(() => _focus = v),
-      actions: {
-        ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
-          widget.onPressed?.call();
-          return null;
-        }),
-      },
-      child: GestureDetector(
-        onTapDown: enabled ? (_) => setState(() => _down = true) : null,
-        onTapUp: enabled ? (_) => setState(() => _down = false) : null,
-        onTapCancel: enabled ? () => setState(() => _down = false) : null,
-        onTap: widget.onPressed,
-        child: AnimatedContainer(
-          duration: C.fast,
-          curve: Curves.easeOut,
-          transform: Matrix4.translationValues(0, _down ? 1 : 0, 0),
-          height: 36,
-          padding: EdgeInsets.symmetric(horizontal: widget.primary ? 18 : 13),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: C.roundedSm,
-            border: Border.all(color: border),
-            boxShadow: _focus
-                ? [
-                    BoxShadow(
-                        color: C.accent.withOpacity(0.45), spreadRadius: 2)
-                  ]
-                : null,
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (widget.icon != null) ...[
-                LdIcon(widget.icon!, size: 15, color: fg),
-                const SizedBox(width: 8),
-              ],
-              Text(widget.label,
-                  style: C.small(
-                      color: fg,
-                      w: widget.primary ? FontWeight.w700 : FontWeight.w600)),
             ],
           ),
         ),

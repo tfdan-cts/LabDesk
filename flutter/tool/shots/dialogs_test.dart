@@ -524,8 +524,11 @@ Widget _elevationFormDialog() {
 /// Built here exactly as those two now build it. The call site passes
 /// `title: null` and puts its heading inside `msgboxContent`, which
 /// `CustomAlertDialog` lifts into the frame's own title row; the type
-/// `custom-nook-nocancel-hasclose` matches no entry in the mark table, so the
-/// header carries no glyph. The width is `contentBoxConstraints`' default 500.
+/// `custom-nook-nocancel-hasclose` matches no named entry in the mark table, so
+/// it takes the table's fallback — the info ring in the accent, which is what
+/// `ldMsgboxMark` now returns for every `custom-*` and unknown type rather than
+/// leaving one dialog in the product with a bare title.
+/// The width is `contentBoxConstraints`' default 500.
 /// The tones are what `dialogButton` reads off the labels: "Save as" is the
 /// primary, the clipboard is the second way to take the same shot, and Cancel
 /// is dismissive whatever the caller passed.
@@ -535,7 +538,8 @@ Widget _elevationFormDialog() {
 Widget _screenshotDialog() {
   return LdDialog(
     width: 500,
-    title: const LdDialogTitle(title: 'Take screenshot'),
+    title: const LdDialogTitle(
+        title: 'Take screenshot', glyph: DialogGlyphs.info),
     content: const LdDialogMessage(
       text: 'Please select how to continue with the screenshot.',
     ),
@@ -646,9 +650,9 @@ void main() {
     await _pump(
       tester,
       _desk([
-        _captioned('a name that already exists on the far machine',
+        _captioned('a name that already exists — cursor on Overwrite',
             _conflictDialog(identical: false, hoverKey: okKey)),
-        _captioned('and the same file byte for byte',
+        _captioned('the same file byte for byte, nothing under the cursor',
             _conflictDialog(identical: true)),
       ]),
       const Size(1080, 620),

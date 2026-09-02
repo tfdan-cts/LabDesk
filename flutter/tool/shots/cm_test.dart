@@ -208,7 +208,7 @@ Widget _requestWindow({
         peerId: '412 007 336',
         kindGlyph: LdIcons.display,
         kindLabel: 'Control Remote Desktop',
-        statusLabel: 'Request access to your device...',
+        statusLabel: 'Request access to your device',
         statusColor: C.accent,
         pending: true,
       ),
