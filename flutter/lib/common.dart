@@ -11,6 +11,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/formatter/id_formatter.dart';
 import 'package:flutter_hbb/desktop/widgets/refresh_wrapper.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
+import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
+import 'package:flutter_hbb/labdesk/theme/dialog_skin.dart';
+import 'package:flutter_hbb/labdesk/theme/ld_icons.dart';
 import 'package:flutter_hbb/main.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/peer_tab_model.dart';
@@ -1060,6 +1063,22 @@ void showToast(String text,
 // - Remove argument "contentPadding", no need for it, all should look the same.
 // - Remove "required" for argument "content". See simple confirm dialog "delete peer", only title and actions are used. No need to "content: SizedBox.shrink()".
 // - Make dead code alive, transform arguments "onSubmit" and "onCancel" into correspondenting buttons "ConfirmOkButton", "CancelButton".
+
+/// The stock modal, drawn by the console's [LdDialog].
+///
+/// Every parameter and callback is the one it always had. What changed is what
+/// comes out the other end: a Material `AlertDialog` under the application
+/// theme became the console's own frame — title row, hairline, body, footer —
+/// so the dozens of raw call sites that still build one of these (the
+/// screenshot prompt, the insecure-connection warning, `_showExistIn`, the
+/// upstream mobile pages) inherit the reskin without being touched. That is the
+/// whole point of doing it here rather than at each site: there are more of
+/// them than anyone is going to convert by hand, and the ones nobody converts
+/// are exactly the ones that ship looking stock.
+///
+/// The keyboard contract moves with it. [LdDialog] answers Escape, Enter and
+/// numpad Enter and stops answering Enter once Tab has moved focus — the same
+/// rules this class implemented itself, minus the deprecated raw-key API.
 class CustomAlertDialog extends StatelessWidget {
   const CustomAlertDialog(
       {Key? key,
@@ -1084,51 +1103,46 @@ class CustomAlertDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // request focus
-    FocusScopeNode scopeNode = FocusScopeNode();
-    Future.delayed(Duration.zero, () {
-      if (!scopeNode.hasFocus) scopeNode.requestFocus();
-    });
-    bool tabTapped = false;
-    if (isAndroid) gFFI.invokeMethod("enable_soft_keyboard", true);
+    // Nearly every raw `msgBox` in the product passes `title: null` and puts
+    // its heading inside the content, which is why a message box used to be
+    // the one modal in the product with no header row. Lift it: the heading
+    // and its mark belong in the frame's own title row, and then this dialog
+    // is the same shape as all the others.
+    Widget? header = title;
+    Widget body = content;
+    if (header == null) {
+      var probe = content;
+      if (probe is SelectionArea) probe = probe.child;
+      if (probe is LdMsgboxContent) {
+        header = probe.header();
+        body = probe.body();
+      }
+    } else if (header is! LdDialogTitle) {
+      // A raw title is a `Text` or a `Row` with an icon in it. Give it the
+      // heading's voice rather than whatever the application theme hands it.
+      header = DefaultTextStyle(
+        style: C.h1(),
+        child: IconTheme(
+            data: const IconThemeData(color: C.accent, size: 19),
+            child: header),
+      );
+    }
 
-    return FocusScope(
-      node: scopeNode,
-      autofocus: true,
-      onKey: (node, key) {
-        if (key.logicalKey == LogicalKeyboardKey.escape) {
-          if (key is RawKeyDownEvent) {
-            onCancel?.call();
-          }
-          return KeyEventResult.handled; // avoid TextField exception on escape
-        } else if (!tabTapped &&
-            onSubmit != null &&
-            (key.logicalKey == LogicalKeyboardKey.enter ||
-                key.logicalKey == LogicalKeyboardKey.numpadEnter)) {
-          if (key is RawKeyDownEvent) onSubmit?.call();
-          return KeyEventResult.handled;
-        } else if (key.logicalKey == LogicalKeyboardKey.tab) {
-          if (key is RawKeyDownEvent) {
-            scopeNode.nextFocus();
-            tabTapped = true;
-          }
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
+    final w = contentBoxConstraints.maxWidth;
+    return LdDialog(
+      title: header,
+      content: body,
+      actions: actions,
+      onSubmit: onSubmit,
+      onCancel: onCancel,
+      // The caller's measure, honoured but held to something readable. The
+      // stock default was 500, near enough the console's own 460.
+      width: w.isFinite ? w.clamp(320.0, 720.0) : DialogSkin.width,
+      // Mobile switches the platform soft keyboard off while a session is on
+      // screen, so a dialog has to switch it back on to be answerable at all.
+      onOpen: () {
+        if (isAndroid) gFFI.invokeMethod("enable_soft_keyboard", true);
       },
-      child: AlertDialog(
-          scrollable: true,
-          title: title,
-          content: ConstrainedBox(
-            constraints: contentBoxConstraints,
-            child: content,
-          ),
-          actions: actions,
-          titlePadding: titlePadding ?? MyTheme.dialogTitlePadding(),
-          contentPadding:
-              MyTheme.dialogContentPadding(actions: actions is List),
-          actionsPadding: MyTheme.dialogActionsPadding(),
-          buttonPadding: MyTheme.dialogButtonPadding),
     );
   }
 }
@@ -1351,55 +1365,109 @@ Widget msgboxIcon(String type) {
   return Offstage();
 }
 
-// title should be null
-Widget msgboxContent(String type, String title, String text) {
-  String translateText(String text) {
-    if (text.indexOf('Failed') == 0 && text.indexOf(': ') > 0) {
-      List<String> words = text.split(': ');
-      for (var i = 0; i < words.length; ++i) {
-        words[i] = translate(words[i]);
-      }
-      text = words.join(': ');
-    } else {
-      List<String> words = text.split(' ');
-      if (words.length > 1 && words[0].endsWith('_tip')) {
-        words[0] = translate(words[0]);
-        final rest = text.substring(words[0].length + 1);
-        text = '${words[0]} ${translate(rest)}';
-      } else {
-        text = translate(text);
-      }
+/// What kind of thing a message box is, in the console's own marks.
+///
+/// The same set [msgboxIcon] drew, at 19 pixels instead of 50: an icon three
+/// lines tall is the loudest thing in a dialog and it is never the most
+/// important one. Red is reserved for a failure, exactly as it was.
+(String?, Color) ldMsgboxMark(String type) {
+  if (type.contains("error") || type == "re-input-password") {
+    return (LdIcons.alert, C.bad);
+  }
+  if (type.contains("success")) return (DialogGlyphs.check, C.ok);
+  if (type == "wait-uac" || type == "wait-remote-accept-nook") {
+    return (DialogGlyphs.waiting, C.accent);
+  }
+  if (type == 'on-uac' || type == 'on-foreground-elevated') {
+    return (LdIcons.shield, C.accent);
+  }
+  if (type == "input-password" || type == "custom-os-password") {
+    return (LdIcons.lock, C.accent);
+  }
+  if (type.contains('info')) return (DialogGlyphs.info, C.accent);
+  // Everything else — the `custom-*` types the session window raises, and any
+  // type this table has never heard of — is a statement, so it gets the
+  // statement's mark. A header with no glyph at all was the one dialog in the
+  // product whose title started on a different column from every other one.
+  return (DialogGlyphs.info, C.accent);
+}
+
+/// `msgboxContent`'s own translation rules, unchanged so that not one string
+/// moves: a "Failed: reason" line is translated a clause at a time, and a
+/// message whose first word is a `_tip` key is translated in two halves.
+String ldMsgboxText(String text) {
+  if (text.indexOf('Failed') == 0 && text.indexOf(': ') > 0) {
+    List<String> words = text.split(': ');
+    for (var i = 0; i < words.length; ++i) {
+      words[i] = translate(words[i]);
     }
-    return text;
+    return words.join(': ');
+  }
+  List<String> words = text.split(' ');
+  if (words.length > 1 && words[0].endsWith('_tip')) {
+    words[0] = translate(words[0]);
+    final rest = text.substring(words[0].length + 1);
+    return '${words[0]} ${translate(rest)}';
+  }
+  return translate(text);
+}
+
+/// What the product has to say, in the console's voice.
+///
+/// A widget rather than the function it replaces, because [CustomAlertDialog]
+/// needs to take it apart: the heading goes in the frame's title row and the
+/// sentences go in the body, which is the one dialog frame everything else in
+/// the product already uses. Placed inline by a caller that is not a dialog it
+/// still draws both halves, stacked.
+class LdMsgboxContent extends StatelessWidget {
+  const LdMsgboxContent(this.type, this.title, this.text, {super.key});
+
+  final String type;
+
+  /// Untranslated key.
+  final String title;
+
+  /// Untranslated key, or a message from the far end.
+  final String text;
+
+  /// The header this content belongs under. Null when there is no heading.
+  Widget? header() {
+    if (title.isEmpty) return null;
+    final mark = ldMsgboxMark(type);
+    return LdDialogTitle(
+        title: translate(title), glyph: mark.$1, tone: mark.$2);
   }
 
-  return Row(
-    children: [
-      msgboxIcon(type),
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              translate(title),
-              style: TextStyle(fontSize: 21),
-            ).marginOnly(bottom: 10),
-            createDialogContent(translateText(text)),
-          ],
-        ),
-      ),
-    ],
-  ).marginOnly(bottom: 12);
+  Widget body() => LdDialogMessage(
+        text: ldMsgboxText(text),
+        onLinkTap: (url) => launchUrl(Uri.parse(url)),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final h = header();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (h != null) ...[h, const SizedBox(height: 12)],
+        body(),
+      ],
+    );
+  }
 }
+
+// title should be null
+Widget msgboxContent(String type, String title, String text) =>
+    LdMsgboxContent(type, title, text);
 
 void msgBoxCommon(OverlayDialogManager dialogManager, String title,
     Widget content, List<Widget> buttons,
     {bool hasCancel = true}) {
   dialogManager.show((setState, close, context) => CustomAlertDialog(
-        title: Text(
-          translate(title),
-          style: TextStyle(fontSize: 21),
-        ),
+        // An [LdDialogTitle] rather than a bare `Text` at 21 pixels: this is
+        // the same header row every other dialog in the product opens with.
+        title: LdDialogTitle(title: translate(title)),
         content: content,
         actions: buttons,
         onCancel: hasCancel ? close : null,
@@ -2988,47 +3056,78 @@ class ServerConfig {
         key = options['key'] ?? "";
 }
 
+/// The answers that are never the point of the dialog, however the call site
+/// asked for them. These are keys from the string table, not free text, so the
+/// set is closed.
+const _dismissiveAnswers = {
+  'Cancel',
+  'Close',
+  'Skip',
+  'Later',
+  'Ignore',
+  'No',
+  'Wait',
+};
+
+/// The answers that cannot be taken back. Deliberately short: a red button
+/// where the product did not mean one is worse than a missing red button.
+const _destructiveAnswers = {
+  'Delete',
+  'Remove',
+  'Disconnect',
+  'Uninstall',
+  'Overwrite',
+};
+
+/// The console's mark for an answer, by the word on it.
+const _answerGlyphs = {
+  'Cancel': LdIcons.close,
+  'Close': LdIcons.close,
+  'OK': DialogGlyphs.check,
+  'Yes': DialogGlyphs.check,
+  'Continue': DialogGlyphs.check,
+  'Retry': LdIcons.refresh,
+  'Reconnect': LdIcons.refresh,
+  'Skip': DialogGlyphs.skip,
+  'Wait': DialogGlyphs.waiting,
+  'Delete': LdIcons.trash,
+  'Remove': LdIcons.trash,
+  'Connect': LdIcons.connect,
+  'Save as': LdIcons.fileTransfer,
+  'Copy to clipboard': LdIcons.clipboard,
+};
+
+/// One answer, drawn by the console's [LdDialogButton].
+///
+/// Every parameter it always had is still here. What it does with two of them
+/// changed: [icon] and [buttonStyle] are Material's, and this button is not a
+/// Material button any more, so the mark comes from the console's own set by
+/// the word on the label and the fill comes from the tone.
+///
+/// The tone is read off the label because the raw call sites do not state one.
+/// `_handleScreenshot` asked for "Save as...", "Copy to clipboard" and "Cancel"
+/// and got three identical filled violet slabs, which is a dialog with three
+/// primary answers and therefore none. A dismissive word is never the primary
+/// answer whatever the caller passed, and everything else takes [isOutline] at
+/// its word.
 Widget dialogButton(String text,
     {required VoidCallback? onPressed,
     bool isOutline = false,
     Widget? icon,
     TextStyle? style,
     ButtonStyle? buttonStyle}) {
-  if (isDesktop || isWebDesktop) {
-    if (isOutline) {
-      return icon == null
-          ? OutlinedButton(
-              onPressed: onPressed,
-              child: Text(translate(text), style: style),
-            )
-          : OutlinedButton.icon(
-              icon: icon,
-              onPressed: onPressed,
-              label: Text(translate(text), style: style),
-            );
-    } else {
-      return icon == null
-          ? ElevatedButton(
-              style: ElevatedButton.styleFrom(elevation: 0).merge(buttonStyle),
-              onPressed: onPressed,
-              child: Text(translate(text), style: style),
-            )
-          : ElevatedButton.icon(
-              icon: icon,
-              style: ElevatedButton.styleFrom(elevation: 0).merge(buttonStyle),
-              onPressed: onPressed,
-              label: Text(translate(text), style: style),
-            );
-    }
-  } else {
-    return TextButton(
-      onPressed: onPressed,
-      child: Text(
-        translate(text),
-        style: style,
-      ),
-    );
-  }
+  final key = text.replaceAll('...', '').replaceAll('…', '').trim();
+  final tone = _dismissiveAnswers.contains(key)
+      ? LdDialogTone.neutral
+      : _destructiveAnswers.contains(key)
+          ? LdDialogTone.danger
+          : (isOutline ? LdDialogTone.neutral : LdDialogTone.primary);
+  return LdDialogButton(
+    label: translate(text),
+    onPressed: onPressed,
+    tone: tone,
+    glyph: _answerGlyphs[key],
+  );
 }
 
 int versionCmp(String v1, String v2) {

@@ -110,6 +110,28 @@ LABDESK_UPTIME=3
       expect(MetricsCollector.parse('bash: LABDESK_CPU: command not found'), isEmpty);
     });
 
+    test('a field glued to the shell\'s bracketed-paste escape is still read', () {
+      // Captured from homebox over the PTY on 2026-09-02: bash emits ESC[?2004l
+      // and a bare CR immediately before the first line of output, so the CPU
+      // line did not start with its tag and was dropped.
+      const raw = '\x1B[?2004l\rLABDESK_CPU=6.2\r\nLABDESK_MEM_USED=1609699328\r\n'
+          'LABDESK_MEM_TOTAL=8120991744\r\nLABDESK_END=0\r\n';
+      final labels = MetricsCollector.parse(raw).map((m) => m.label).toList();
+      expect(labels, contains('CPU'));
+      expect(labels, contains('Memory'));
+    });
+
+    test('the Windows probe is bare PowerShell with the marker appended', () {
+      final p = MetricsCollector.probeFor('Windows')!;
+      // The channel is already PowerShell; a nested powershell -Command with
+      // escaped quotes left the shell at a continuation prompt on Foundry.
+      expect(p.command, isNot(startsWith('powershell')));
+      expect(p.command, isNot(contains(r'\"')));
+      final framed = MetricsCollector.framed(p);
+      expect(framed, endsWith("Write-Output ('LABDESK_END=' + \$(if (\$?) { 0 } else { 1 }))"));
+      expect(framed.split('\n').length, 1);
+    });
+
     test('a field present without its pair is dropped, not halved', () {
       // Used without total cannot be turned into a percentage.
       const raw = 'LABDESK_MEM_USED=2000\n';

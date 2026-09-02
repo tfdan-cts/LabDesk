@@ -13,6 +13,7 @@ import 'package:flutter_hbb/models/model.dart';
 import 'package:get/get.dart';
 
 import '../../models/platform_model.dart';
+import 'labdesk_terminal_rpc.dart';
 import 'terminal_page.dart';
 import 'terminal_connection_manager.dart';
 import '../widgets/material_mod_popup_menu.dart' as mod_menu;
@@ -347,6 +348,17 @@ class _TerminalTabPageState extends State<TerminalTabPage> {
           return true;
         }
         return false;
+      } else if (call.method == kWindowEventGetRemoteList ||
+          call.method == kWindowEventLabDeskTerminalList) {
+        return LabDeskTerminalRpc.peerList(tabController);
+      } else if (call.method == kWindowEventLabDeskProbe) {
+        final args = jsonDecode(call.arguments);
+        return jsonEncode(
+            await LabDeskTerminalRpc.probe(args['id'], args['platform']));
+      } else if (call.method == kWindowEventLabDeskTermRun) {
+        final args = jsonDecode(call.arguments);
+        return jsonEncode(
+            await LabDeskTerminalRpc.run(args['id'], args['command']));
       }
     });
     Future.delayed(Duration.zero, () {

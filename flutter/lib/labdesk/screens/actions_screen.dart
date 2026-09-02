@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/machine_row.dart';
 import '../theme/console_theme.dart';
+import '../theme/ld_icons.dart';
 
 /// One thing the operator can do to a machine.
 class MachineAction {
@@ -9,7 +10,7 @@ class MachineAction {
     required this.id,
     required this.label,
     required this.description,
-    required this.icon,
+    required this.glyph,
     this.requiresSession = true,
     this.destructive = false,
   });
@@ -17,7 +18,11 @@ class MachineAction {
   final String id;
   final String label;
   final String description;
-  final IconData icon;
+
+  /// A path from [LdIcons], not an [IconData]. The console draws its own
+  /// glyphs; a row of Material icons down the left of this list was the
+  /// loudest remaining tell that the product was derived from another one.
+  final String glyph;
 
   /// Most actions run over an open connection. The screen disables rather than
   /// hides them when there is none, so the operator can see what exists.
@@ -37,34 +42,34 @@ const kMachineActions = <MachineAction>[
     id: 'connect',
     label: 'Connect',
     description: 'Open a remote desktop session.',
-    icon: Icons.desktop_windows_rounded,
+    glyph: LdIcons.display,
     requiresSession: false,
   ),
   MachineAction(
     id: 'terminal',
     label: 'Open terminal',
     description: 'Start a shell on the machine without opening its desktop.',
-    icon: Icons.terminal_rounded,
+    glyph: LdIcons.terminal,
     requiresSession: false,
   ),
   MachineAction(
     id: 'transfer',
     label: 'Transfer files',
     description: 'Browse and move files between this machine and that one.',
-    icon: Icons.folder_copy_outlined,
+    glyph: LdIcons.fileTransfer,
     requiresSession: false,
   ),
   MachineAction(
     id: 'screenshot',
     label: 'Capture screen',
     description: 'Save a still of the remote display.',
-    icon: Icons.photo_camera_outlined,
+    glyph: LdIcons.screenshot,
   ),
   MachineAction(
     id: 'reboot',
     label: 'Restart machine',
     description: 'Reboot the remote machine. Any open session ends.',
-    icon: Icons.restart_alt_rounded,
+    glyph: LdIcons.restart,
     destructive: true,
   ),
 ];
@@ -93,12 +98,16 @@ class ActionsScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.bolt_outlined, size: 26, color: C.textFaint),
+            // The set's own bolt, which is the mark the Actions tab carries.
+            const LdIcon(LdIcons.actions, size: 26, color: C.textFaint),
             const SizedBox(height: 14),
             Text('No machine selected', style: C.h2()),
             const SizedBox(height: 6),
+            // Fixed height, matching the health and terminal screens: see the
+            // note on HealthScreen's empty state.
             SizedBox(
               width: 320,
+              height: 34,
               child: Text(
                 'Choose a machine on the Fleet screen to act on it.',
                 textAlign: TextAlign.center,
@@ -192,7 +201,7 @@ class _ActionRowState extends State<_ActionRow> {
           color: _hover && enabled ? C.surfaceHi : Colors.transparent,
           child: Row(
             children: [
-              Icon(a.icon, size: 17, color: a.destructive && enabled ? C.bad : fg),
+              LdIcon(a.glyph, size: 17, color: a.destructive && enabled ? C.bad : fg),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -211,13 +220,10 @@ class _ActionRowState extends State<_ActionRow> {
               ),
               const SizedBox(width: 16),
               if (widget.busy)
-                SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 1.6, color: C.accent),
-                )
+                const LdSpinner(size: 14, color: C.accent)
               else
-                Icon(Icons.chevron_right_rounded, size: 18, color: enabled ? C.textMuted : C.textFaint),
+                LdIcon(LdIcons.chevronRight,
+                    size: 18, color: enabled ? C.textMuted : C.textFaint),
             ],
           ),
         ),

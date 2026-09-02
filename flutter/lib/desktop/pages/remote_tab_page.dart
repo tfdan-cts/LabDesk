@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:dash_chat_2/dash_chat_2.dart' show ChatMessage;
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
@@ -10,6 +11,11 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/input_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/desktop/pages/remote_page.dart';
+import 'package:flutter_hbb/labdesk/models/chat_transcript.dart';
+import 'package:flutter_hbb/labdesk/models/console_rpc.dart';
+import 'package:flutter_hbb/models/chat_model.dart'
+    show ChatModel, MessageKey;
+import 'package:flutter_hbb/models/model.dart' show FFI;
 import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/desktop/widgets/material_mod_popup_menu.dart'
@@ -389,6 +395,41 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
     return widget.params["windowId"];
   }
 
+  /// The session this window holds for a peer, or null when it holds none.
+  FFI? _ffiOf(String peerId) {
+    for (final tab in tabController.state.value.tabs) {
+      if (tab.key == peerId) return (tab.page as RemotePage).ffi;
+    }
+    return null;
+  }
+
+  /// This session's chat, as the console reads it.
+  ///
+  /// The chat model keeps its messages newest first, because that is the order
+  /// its own reversed list view wants; the console renders reading order, so
+  /// the flip happens here rather than in the transcript type.
+  SessionChat _chatOf(FFI ffi, String peerId) {
+    final chat = ffi.chatModel;
+    final body = chat.messages[MessageKey(peerId, ChatModel.clientModeID)];
+    final pi = ffi.ffiModel.pi;
+    final label = pi.hostname.isNotEmpty
+        ? pi.hostname
+        : (pi.username.isNotEmpty ? pi.username : peerId);
+    return SessionChat(
+      id: peerId,
+      peerLabel: label,
+      direction: SessionDirection.outgoing,
+      lines: [
+        for (final m in (body?.chatMessages ?? const <ChatMessage>[]).reversed)
+          ChatLine(
+            from: m.user.id == chat.me.id ? ChatFrom.mine : ChatFrom.peer,
+            text: m.text,
+            at: m.createdAt,
+          ),
+      ],
+    );
+  }
+
   Future<bool> handleWindowCloseButton() async {
     final connLength = tabController.length;
     if (connLength == 1) {
@@ -508,6 +549,56 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           .map((e) => '${e.key},${(e.page as RemotePage).ffi.sessionId}')
           .toList()
           .join(';');
+    } else if (call.method == kLabDeskRpcSessionStats) {
+      // The console's Health screen asking about a session this window holds.
+      final ffi = _ffiOf(call.arguments as String);
+      if (ffi == null) return null;
+      final d = ffi.qualityMonitorModel.data;
+      return jsonEncode({
+        'speed': d.speed,
+        'fps': d.fps,
+        'delay': d.delay,
+        'targetBitrate': d.targetBitrate,
+        'codecFormat': d.codecFormat,
+        'chroma': d.chroma,
+      });
+    } else if (call.method == kLabDeskRpcChatGet) {
+      // The console's Sessions screen reading this session's conversation.
+      final peerId = call.arguments as String;
+      final ffi = _ffiOf(peerId);
+      if (ffi == null) return null;
+      return encodeSessionChat(_chatOf(ffi, peerId));
+    } else if (call.method == kLabDeskRpcChatSend) {
+      final args = jsonDecode(call.arguments);
+      final peerId = args['id'] as String;
+      final text = (args['text'] as String? ?? '').trim();
+      final ffi = _ffiOf(peerId);
+      if (ffi == null || text.isEmpty) return false;
+      final chat = ffi.chatModel;
+      // Exactly what the floating chat does before it sends: the model sends
+      // to whichever conversation is current, and in a session window that has
+      // never had the chat opened the current key is still the invalid one.
+      chat.changeCurrentKey(MessageKey(peerId, ChatModel.clientModeID));
+      chat.send(ChatMessage(
+          text: text, user: chat.me, createdAt: DateTime.now()));
+      return true;
+    } else if (call.method == kLabDeskRpcAction) {
+      // The console's Actions screen. The operator has already confirmed
+      // anything destructive there, so no second dialog is raised here.
+      final args = jsonDecode(call.arguments);
+      final ffi = _ffiOf(args['id'] as String);
+      if (ffi == null) return false;
+      switch (args['action']) {
+        case 'screenshot':
+          await bind.sessionTakeScreenshot(
+              sessionId: ffi.sessionId,
+              display: ffi.ffiModel.pi.currentDisplay);
+          return true;
+        case 'reboot':
+          await bind.sessionRestartRemoteDevice(sessionId: ffi.sessionId);
+          return true;
+      }
+      return false;
     } else if (call.method == kWindowEventGetCachedSessionData) {
       // Ready to show new window and close old tab.
       final args = jsonDecode(call.arguments);

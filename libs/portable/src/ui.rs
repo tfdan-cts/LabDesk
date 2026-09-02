@@ -4,9 +4,12 @@ use std::cell::RefCell;
 
 const GIF_DATA: &[u8] = include_bytes!("./res/spin.gif");
 const LABEL_DATA: &[u8] = include_bytes!("./res/label.png");
-const GIF_SIZE: i32 = 32;
-const BG_COLOR: [u8; 3] = [90, 90, 120];
-const BORDER_COLOR: [u8; 3] = [40, 40, 40];
+const GIF_SIZE: i32 = 40;
+// The console's own ground and hairline, so the first thing the product shows
+// looks like the product. These must match the background the label and the
+// spinner were rendered on, or the images sit on a visible patch.
+const BG_COLOR: [u8; 3] = [14, 14, 18];
+const BORDER_COLOR: [u8; 3] = [38, 38, 48];
 const GIF_DELAY: u64 = 30;
 
 #[derive(Default)]
@@ -82,7 +85,7 @@ mod basic_app_ui {
     impl nwg::NativeUi<BasicAppUi> for BasicApp {
         fn build_ui(mut data: BasicApp) -> Result<BasicAppUi, nwg::NwgError> {
             data.decoder = nwg::ImageDecoder::new()?;
-            let col_cnt: i32 = 7;
+            let col_cnt: i32 = 8;
             let row_cnt: i32 = 3;
             let border_width: i32 = 1;
             let window_size = (
@@ -163,7 +166,7 @@ mod basic_app_ui {
                 .max_column(Some(col_cnt as _))
                 .max_row(Some(row_cnt as _))
                 .child_item(GridLayoutItem::new(&ui.gif_image, 2, 1, 1, 1))
-                .child_item(GridLayoutItem::new(&ui.label_image, 3, 1, 3, 1))
+                .child_item(GridLayoutItem::new(&ui.label_image, 3, 1, 4, 1))
                 .build(&ui.inner_layout)?;
 
             // Events

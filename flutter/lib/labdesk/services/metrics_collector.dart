@@ -26,11 +26,15 @@ class MetricsCollector {
   /// Linux: CPU from /proc/stat sampled twice, memory from /proc/meminfo, disk
   /// from the root filesystem, uptime from /proc/uptime. Deliberately avoids
   /// top and vmstat, whose output differs between distributions.
-  static const _linux = r'''awk '/^cpu /{a=$2+$4;t=$2+$4+$5}END{print a,t}' /proc/stat > /tmp/.ld1; sleep 1; awk -v p="$(cat /tmp/.ld1)" '/^cpu /{split(p,q," ");a=$2+$4;t=$2+$4+$5;d=t-q[2];if(d>0)printf "LABDESK_CPU=%.1f\n",(a-q[1])*100/d}' /proc/stat; awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{if(t>0){printf "LABDESK_MEM_USED=%d\nLABDESK_MEM_TOTAL=%d\n",(t-a)*1024,t*1024}}' /proc/meminfo; df -B1 / | awk 'NR==2{printf "LABDESK_DISK_USED=%d\nLABDESK_DISK_TOTAL=%d\n",$3,$2}'; awk '{printf "LABDESK_UPTIME=%d\n",$1}' /proc/uptime''';
+  static const _linux = r'''p=$(awk '/^cpu /{print $2+$4,$2+$4+$5}' /proc/stat); sleep 1; awk -v p="$p" '/^cpu /{split(p,q," ");a=$2+$4;t=$2+$4+$5;d=t-q[2];if(d>0)printf "LABDESK_CPU=%.1f\n",(a-q[1])*100/d}' /proc/stat; awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{if(t>0){printf "LABDESK_MEM_USED=%d\nLABDESK_MEM_TOTAL=%d\n",(t-a)*1024,t*1024}}' /proc/meminfo; df -B1 / | awk 'NR==2{printf "LABDESK_DISK_USED=%d\nLABDESK_DISK_TOTAL=%d\n",$3,$2}'; awk '{printf "LABDESK_UPTIME=%d\n",$1}' /proc/uptime''';
 
-  /// Windows: CIM rather than the deprecated wmic, in one PowerShell call.
+  /// Windows: CIM rather than the deprecated wmic. Bare statements, because the
+  /// terminal channel on Windows already IS PowerShell: wrapping them in a
+  /// nested `powershell -Command "..."` with backslash-escaped quotes left an
+  /// unterminated string, and the shell sat at a continuation prompt until the
+  /// probe timed out. Seen on trapLab-Foundry, 2026-09-02.
   static const _windows =
-      r'''powershell -NoProfile -Command "$os=Get-CimInstance Win32_OperatingSystem; $cpu=(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; $d=Get-CimInstance Win32_LogicalDisk -Filter \"DeviceID='C:'\"; Write-Output ('LABDESK_CPU=' + $cpu); Write-Output ('LABDESK_MEM_USED=' + (($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) * 1024)); Write-Output ('LABDESK_MEM_TOTAL=' + ($os.TotalVisibleMemorySize * 1024)); Write-Output ('LABDESK_DISK_USED=' + ($d.Size - $d.FreeSpace)); Write-Output ('LABDESK_DISK_TOTAL=' + $d.Size); Write-Output ('LABDESK_UPTIME=' + [int]((Get-Date) - $os.LastBootUpTime).TotalSeconds)"''';
+      r'''$os=Get-CimInstance Win32_OperatingSystem; $cpu=(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; $d=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; Write-Output ('LABDESK_CPU=' + $cpu); Write-Output ('LABDESK_MEM_USED=' + (($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) * 1024)); Write-Output ('LABDESK_MEM_TOTAL=' + ($os.TotalVisibleMemorySize * 1024)); Write-Output ('LABDESK_DISK_USED=' + ($d.Size - $d.FreeSpace)); Write-Output ('LABDESK_DISK_TOTAL=' + $d.Size); Write-Output ('LABDESK_UPTIME=' + [int]((Get-Date) - $os.LastBootUpTime).TotalSeconds)''';
 
   /// macOS: page counts from vm_stat, sized by the real page size rather than
   /// an assumed 4096, which is wrong on Apple silicon.
@@ -43,16 +47,16 @@ class MetricsCollector {
   /// one still arriving, or a failed one from a silent shell.
   static const endMarker = 'LABDESK_END';
 
+  /// CSI and OSC sequences, and the lone ESC-letter forms.
+  static final _ansi = RegExp(
+      r'\x1B(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-Z\\-_])');
+
   /// The probe's command with the end marker appended, in the syntax of the
   /// shell that command already runs in.
   static String framed(MetricsProbe probe) {
     if (probe.platform == 'windows') {
-      // The command is a single powershell -Command invocation, so the marker
-      // is appended inside its quoted script rather than after it. $? is a
-      // boolean in PowerShell, so the exit status is spelled out instead.
-      final withMarker =
-          '''; Write-Output ('$endMarker=' + \$(if (\$?) { 0 } else { 1 }))"''';
-      return '${probe.command.substring(0, probe.command.length - 1)}$withMarker';
+      // $? is a boolean in PowerShell, so the exit status is spelled out.
+      return '''${probe.command}; Write-Output ('$endMarker=' + \$(if (\$?) { 0 } else { 1 }))''';
     }
     return '${probe.command}; echo "$endMarker=\$?"';
   }
@@ -82,7 +86,11 @@ class MetricsCollector {
   /// measurement that was taken.
   static List<Metric> parse(String raw) {
     final fields = <String, double>{};
-    for (final line in raw.split('\n')) {
+    // A PTY delivers terminal control sequences on the same line as the data
+    // (bash turns bracketed paste off with `ESC[?2004l` and a bare CR right
+    // before the first line of output), so every line is stripped of them
+    // and split on CR as well as LF before the tag is looked for.
+    for (final line in raw.replaceAll(_ansi, '').split(RegExp(r'[\r\n]'))) {
       final t = line.trim();
       if (!t.startsWith('LABDESK_')) continue;
       final eq = t.indexOf('=');

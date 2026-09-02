@@ -542,10 +542,17 @@ class FfiModel with ChangeNotifier {
         close();
       }
 
+      // Three answers, one of which is the point of the prompt. In reading
+      // order, with the answer last, as every other dialog in the product puts
+      // them: "Save as" is the primary, the clipboard is the other way to take
+      // the same shot, and Cancel is dismissive whatever it is passed as.
+      // Asked for as three plain `dialogButton`s in the other order they
+      // arrived as three identical filled slabs with Cancel on the end.
       final List<Widget> buttons = [
-        dialogButton('${translate('Save as')}...', onPressed: saveAs),
-        dialogButton('Copy to clipboard', onPressed: copyToClipboard),
         dialogButton('Cancel', onPressed: cancel),
+        dialogButton('Copy to clipboard',
+            onPressed: copyToClipboard, isOutline: true),
+        dialogButton('${translate('Save as')}...', onPressed: saveAs),
       ];
       dialogManager.dismissAll();
       dialogManager.show(
@@ -956,7 +963,8 @@ class FfiModel with ChangeNotifier {
       _restartReconnectDelayTimer = null;
       reconnect(dialogManager, sessionId, false);
     } else if (type == 'wait-remote-accept-nook') {
-      showWaitAcceptDialog(sessionId, type, title, text, dialogManager);
+      showWaitAcceptDialog(sessionId, type, title, text, dialogManager,
+          peerId: peerId);
     } else if (type == 'on-uac' || type == 'on-foreground-elevated') {
       showOnBlockDialog(sessionId, type, title, text, dialogManager);
     } else if (type == 'wait-uac') {
@@ -3720,6 +3728,11 @@ class FFI {
   // Getter for terminal models
   Map<int, TerminalModel> get terminalModels => _terminalModels;
 
+  // Headless terminals (LabDesk probe and command runs) have no TerminalModel
+  // and no view, so they take their events raw instead of being routed to one.
+  final Map<int, void Function(Map<String, dynamic>)> _rawTerminalListeners =
+      {};
+
   FFI(SessionID? sId) {
     sessionId = sId ?? (isDesktop ? Uuid().v4obj() : _constSessionId);
     imageModel = ImageModel(WeakReference(this));
@@ -4078,8 +4091,23 @@ class FFI {
     _terminalModels.remove(terminalId);
   }
 
+  void setRawTerminalListener(
+      int terminalId, void Function(Map<String, dynamic>)? listener) {
+    if (listener == null) {
+      _rawTerminalListeners.remove(terminalId);
+    } else {
+      _rawTerminalListeners[terminalId] = listener;
+    }
+  }
+
   void routeTerminalResponse(Map<String, dynamic> evt) {
     final int terminalId = TerminalModel.getTerminalIdFromEvt(evt);
+
+    final rawListener = _rawTerminalListeners[terminalId];
+    if (rawListener != null) {
+      rawListener(evt);
+      return;
+    }
 
     // Route to specific terminal model if it exists
     final model = _terminalModels[terminalId];

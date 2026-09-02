@@ -10,11 +10,32 @@ Stock RustDesk stores a single ID/Relay/API/key configuration; pointing the clie
 
 ## What LabDesk adds
 
-- **Server profiles**: save any number of named ID/Relay/API/key configurations. Manage them under *Settings > Network > Server profiles* (add / edit / delete), switch the active profile from a dropdown on the home screen. The active configuration is applied live, no restart.
-- **Machine groups**: create, rename, and delete local groups in the *Groups* tab, with collapsible sections. Assign machines from the group editor or a machine's right-click menu. Groups are stored locally, no server required.
-- **Machine icons**: give any machine one of 10 themed icons (PC, laptop, server, NAS, home, business, warehouse, router, phone, cloud) from its right-click menu.
-- **Live reachability status**: colored status dots: green (reachable), red (unreachable), amber (checking), with faster status polling and a manual refresh button on the home screen for immediate re-checks after switching profiles or networks.
-- **Purple theme and branding** throughout.
+LabDesk opens on a **console**. It is the whole interface rather than a screen beside one: a
+single sidebar carrying Connect, Fleet, Health, Terminal, Actions, This machine and Settings.
+
+- **Connect** is where you work: type a machine's id, or pick one from recent sessions,
+  favourites, discovered machines, your address book, or a group.
+- **Fleet** shows reachability across the session. Every machine's recent checks are drawn as a
+  strip rather than a single dot, so a machine that keeps dropping looks different from one that
+  is simply down, and a machine nobody has asked about yet reads as unknown rather than offline.
+- **Health** shows what LabDesk can honestly read from a machine, and says plainly when it can
+  read nothing rather than showing zeroes.
+- **Terminal** and **Actions** act on the machine selected in Fleet. Actions that need an open
+  session are disabled with their reason shown, never hidden and never inert.
+- **This machine** is this computer's own identity: its id, its password with a plain statement
+  of whether it is one-time or permanent, its server profile, and whether the background service
+  is running.
+- **Settings** nests its pages in the same sidebar, so there is one place to navigate.
+
+Underneath that:
+
+- **Server profiles**: save any number of named ID/Relay/API/key configurations, switch between
+  them from the console, and have the change applied live with no restart.
+- **Machine groups** and **machine icons**: organise machines into local groups with themed
+  icons. Stored locally, no server required.
+- **Live reachability**: green, red, and a real unknown state, with a manual refresh for an
+  immediate re-check after switching profiles or networks.
+- **Purple theme and branding** throughout, including the installer.
 
 Connection protocol, encryption, file transfer, and server compatibility are all inherited from upstream RustDesk. LabDesk works with the standard open-source `rustdesk-server` (hbbs/hbbr) and RustDesk Server Pro.
 
@@ -100,7 +121,7 @@ pre-releases, so it will not show them.
 Add `--silent-install` to run one without any interface:
 
 ```powershell
-.\LabDesk-1.4.9-x86_64-install.exe --silent-install
+.\LabDesk-1.2.0-x86_64-install.exe --silent-install
 ```
 
 ### Uninstalling

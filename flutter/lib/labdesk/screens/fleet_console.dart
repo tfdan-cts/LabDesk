@@ -1,9 +1,13 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
+import '../../common/formatter/id_formatter.dart';
 import '../../common/labdesk_peer_status.dart';
 import '../models/machine_row.dart';
 import '../charts/reachability_chart.dart';
 import '../theme/console_theme.dart';
+import '../theme/ld_icons.dart';
 
 /// The fleet console.
 ///
@@ -108,12 +112,12 @@ class _Sidebar extends StatelessWidget {
 
   final String profileName;
 
-  static const _nav = <(IconData, String, bool)>[
-    (Icons.grid_view_rounded, 'Fleet', true),
-    (Icons.monitor_heart_outlined, 'Health', false),
-    (Icons.terminal_rounded, 'Terminal', false),
-    (Icons.bolt_outlined, 'Actions', false),
-    (Icons.tune_rounded, 'Settings', false),
+  static const _nav = <(String, String, bool)>[
+    (LdIcons.fleet, 'Fleet', true),
+    (LdIcons.health, 'Health', false),
+    (LdIcons.terminal, 'Terminal', false),
+    (LdIcons.actions, 'Actions', false),
+    (LdIcons.settings, 'Settings', false),
   ];
 
   @override
@@ -165,7 +169,7 @@ class _Sidebar extends StatelessWidget {
                         style: C.body(),
                       ),
                     ),
-                    Icon(Icons.unfold_more_rounded, size: 15, color: C.textFaint),
+                    const LdIcon(LdIcons.chevronDown, size: 14, color: C.textFaint),
                   ],
                 ),
               ],
@@ -180,7 +184,7 @@ class _Sidebar extends StatelessWidget {
 class _NavItem extends StatefulWidget {
   const _NavItem({required this.icon, required this.label, required this.active});
 
-  final IconData icon;
+  final String icon;
   final String label;
   final bool active;
 
@@ -203,7 +207,7 @@ class _NavItemState extends State<_NavItem> {
         child: AnimatedContainer(
           duration: C.fast,
           height: 34,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+          padding: const EdgeInsets.only(right: 10),
           decoration: BoxDecoration(
             color: widget.active
                 ? C.accent.withOpacity(0.14)
@@ -212,7 +216,18 @@ class _NavItemState extends State<_NavItem> {
           ),
           child: Row(
             children: [
-              Icon(widget.icon, size: 16, color: widget.active ? C.accent : fg),
+              // Fill plus a leading accent bar: the one way this product says
+              // "this is the current thing", shared with the selected row.
+              Container(
+                width: _leadBar,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: widget.active ? C.accent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+              const SizedBox(width: 8),
+              LdIcon(widget.icon, size: 16, color: widget.active ? C.accent : fg),
               const SizedBox(width: 10),
               Text(
                 widget.label,
@@ -259,7 +274,7 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: 12),
           GhostButton(
             label: 'Refresh',
-            icon: Icons.refresh_rounded,
+            glyph: LdIcons.refresh,
             busy: isRefreshing,
             onPressed: onRefresh,
           ),
@@ -295,97 +310,153 @@ class _Summary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Nothing has answered a check yet. Online and offline are not zero, they
+    // are unmeasured, and printing "0" beside Online would claim a reading
+    // that was never taken.
+    final measured = online + offline > 0;
+    final note = !measured
+        ? 'No machine has answered a check yet, so online and offline are not '
+            'known. They are not zero.'
+        : unknown > 0
+            ? 'Unknown means LabDesk has had no answer for that machine yet. It '
+                'is not a report that the machine is down.'
+            : null;
+
     return Panel(
       title: 'Reachability',
       subtitle: 'Whether each machine is registered with the ID server. This is not a health check.',
       child: isLoading
           ? const _SummarySkeleton()
-          : Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+                // One band: three counts sharing a rule, over a single bar of
+                // the same three quantities in the same left-to-right order,
+                // so the counts are the bar's labels rather than a separate
+                // widget parked beside it.
+                Row(
                   children: [
-                    _Metric(label: 'Online', value: online, color: C.ok),
-                    const SizedBox(height: 20),
-                    _Metric(label: 'Offline', value: offline, color: C.bad),
-                    const SizedBox(height: 20),
+                    _Metric(
+                      label: 'Online',
+                      value: measured ? '$online' : '--',
+                      color: C.ok,
+                    ),
+                    const _BandRule(),
+                    _Metric(
+                      label: 'Offline',
+                      value: measured ? '$offline' : '--',
+                      color: C.bad,
+                    ),
+                    const _BandRule(),
                     _Metric(
                       label: 'Unknown',
-                      value: unknown,
+                      value: '$unknown',
                       color: C.idle,
-                      hint: 'Not queried yet, or the last query failed.\n'
-                          'LabDesk cannot tell a powered-off machine from\n'
-                          'one it has never asked about.',
+                      hollow: true,
                     ),
                   ],
                 ),
-                const SizedBox(width: 38),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text('Online this session', style: C.micro()),
-                      const SizedBox(height: 12),
-                      ReachabilityChart(samples: samples),
-                    ],
-                  ),
+                const SizedBox(height: 16),
+                FleetMixBar(online: online, offline: offline, unknown: unknown),
+                if (note != null) ...[
+                  const SizedBox(height: 12),
+                  Text(note, style: C.small(color: C.textFaint)),
+                ],
+                const SizedBox(height: 18),
+                Divider(height: 1, thickness: 1, color: C.hairline),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Text('Online this session', style: C.micro()),
+                    const Spacer(),
+                    if (samples.length >= 2)
+                      Text(
+                        '0 to ${samples.map((s) => s.total).reduce(math.max)} machines',
+                        style: C.micro(),
+                      ),
+                  ],
                 ),
+                const SizedBox(height: 10),
+                ReachabilityChart(samples: samples),
               ],
             ),
     );
   }
 }
 
+/// One count in the status band.
+///
+/// Flexed rather than sized to its content: three cells of equal width read as
+/// a band, where three content-sized cells read as a column with the rest of
+/// the card left over.
 class _Metric extends StatelessWidget {
   const _Metric({
     required this.label,
     required this.value,
     required this.color,
-    this.hint,
+    this.hollow = false,
   });
 
   final String label;
-  final int value;
+
+  /// Already formatted, because an unmeasured count is a dash and not a number.
+  final String value;
   final Color color;
-  final String? hint;
+
+  /// Unknown carries a ring rather than a filled dot, so it stays separable
+  /// from offline for an operator who cannot tell the two hues apart.
+  final bool hollow;
 
   @override
   Widget build(BuildContext context) {
-    final content = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            _Dot(color: color),
-            const SizedBox(width: 7),
-            Text(label, style: C.small()),
-            if (hint != null) ...[
-              const SizedBox(width: 5),
-              Icon(Icons.info_outline_rounded, size: 12, color: C.textFaint),
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              _Dot(color: color, hollow: hollow),
+              const SizedBox(width: 8),
+              Text(label, style: C.small()),
             ],
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text('$value', style: C.metric()),
-      ],
+          ),
+          const SizedBox(height: 8),
+          Text(value, style: C.metric()),
+        ],
+      ),
     );
-    return hint == null ? content : Tooltip(message: hint!, child: content);
   }
 }
 
-class _Dot extends StatelessWidget {
-  const _Dot({required this.color});
-
-  final Color color;
+/// The rule between two cells of the band.
+class _BandRule extends StatelessWidget {
+  const _BandRule();
 
   @override
   Widget build(BuildContext context) => Container(
-        width: 7,
-        height: 7,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        width: 1,
+        height: 44,
+        margin: const EdgeInsets.only(right: 22, left: 2),
+        color: C.hairline,
+      );
+}
+
+class _Dot extends StatelessWidget {
+  const _Dot({required this.color, this.hollow = false});
+
+  final Color color;
+  final bool hollow;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: hollow ? 8 : 7,
+        height: hollow ? 8 : 7,
+        decoration: BoxDecoration(
+          color: hollow ? null : color,
+          border: hollow ? Border.all(color: color, width: 1.5) : null,
+          shape: BoxShape.circle,
+        ),
       );
 }
 
@@ -410,24 +481,33 @@ class _MachineList extends StatelessWidget {
       title: 'Machines',
       subtitle: isLoading ? null : '${machines.length} tracked',
       padding: EdgeInsets.zero,
+      actions: isLoading || machines.isEmpty ? null : const [AvailabilityLegend()],
       child: isLoading
           ? const _ListSkeleton()
           : machines.isEmpty
               ? const _EmptyState()
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const _ListHeader(),
-                    for (var i = 0; i < machines.length; i++) ...[
-                      if (i > 0) Divider(height: 1, thickness: 1, color: C.hairline),
-                      _MachineTile(
-                        machine: machines[i],
-                        selected: machines[i].id == selectedId,
-                        onTap: onSelect == null ? null : () => onSelect!(machines[i].id),
-                        now: now,
-                      ),
+              : ClipRRect(
+                  // A selected last row is filled to its corners, and the panel
+                  // draws its radius without clipping its child.
+                  borderRadius: BorderRadius.vertical(
+                    bottom: Radius.circular(C.radius - 1),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const _ListHeader(),
+                      for (var i = 0; i < machines.length; i++)
+                        _MachineTile(
+                          machine: machines[i],
+                          selected: machines[i].id == selectedId,
+                          last: i == machines.length - 1,
+                          onTap: onSelect == null
+                              ? null
+                              : () => onSelect!(machines[i].id),
+                          now: now,
+                        ),
                     ],
-                  ],
+                  ),
                 ),
     );
   }
@@ -437,33 +517,57 @@ const _wStatus = 30.0;
 const _wPlatform = 92.0;
 const _wGroup = 118.0;
 const _wSeen = 84.0;
-const _wTrend = 90.0;
+
+/// The accent bar that marks the current row and the current nav item. Two
+/// pixels, drawn down the leading edge, the same everywhere.
+const _leadBar = 2.0;
+
+/// Row height, matched to the table on Connect and to the file manager.
+///
+/// 52 plus a rule before, which is 53 and reads as a different table beside
+/// them. 44 holds the same two lines - the name at body size over the id in
+/// mono - by tightening the leading, not the type, and carries its own rule
+/// inside the height the way the other tables do.
+const _rowH = 44.0;
+
+/// Content inset. The bar is drawn as the row's left border, so the padding is
+/// short by its width and the text still lands 18 from the panel edge.
+const _padH = 18.0;
+
+/// Wide enough to hold the strip and the word above it on the same left edge,
+/// with a gutter before the right-aligned last column.
+const _wTrend = 100.0;
+const _wStrip = 88.0;
 
 class _ListHeader extends StatelessWidget {
   const _ListHeader();
 
   @override
   Widget build(BuildContext context) {
+    // Uppercase and letterspaced, the way Connect, the file manager and the
+    // connection manager all label their columns. A column head is a label,
+    // not a sentence, and this product had already decided how a label looks.
     Widget h(String s, {double? w, bool right = false}) {
       final t = Text(s,
-          textAlign: right ? TextAlign.right : TextAlign.left, style: C.micro());
+          textAlign: right ? TextAlign.right : TextAlign.left,
+          style: C.micro().copyWith(letterSpacing: 0.7));
       return w == null ? Expanded(child: t) : SizedBox(width: w, child: t);
     }
 
     return Container(
-      height: 34,
-      padding: const EdgeInsets.symmetric(horizontal: 18),
+      height: 28,
+      padding: const EdgeInsets.fromLTRB(_padH + _leadBar, 0, _padH, 0),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: C.hairline)),
       ),
       child: Row(
         children: [
           const SizedBox(width: _wStatus),
-          h('Machine'),
-          h('Platform', w: _wPlatform),
-          h('Group', w: _wGroup),
-          h('Recent', w: _wTrend),
-          h('Last seen', w: _wSeen, right: true),
+          h('MACHINE'),
+          h('PLATFORM', w: _wPlatform),
+          h('GROUP', w: _wGroup),
+          h('RECENT', w: _wTrend),
+          h('LAST SEEN', w: _wSeen, right: true),
         ],
       ),
     );
@@ -474,12 +578,17 @@ class _MachineTile extends StatefulWidget {
   const _MachineTile({
     required this.machine,
     required this.selected,
+    required this.last,
     required this.onTap,
     this.now,
   });
 
   final MachineRow machine;
   final bool selected;
+
+  /// The last row drops its rule, so the panel's rounded bottom edge is not
+  /// cut by a hairline running to both corners.
+  final bool last;
   final VoidCallback? onTap;
   final DateTime? now;
 
@@ -496,10 +605,12 @@ class _MachineTileState extends State<_MachineTile> {
         LabDeskPeerStatus.unknown => C.idle,
       };
 
+  /// One triplet for these three states, everywhere on this screen and in the
+  /// rest of the product: Online, Offline, Unknown.
   String get _statusWord => switch (widget.machine.status) {
         LabDeskPeerStatus.online => 'Online',
         LabDeskPeerStatus.offline => 'Offline',
-        LabDeskPeerStatus.unknown => 'Not yet checked',
+        LabDeskPeerStatus.unknown => 'Unknown',
       };
 
   @override
@@ -513,29 +624,55 @@ class _MachineTileState extends State<_MachineTile> {
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: C.fast,
-          height: 52,
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          color: widget.selected
-              ? C.accent.withOpacity(0.10)
-              : (_hover ? C.surfaceHi : Colors.transparent),
+          height: _rowH,
+          padding: const EdgeInsets.fromLTRB(_padH, 0, _padH, 0),
+          decoration: BoxDecoration(
+            color: widget.selected
+                ? C.accent.withOpacity(0.13)
+                : (_hover ? C.surfaceHi : Colors.transparent),
+            border: Border(
+              // Down the leading edge, not under the row: a rule beneath a
+              // selected row reads as belonging to the row above it.
+              left: BorderSide(
+                color: widget.selected ? C.accent : Colors.transparent,
+                width: _leadBar,
+              ),
+              bottom: BorderSide(
+                color: widget.last ? Colors.transparent : C.hairline,
+              ),
+            ),
+          ),
           child: Row(
             children: [
               SizedBox(
                 width: _wStatus,
-                child: Tooltip(message: _statusWord, child: _Dot(color: _statusColor)),
+                child: Tooltip(
+                  message: _statusWord,
+                  child: _Dot(
+                    color: _statusColor,
+                    hollow: m.status == LabDeskPeerStatus.unknown,
+                  ),
+                ),
               ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    // Leading tightened to hold two lines in the shorter row.
+                    // The type sizes are untouched: this is leading, not the
+                    // identity getting smaller.
                     Text(
                       m.displayName,
                       overflow: TextOverflow.ellipsis,
-                      style: C.body(),
+                      style: C.body().copyWith(height: 1.2),
                     ),
-                    const SizedBox(height: 2),
-                    Text(m.id, style: C.data(size: 11, color: C.textFaint)),
+                    // One id formatter for the product. Connect and the consent
+                    // prompt both print grouped triplets; a raw ten-digit run
+                    // here made the same number look like a different field.
+                    Text(formatID(m.id),
+                        style: C.data(size: 11, color: C.textFaint)
+                            .copyWith(height: 1.25)),
                   ],
                 ),
               ),
@@ -559,7 +696,10 @@ class _MachineTileState extends State<_MachineTile> {
                     ? Text('--', style: C.small(color: C.textFaint))
                     : Tooltip(
                         message: 'Last ${m.history.length} checks, oldest first',
-                        child: AvailabilityStrip(history: m.history),
+                        child: AvailabilityStrip(
+                          history: m.history,
+                          width: _wStrip,
+                        ),
                       ),
               ),
               SizedBox(
@@ -593,7 +733,7 @@ class _EmptyState extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 54, horizontal: 24),
       child: Column(
         children: [
-          Icon(Icons.devices_other_rounded, size: 26, color: C.textFaint),
+          const LdIcon(LdIcons.fleet, size: 26, color: C.textFaint),
           const SizedBox(height: 14),
           Text('No machines yet', style: C.h2()),
           const SizedBox(height: 6),
@@ -616,20 +756,29 @@ class _SummarySkeleton extends StatelessWidget {
   const _SummarySkeleton();
 
   @override
-  Widget build(BuildContext context) => Row(
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (var i = 0; i < 3; i++) ...[
-            if (i > 0) const SizedBox(width: 52),
-            const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _Shimmer(width: 58, height: 10),
-                SizedBox(height: 10),
-                _Shimmer(width: 38, height: 24),
+          Row(
+            children: [
+              for (var i = 0; i < 3; i++) ...[
+                if (i > 0) const _BandRule(),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _Shimmer(width: 58, height: 10),
+                      SizedBox(height: 10),
+                      _Shimmer(width: 38, height: 24),
+                    ],
+                  ),
+                ),
               ],
-            ),
-          ],
+            ],
+          ),
+          const SizedBox(height: 16),
+          const _Shimmer(width: double.infinity, height: 8),
         ],
       );
 }
@@ -642,8 +791,8 @@ class _ListSkeleton extends StatelessWidget {
         children: [
           for (var i = 0; i < 5; i++)
             Container(
-              height: 52,
-              padding: const EdgeInsets.symmetric(horizontal: 18),
+              height: _rowH,
+              padding: const EdgeInsets.symmetric(horizontal: _padH),
               decoration: BoxDecoration(
                 border: Border(bottom: BorderSide(color: C.hairline)),
               ),

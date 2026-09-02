@@ -13,12 +13,128 @@ import 'package:flutter_hbb/models/peer_tab_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:get/get.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
+import 'package:flutter_hbb/labdesk/theme/dialog_skin.dart';
+import 'package:flutter_hbb/labdesk/theme/ld_icons.dart';
+import 'package:flutter_hbb/labdesk/theme/settings_skin.dart';
 import 'package:flutter_hbb/utils/http_service.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../common.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import 'address_book.dart';
+
+// ---------------------------------------------------------------------------
+// The console's modals.
+//
+// Every dialog below used to be a Material `AlertDialog` with Material buttons,
+// Material icons and RustDesk's accent, raised over three surfaces that have
+// since been restyled — the console, the session windows, the connection
+// manager. The presentation now comes from `labdesk/theme/dialog_skin.dart`, so
+// they move together and so `tool/shots/dialogs_test.dart` can render them
+// without a session behind them.
+//
+// Nothing here changes behaviour: the strings, the `translate` keys, the
+// validation rules, the timeouts, the autofocus and the Escape/Enter contract
+// are the ones that were here before.
+
+/// [LdDialog] wearing the type the dialog manager insists on.
+///
+/// `OverlayDialogManager.show` is typed to return a `CustomAlertDialog`, and
+/// that typedef lives in the app's shared `common.dart`. So the console's
+/// dialog is handed over as one, with the Material `AlertDialog` its build
+/// would have produced replaced outright. Nothing of the original survives
+/// except the type name — the keyboard contract it carried is reimplemented in
+/// [LdDialog] verbatim.
+class _LdAlertDialog extends CustomAlertDialog {
+  _LdAlertDialog({
+    this.ldTitle,
+    this.ldContent,
+    this.ldActions,
+    this.ldOnSubmit,
+    this.ldOnCancel,
+    this.ldWidth = DialogSkin.width,
+  }) : super(content: const SizedBox.shrink());
+
+  final Widget? ldTitle;
+  final Widget? ldContent;
+  final List<Widget>? ldActions;
+  final VoidCallback? ldOnSubmit;
+  final VoidCallback? ldOnCancel;
+  final double ldWidth;
+
+  @override
+  Widget build(BuildContext context) => LdDialog(
+        title: ldTitle,
+        content: ldContent,
+        actions: ldActions,
+        onSubmit: ldOnSubmit,
+        onCancel: ldOnCancel,
+        width: ldWidth,
+        // Mobile switches the platform soft keyboard off while a session is on
+        // screen, so a dialog has to switch it back on to be answerable at all.
+        onOpen: () {
+          if (isAndroid) gFFI.invokeMethod("enable_soft_keyboard", true);
+        },
+      );
+}
+
+/// The console's modal, ready for `OverlayDialogManager.show`.
+///
+/// Public because `msgBox`, `msgBoxCommon` and `showFileConfirmDialog` raise
+/// dialogs too and live in files this one does not own; they need one call, not
+/// a copy of this.
+CustomAlertDialog ldDialog({
+  Widget? title,
+  Widget? content,
+  List<Widget>? actions,
+  VoidCallback? onSubmit,
+  VoidCallback? onCancel,
+  double width = DialogSkin.width,
+}) =>
+    _LdAlertDialog(
+      ldTitle: title,
+      ldContent: content,
+      ldActions: actions,
+      ldOnSubmit: onSubmit,
+      ldOnCancel: onCancel,
+      ldWidth: width,
+    );
+
+/// One answer. Takes the untranslated key, exactly as `dialogButton` did.
+Widget ldButton(
+  String text, {
+  required VoidCallback? onPressed,
+  LdDialogTone tone = LdDialogTone.neutral,
+  String? glyph,
+  bool busy = false,
+}) =>
+    LdDialogButton(
+      label: translate(text),
+      onPressed: onPressed,
+      tone: tone,
+      glyph: glyph,
+      busy: busy,
+    );
+
+/// The header of a dialog whose whole content is something the product has to
+/// say — the same [LdDialogTitle] row every other dialog opens with, so a
+/// message box is not the one modal in the product with no header.
+///
+/// The mark table and the translation rules live on [LdMsgboxContent] in
+/// common.dart, because the raw `msgBox` path needs exactly the same two and a
+/// second copy of them here is a second copy that drifts.
+Widget? ldMessageTitle(String type, String title) =>
+    LdMsgboxContent(type, title, '').header();
+
+/// The body of a dialog whose whole content is something the product has to
+/// say. Replaces `msgboxContent`. Pairs with [ldMessageTitle].
+Widget ldMessage(String text, {String? detail}) => LdDialogMessage(
+      text: ldMsgboxText(text),
+      detail: detail,
+      onLinkTap: (url) => launchUrl(Uri.parse(url)),
+    );
 
 void clientClose(SessionID sessionId, FFI ffi) async {
   if (allowAskForNoteAtEndOfConnection(ffi, true)) {
@@ -121,26 +237,29 @@ void changeIdDialog() {
       });
     }
 
-    return CustomAlertDialog(
-      title: Text(translate("Change ID")),
+    return ldDialog(
+      title: LdDialogTitle(
+          title: translate("Change ID"), glyph: LdIcons.machine),
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(translate("id_change_tip")),
+          Text(translate("id_change_tip"), style: C.body(color: C.textMuted)),
           const SizedBox(
-            height: 12.0,
+            height: 16.0,
           ),
-          TextField(
-            decoration: InputDecoration(
-                labelText: translate('Your new ID'),
-                errorText: msg.isEmpty ? null : translate(msg),
-                suffixText: '${rxId.value.length}/16',
-                suffixStyle: const TextStyle(fontSize: 12, color: Colors.grey)),
+          LdDialogField(
+            controller: controller,
+            label: translate('Your new ID'),
+            // An id is compared character by character against something
+            // somebody else read out, so it is set in the data face.
+            mono: true,
+            errorText: msg.isEmpty ? null : translate(msg),
+            suffixText: '${rxId.value.length}/16',
             inputFormatters: [
               LengthLimitingTextInputFormatter(16),
               // FilteringTextInputFormatter(RegExp(r"[a-zA-z][a-zA-z0-9\_]*"), allow: true)
             ],
-            controller: controller,
             autofocus: true,
             onChanged: (value) {
               setState(() {
@@ -149,36 +268,36 @@ void changeIdDialog() {
               });
             },
           ).workaroundFreezeLinuxMint(),
-          const SizedBox(
-            height: 8.0,
-          ),
+          // The rules, as a checklist rather than as a row of pink and green
+          // lozenges. A rule that is not met yet is quiet: it is a thing still
+          // to do, not an error the operator has already made.
           (isDesktop || isWebDesktop)
               ? Obx(() => Wrap(
-                    runSpacing: 8,
-                    spacing: 4,
+                    runSpacing: 7,
+                    spacing: 16,
                     children: rules.map((e) {
                       var checked = e.validate(rxId.value);
-                      return Chip(
-                          label: Text(
-                            e.name,
-                            style: TextStyle(
-                                color: checked
-                                    ? const Color(0xFF0A9471)
-                                    : Color.fromARGB(255, 198, 86, 157)),
-                          ),
-                          backgroundColor: checked
-                              ? const Color(0xFFD0F7ED)
-                              : Color.fromARGB(255, 247, 205, 232));
+                      return Row(mainAxisSize: MainAxisSize.min, children: [
+                        LdIcon(checked ? DialogGlyphs.check : LdIcons.minus,
+                            size: 13, color: checked ? C.ok : C.textFaint),
+                        const SizedBox(width: 6),
+                        Text(e.name,
+                            style: C.small(
+                                color: checked ? C.ok : C.textMuted)),
+                      ]);
                     }).toList(),
-                  )).marginOnly(bottom: 8)
+                  )).marginOnly(top: 14)
               : SizedBox.shrink(),
           // NOT use Offstage to wrap LinearProgressIndicator
-          if (isInProgress) const LinearProgressIndicator(),
+          if (isInProgress) const LinearProgressIndicator().marginOnly(top: 16),
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: submit),
+        ldButton("Cancel", onPressed: close, glyph: LdIcons.close),
+        ldButton("OK",
+            onPressed: submit,
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -196,53 +315,52 @@ void changeWhiteList({Function()? callback}) async {
   var isInProgress = false;
   final isOptFixed = isOptionFixed(kOptionWhitelist);
   gFFI.dialogManager.show((setState, close, context) {
-    return CustomAlertDialog(
-      title: Text(translate("IP Whitelisting")),
+    return ldDialog(
+      title: LdDialogTitle(
+          title: translate("IP Whitelisting"), glyph: LdIcons.shield),
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(translate("whitelist_sep")),
+          Text(translate("whitelist_sep"), style: C.body(color: C.textMuted)),
           const SizedBox(
             height: 8.0,
           ),
-          Text(translate("whitelist_cidr_tip")),
+          Text(translate("whitelist_cidr_tip"),
+              style: C.body(color: C.textMuted)),
           const SizedBox(
-            height: 8.0,
+            height: 16.0,
           ),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                        maxLines: null,
-                        decoration: InputDecoration(
-                          errorText: msg.isEmpty ? null : translate(msg),
-                        ),
-                        controller: controller,
-                        enabled: !isOptFixed,
-                        autofocus: true)
-                    .workaroundFreezeLinuxMint(),
-              ),
-            ],
-          ),
-          const SizedBox(
-            height: 4.0,
-          ),
+          LdDialogField(
+            controller: controller,
+            label: '',
+            // A column of addresses. Monospaced so a stray digit in an octet
+            // is visible, and tall enough to hold a real list.
+            mono: true,
+            maxLines: null,
+            minLines: 4,
+            errorText: msg.isEmpty ? null : translate(msg),
+            enabled: !isOptFixed,
+            autofocus: true,
+          ).workaroundFreezeLinuxMint(),
           // NOT use Offstage to wrap LinearProgressIndicator
-          if (isInProgress) const LinearProgressIndicator(),
+          if (isInProgress) const LinearProgressIndicator().marginOnly(top: 16),
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
+        ldButton("Cancel", onPressed: close, glyph: LdIcons.close),
         if (!isOptFixed)
-          dialogButton("Clear", onPressed: () async {
+          ldButton("Clear", glyph: LdIcons.trash, onPressed: () async {
             await bind.mainSetOption(
                 key: kOptionWhitelist, value: defaultOptionWhitelist);
             callback?.call();
             close();
-          }, isOutline: true),
+          }),
         if (!isOptFixed)
-          dialogButton(
+          ldButton(
             "OK",
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check,
             onPressed: () async {
               setState(() {
                 msg = "";
@@ -296,57 +414,55 @@ void changeIdWhiteList({Function()? callback}) async {
   var isInProgress = false;
   final isOptFixed = isOptionFixed(kOptionIdWhitelist);
   gFFI.dialogManager.show((setState, close, context) {
-    return CustomAlertDialog(
-      title: Text(translate("ID whitelisting")),
+    return ldDialog(
+      title: LdDialogTitle(
+          title: translate("ID whitelisting"), glyph: LdIcons.shield),
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(translate("whitelist_sep")),
+          Text(translate("whitelist_sep"), style: C.body(color: C.textMuted)),
           const SizedBox(
             height: 8.0,
           ),
-          Text(translate("id_whitelist_wildcard_tip")),
+          Text(translate("id_whitelist_wildcard_tip"),
+              style: C.body(color: C.textMuted)),
           const SizedBox(
             height: 8.0,
           ),
-          Text(translate("id_whitelist_caveat_tip")),
+          Text(translate("id_whitelist_caveat_tip"),
+              style: C.body(color: C.textMuted)),
           const SizedBox(
-            height: 8.0,
+            height: 16.0,
           ),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                        maxLines: null,
-                        decoration: InputDecoration(
-                          errorText: msg.isEmpty ? null : translate(msg),
-                        ),
-                        controller: controller,
-                        enabled: !isOptFixed,
-                        autofocus: true)
-                    .workaroundFreezeLinuxMint(),
-              ),
-            ],
-          ),
-          const SizedBox(
-            height: 4.0,
-          ),
+          LdDialogField(
+            controller: controller,
+            label: '',
+            mono: true,
+            maxLines: null,
+            minLines: 4,
+            errorText: msg.isEmpty ? null : translate(msg),
+            enabled: !isOptFixed,
+            autofocus: true,
+          ).workaroundFreezeLinuxMint(),
           // NOT use Offstage to wrap LinearProgressIndicator
-          if (isInProgress) const LinearProgressIndicator(),
+          if (isInProgress) const LinearProgressIndicator().marginOnly(top: 16),
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
+        ldButton("Cancel", onPressed: close, glyph: LdIcons.close),
         if (!isOptFixed)
-          dialogButton("Clear", onPressed: () async {
+          ldButton("Clear", glyph: LdIcons.trash, onPressed: () async {
             await bind.mainSetOption(
                 key: kOptionIdWhitelist, value: defaultOptionWhitelist);
             callback?.call();
             close();
-          }, isOutline: true),
+          }),
         if (!isOptFixed)
-          dialogButton(
+          ldButton(
             "OK",
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check,
             onPressed: () async {
               setState(() {
                 msg = "";
@@ -395,41 +511,42 @@ Future<String> changeDirectAccessPort(
     String currentIP, String currentPort) async {
   final controller = TextEditingController(text: currentPort);
   await gFFI.dialogManager.show((setState, close, context) {
-    return CustomAlertDialog(
-      title: Text(translate("Change Local Port")),
-      content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return ldDialog(
+      width: DialogSkin.narrowWidth,
+      title: LdDialogTitle(
+          title: translate("Change Local Port"), glyph: LdIcons.portForward),
+      content: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const SizedBox(height: 8.0),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                        maxLines: null,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                            hintText: '21118',
-                            isCollapsed: true,
-                            prefix: Text('$currentIP : '),
-                            suffix: IconButton(
-                                padding: EdgeInsets.zero,
-                                icon: const Icon(Icons.clear, size: 16),
-                                onPressed: () => controller.clear())),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(
-                              r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
-                        ],
-                        controller: controller,
-                        autofocus: true)
-                    .workaroundFreezeLinuxMint(),
-              ),
-            ],
+          // The address is not editable, so it is a statement beside the field
+          // rather than a prefix inside it — a prefix the caret can never reach
+          // reads as text somebody failed to select.
+          Text('$currentIP :', style: C.data(size: 13, color: C.textMuted)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: LdDialogField(
+              controller: controller,
+              label: '',
+              mono: true,
+              maxLines: null,
+              hintText: '21118',
+              keyboardType: TextInputType.number,
+              trailing: LdFieldButton(
+                  glyph: LdIcons.close, onPressed: () => controller.clear()),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(
+                    r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
+              ],
+              autofocus: true,
+            ).workaroundFreezeLinuxMint(),
           ),
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: () async {
+        ldButton("Cancel", onPressed: close, glyph: LdIcons.close),
+        ldButton("OK",
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check, onPressed: () async {
           await bind.mainSetOption(
               key: kOptionDirectAccessPort, value: controller.text);
           close();
@@ -444,40 +561,30 @@ Future<String> changeDirectAccessPort(
 Future<String> changeAutoDisconnectTimeout(String old) async {
   final controller = TextEditingController(text: old);
   await gFFI.dialogManager.show((setState, close, context) {
-    return CustomAlertDialog(
-      title: Text(translate("Timeout in minutes")),
-      content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 8.0),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                        maxLines: null,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                            hintText: '10',
-                            isCollapsed: true,
-                            suffix: IconButton(
-                                padding: EdgeInsets.zero,
-                                icon: const Icon(Icons.clear, size: 16),
-                                onPressed: () => controller.clear())),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(
-                              r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
-                        ],
-                        controller: controller,
-                        autofocus: true)
-                    .workaroundFreezeLinuxMint(),
-              ),
-            ],
-          ),
+    return ldDialog(
+      width: DialogSkin.narrowWidth,
+      title: LdDialogTitle(
+          title: translate("Timeout in minutes"), glyph: LdIcons.recent),
+      content: LdDialogField(
+        controller: controller,
+        label: '',
+        mono: true,
+        maxLines: null,
+        hintText: '10',
+        keyboardType: TextInputType.number,
+        trailing: LdFieldButton(
+            glyph: LdIcons.close, onPressed: () => controller.clear()),
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(RegExp(
+              r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
         ],
-      ),
+        autofocus: true,
+      ).workaroundFreezeLinuxMint(),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: () async {
+        ldButton("Cancel", onPressed: close, glyph: LdIcons.close),
+        ldButton("OK",
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check, onPressed: () async {
           await bind.mainSetOption(
               key: kOptionAutoDisconnectTimeout, value: controller.text);
           close();
@@ -504,9 +611,11 @@ class DialogTextField extends StatelessWidget {
   final int? maxLength;
 
   static const kUsernameTitle = 'Username';
-  static const kUsernameIcon = Icon(Icons.account_circle_outlined);
+  static const kUsernameIcon =
+      LdIcon(DialogGlyphs.user, size: 16, color: C.textFaint);
   static const kPasswordTitle = 'Password';
-  static const kPasswordIcon = Icon(Icons.lock_outline);
+  static const kPasswordIcon =
+      LdIcon(LdIcons.lock, size: 16, color: C.textFaint);
 
   DialogTextField(
       {Key? key,
@@ -526,45 +635,21 @@ class DialogTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            children: [
-              TextField(
-                decoration: InputDecoration(
-                  labelText: title,
-                  hintText: hintText,
-                  prefixIcon: prefixIcon,
-                  suffixIcon: suffixIcon,
-                  helperText: helperText,
-                  helperMaxLines: 8,
-                ),
-                controller: controller,
-                focusNode: focusNode,
-                autofocus: true,
-                obscureText: obscureText,
-                keyboardType: keyboardType,
-                inputFormatters: inputFormatters,
-                maxLength: maxLength,
-              ),
-              if (errorText != null)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: SelectableText(
-                    errorText!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                      fontSize: 12,
-                    ),
-                    textAlign: TextAlign.left,
-                  ).paddingOnly(top: 8, left: 12),
-                ),
-            ],
-          ).workaroundFreezeLinuxMint(),
-        ),
-      ],
-    ).paddingSymmetric(vertical: 4.0);
+    return LdDialogField(
+      controller: controller,
+      label: title,
+      hintText: hintText,
+      helperText: helperText,
+      errorText: errorText,
+      leading: prefixIcon,
+      trailing: suffixIcon,
+      focusNode: focusNode,
+      autofocus: true,
+      obscureText: obscureText,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      maxLength: maxLength,
+    ).workaroundFreezeLinuxMint().paddingSymmetric(vertical: 6.0);
   }
 }
 
@@ -875,11 +960,10 @@ class _PasswordWidgetState extends State<PasswordWidget> {
       hintText: translate(widget.hintText ?? 'Enter your password'),
       controller: widget.controller,
       prefixIcon: DialogTextField.kPasswordIcon,
-      suffixIcon: IconButton(
-        icon: Icon(
-            // Based on passwordVisible state choose the icon
-            _passwordVisible ? Icons.visibility : Icons.visibility_off,
-            color: MyTheme.lightTheme.primaryColor),
+      suffixIcon: LdFieldButton(
+        // Based on passwordVisible state choose the icon
+        glyph: _passwordVisible ? DialogGlyphs.eye : LdIcons.privacy,
+        active: _passwordVisible,
         onPressed: () {
           // Update the state i.e. toggle the state of passwordVisible variable
           setState(() {
@@ -908,19 +992,21 @@ void wrongPasswordDialog(SessionID sessionId,
       enterPasswordDialog(sessionId, dialogManager);
     }
 
-    return CustomAlertDialog(
-        title: null,
-        content: msgboxContent(type, title, text),
+    return ldDialog(
+        title: ldMessageTitle(type, title),
+        content: ldMessage(text),
         onSubmit: submit,
         onCancel: cancel,
         actions: [
-          dialogButton(
+          ldButton(
             'Cancel',
+            glyph: LdIcons.close,
             onPressed: cancel,
-            isOutline: true,
           ),
-          dialogButton(
+          ldButton(
             'Retry',
+            tone: LdDialogTone.primary,
+            glyph: LdIcons.refresh,
             onPressed: submit,
           ),
         ]);
@@ -1032,24 +1118,21 @@ _connectDialog(
           onCancel: closeConnection);
     }
 
+    // The sentence that says *which* password is being asked for. Under stress
+    // this is the whole dialog: an operator who types the machine's password
+    // into the account prompt has not misread a label, they were never given
+    // one.
     descWidget(String text) {
-      return Column(
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              text,
-              maxLines: 3,
-              softWrap: true,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 16),
-            ),
-          ),
-          Container(
-            height: 8,
-          ),
-        ],
-      );
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          text,
+          maxLines: 3,
+          softWrap: true,
+          overflow: TextOverflow.ellipsis,
+          style: C.body(color: C.textMuted),
+        ),
+      ).paddingOnly(bottom: 10);
     }
 
     rememberWidget(
@@ -1057,14 +1140,11 @@ _connectDialog(
       bool remember,
       ValueChanged<bool?>? onChanged,
     ) {
-      return CheckboxListTile(
-        contentPadding: const EdgeInsets.all(0),
-        dense: true,
-        controlAffinity: ListTileControlAffinity.leading,
-        title: Text(desc),
+      return LdDialogCheck(
+        label: desc,
         value: remember,
-        onChanged: onChanged,
-      );
+        onChanged: onChanged == null ? null : (v) => onChanged(v),
+      ).paddingOnly(top: 4);
     }
 
     osAccountWidget() {
@@ -1072,26 +1152,18 @@ _connectDialog(
         return Offstage();
       }
       return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           if (osAccountDescTip != null) descWidget(translate(osAccountDescTip)),
           DialogTextField(
             title: translate(DialogTextField.kUsernameTitle),
             controller: osUsernameController,
             prefixIcon: DialogTextField.kUsernameIcon,
-            errorText: null,
+            // The message belongs to the field it is about, not to the gap
+            // underneath it.
+            errorText: errUsername.value.isEmpty ? null : errUsername.value,
           ),
-          if (errUsername.value.isNotEmpty)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: SelectableText(
-                errUsername.value,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                  fontSize: 12,
-                ),
-                textAlign: TextAlign.left,
-              ).paddingOnly(left: 12, bottom: 2),
-            ),
           PasswordWidget(
             controller: osPasswordController,
             autoFocus: false,
@@ -1115,6 +1187,8 @@ _connectDialog(
         return Offstage();
       }
       return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           descWidget(translate('verify_rustdesk_password_tip')),
           PasswordWidget(
@@ -1134,31 +1208,31 @@ _connectDialog(
       );
     }
 
-    return CustomAlertDialog(
-      title: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.password_rounded, color: MyTheme.accent),
-          Text(translate('Password Required')).paddingOnly(left: 10),
-        ],
+    return ldDialog(
+      title: LdDialogTitle(
+        title: translate('Password Required'),
+        glyph: LdIcons.lock,
       ),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        osAccountWidget(),
-        osUsernameController == null || passwordController == null
-            ? Offstage()
-            : Container(height: 12),
-        passwdWidget(),
-      ]),
+      content: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            osAccountWidget(),
+            osUsernameController == null || passwordController == null
+                ? Offstage()
+                : Container(height: 18),
+            passwdWidget(),
+          ]),
       actions: [
-        dialogButton(
+        ldButton(
           'Cancel',
-          icon: Icon(Icons.close_rounded),
+          glyph: LdIcons.close,
           onPressed: cancel,
-          isOutline: true,
         ),
-        dialogButton(
+        ldButton(
           'OK',
-          icon: Icon(Icons.done_rounded),
+          tone: LdDialogTone.primary,
+          glyph: DialogGlyphs.check,
           onPressed: submit,
         ),
       ],
@@ -1173,13 +1247,14 @@ void showWaitUacDialog(
   dialogManager.dismissAll();
   dialogManager.show(
       tag: '$sessionId-wait-uac',
-      (setState, close, context) => CustomAlertDialog(
-            title: null,
-            content: msgboxContent(type, 'Wait', 'wait_accept_uac_tip'),
+      (setState, close, context) => ldDialog(
+            title: ldMessageTitle(type, 'Wait'),
+            content: ldMessage('wait_accept_uac_tip'),
             actions: [
-              dialogButton(
+              ldButton(
                 'OK',
-                icon: Icon(Icons.done_rounded),
+                tone: LdDialogTone.primary,
+                glyph: DialogGlyphs.check,
                 onPressed: close,
               ),
             ],
@@ -1201,97 +1276,43 @@ void showRequestElevationDialog(
     }
   }
 
-  // TODO get from theme
-  final double fontSizeNote = 13.00;
-
+  // The two ways this can go, as a pair of choices rather than two Material
+  // radios with their labels floating beside them. The explanation belongs to
+  // the option it explains, so it sits inside the row.
   Widget OptionRequestPermissions = Obx(
-    () => Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Radio(
-          visualDensity: VisualDensity(horizontal: -4, vertical: -4),
-          value: '',
-          groupValue: groupValue.value,
-          onChanged: onRadioChanged,
-        ).marginOnly(right: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              InkWell(
-                hoverColor: Colors.transparent,
-                onTap: () => groupValue.value = '',
-                child: Text(
-                  translate('Ask the remote user for authentication'),
-                ),
-              ).marginOnly(bottom: 10),
-              Text(
-                translate('Choose this if the remote account is administrator'),
-                style: TextStyle(fontSize: fontSizeNote),
-              ),
-            ],
-          ).marginOnly(top: 3),
-        ),
-      ],
+    () => LdRadioRow(
+      label: translate('Ask the remote user for authentication'),
+      explain:
+          translate('Choose this if the remote account is administrator'),
+      selected: groupValue.value == '',
+      onTap: () => onRadioChanged(''),
     ),
   );
 
   Widget OptionCredentials = Obx(
-    () => Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Radio(
-          visualDensity: VisualDensity(horizontal: -4, vertical: -4),
-          value: 'logon',
-          groupValue: groupValue.value,
-          onChanged: onRadioChanged,
-        ).marginOnly(right: 10),
-        Expanded(
-          child: InkWell(
-            hoverColor: Colors.transparent,
-            onTap: () => onRadioChanged('logon'),
-            child: Text(
-              translate('Transmit the username and password of administrator'),
-            ),
-          ).marginOnly(top: 4),
-        ),
-      ],
+    () => LdRadioRow(
+      label: translate('Transmit the username and password of administrator'),
+      selected: groupValue.value == 'logon',
+      onTap: () => onRadioChanged('logon'),
     ),
   );
 
-  Widget UacNote = Container(
-    padding: EdgeInsets.fromLTRB(10, 8, 8, 8),
-    decoration: BoxDecoration(
-      color: MyTheme.currentThemeMode() == ThemeMode.dark
-          ? Color.fromARGB(135, 87, 87, 90)
-          : Colors.grey[100],
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: Colors.grey),
-    ),
-    child: Row(
-      children: [
-        Icon(Icons.info_outline_rounded, size: 20).marginOnly(right: 10),
-        Expanded(
-          child: Text(
-            translate('still_click_uac_tip'),
-            style: TextStyle(
-                fontSize: fontSizeNote, fontWeight: FontWeight.normal),
-          ),
-        )
-      ],
-    ),
-  );
+  Widget UacNote = LdDialogNote(translate('still_click_uac_tip'));
 
   var content = Obx(
     () => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        OptionRequestPermissions.marginOnly(bottom: 15),
+        OptionRequestPermissions.marginOnly(bottom: 6),
         OptionCredentials,
         Offstage(
           offstage: 'logon' != groupValue.value,
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              UacNote.marginOnly(bottom: 10),
+              UacNote.marginOnly(bottom: 12),
               DialogTextField(
                 controller: userController,
                 title: translate('Username'),
@@ -1305,8 +1326,9 @@ void showRequestElevationDialog(
                 errorText: errPwd.isEmpty ? null : errPwd.value,
               ),
             ],
-          ).marginOnly(left: stateGlobal.isPortrait.isFalse ? 35 : 0),
-        ).marginOnly(top: 10),
+          ).marginOnly(
+              left: stateGlobal.isPortrait.isFalse ? SettingsSkin.indent : 0),
+        ).marginOnly(top: 12),
       ],
     ),
   );
@@ -1335,19 +1357,20 @@ void showRequestElevationDialog(
       showWaitUacDialog(sessionId, dialogManager, "wait-uac");
     }
 
-    return CustomAlertDialog(
-      title: Text(translate('Request Elevation')),
+    return ldDialog(
+      title: LdDialogTitle(
+          title: translate('Request Elevation'), glyph: LdIcons.shield),
       content: content,
       actions: [
-        dialogButton(
+        ldButton(
           'Cancel',
-          icon: Icon(Icons.close_rounded),
+          glyph: LdIcons.close,
           onPressed: close,
-          isOutline: true,
         ),
-        dialogButton(
+        ldButton(
           'OK',
-          icon: Icon(Icons.done_rounded),
+          tone: LdDialogTone.primary,
+          glyph: DialogGlyphs.check,
           onPressed: submit,
         )
       ],
@@ -1374,13 +1397,16 @@ void showOnBlockDialog(
       showRequestElevationDialog(sessionId, dialogManager);
     }
 
-    return CustomAlertDialog(
-      title: null,
-      content: msgboxContent(type, title,
+    return ldDialog(
+      title: ldMessageTitle(type, title),
+      content: ldMessage(
           "${translate(text)}${type.contains('uac') ? '\n' : '\n\n'}${translate('request_elevation_tip')}"),
       actions: [
-        dialogButton('Wait', onPressed: close, isOutline: true),
-        dialogButton('Request Elevation', onPressed: submit),
+        ldButton('Wait', glyph: DialogGlyphs.waiting, onPressed: close),
+        ldButton('Request Elevation',
+            tone: LdDialogTone.primary,
+            glyph: LdIcons.shield,
+            onPressed: submit),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -1396,14 +1422,18 @@ void showElevationError(SessionID sessionId, String type, String title,
       showRequestElevationDialog(sessionId, dialogManager);
     }
 
-    return CustomAlertDialog(
-      title: null,
-      content: msgboxContent(type, title, text),
+    return ldDialog(
+      title: ldMessageTitle(type, title),
+      content: ldMessage(text),
       actions: [
-        dialogButton('Cancel', onPressed: () {
+        ldButton('Cancel', glyph: LdIcons.close, onPressed: () {
           close();
-        }, isOutline: true),
-        if (text != 'No permission') dialogButton('Retry', onPressed: submit),
+        }),
+        if (text != 'No permission')
+          ldButton('Retry',
+              tone: LdDialogTone.primary,
+              glyph: LdIcons.refresh,
+              onPressed: submit),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -1412,18 +1442,32 @@ void showElevationError(SessionID sessionId, String type, String title,
 }
 
 void showWaitAcceptDialog(SessionID sessionId, String type, String title,
-    String text, OverlayDialogManager dialogManager) {
+    String text, OverlayDialogManager dialogManager,
+    {String peerId = ''}) {
   dialogManager.dismissAll();
+  // The server sends this when it would not take a password at all: the
+  // machine has no permanent password, or approves every session by hand. The
+  // stock wording ("Prompt / please wait") over a black canvas read as a broken
+  // window. Say what is being waited for and why, and name the machine.
+  final alias = peerId.isEmpty
+      ? ''
+      : bind.mainGetPeerOptionSync(id: peerId, key: 'alias');
+  final name = alias.isNotEmpty ? alias : (peerId.isEmpty ? 'the machine' : peerId);
   dialogManager.show((setState, close, context) {
     onCancel() {
       closeConnection();
     }
 
-    return CustomAlertDialog(
-      title: null,
-      content: msgboxContent(type, title, text),
+    return ldDialog(
+      title: ldMessageTitle(type, 'Waiting for approval at $name'),
+      content: ldMessage(
+        'Someone at $name has to accept this session before anything shows here.',
+        detail: '$name did not take a password: it has no permanent password '
+            'set, or it approves every session by hand. To connect unattended, '
+            'set a permanent password on that machine and save it here.',
+      ),
       actions: [
-        dialogButton('Cancel', onPressed: onCancel, isOutline: true),
+        ldButton('Cancel', glyph: LdIcons.close, onPressed: onCancel),
       ],
       onCancel: onCancel,
     );
@@ -1433,25 +1477,36 @@ void showWaitAcceptDialog(SessionID sessionId, String type, String title,
 void showRestartRemoteDevice(PeerInfo pi, String id, SessionID sessionId,
     OverlayDialogManager dialogManager) async {
   final res = await dialogManager
-      .show<bool>((setState, close, context) => CustomAlertDialog(
-            title: Row(children: [
-              Icon(Icons.warning_rounded, color: Colors.redAccent, size: 28),
-              Flexible(
-                  child: Text(translate("Restart remote device"))
-                      .paddingOnly(left: 10)),
-            ]),
-            content: Text(
-                "${translate('Are you sure you want to restart')} \n${pi.username}@${pi.hostname}($id) ?"),
+      .show<bool>((setState, close, context) => ldDialog(
+            width: DialogSkin.narrowWidth,
+            title: LdDialogTitle(
+              title: translate("Restart remote device"),
+              glyph: LdIcons.restart,
+              tone: C.bad,
+            ),
+            // The machine is pulled out of the sentence and set in the data
+            // face. It is the only thing in this dialog anybody checks, and the
+            // question above it has never been the part that was misread.
+            content: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text("${translate('Are you sure you want to restart')} ",
+                    style: C.body(color: C.textMuted)),
+                const SizedBox(height: 10),
+                LdDialogIdentity("${pi.username}@${pi.hostname}($id) ?"),
+              ],
+            ),
             actions: [
-              dialogButton(
+              ldButton(
                 "Cancel",
-                icon: Icon(Icons.close_rounded),
+                glyph: LdIcons.close,
                 onPressed: close,
-                isOutline: true,
               ),
-              dialogButton(
+              ldButton(
                 "OK",
-                icon: Icon(Icons.done_rounded),
+                tone: LdDialogTone.danger,
+                glyph: LdIcons.restart,
                 onPressed: () => close(true),
               ),
             ],
@@ -1496,43 +1551,33 @@ showSetOSPassword(
       closeWithCallback();
     }
 
-    return CustomAlertDialog(
-      title: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.password_rounded, color: MyTheme.accent),
-          Text(translate('OS Password')).paddingOnly(left: 10),
-        ],
-      ),
+    return ldDialog(
+      title: LdDialogTitle(
+          title: translate('OS Password'), glyph: LdIcons.lock),
       content: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
           PasswordWidget(controller: controller),
-          CheckboxListTile(
-            contentPadding: const EdgeInsets.all(0),
-            dense: true,
-            controlAffinity: ListTileControlAffinity.leading,
-            title: Text(
-              translate('Auto Login'),
-            ),
+          LdDialogCheck(
+            label: translate('Auto Login'),
             value: autoLogin,
             onChanged: (v) {
-              if (v == null) return;
               setState(() => autoLogin = v);
             },
-          ),
+          ).paddingOnly(top: 4),
         ],
       ),
       actions: [
-        dialogButton(
+        ldButton(
           "Cancel",
-          icon: Icon(Icons.close_rounded),
+          glyph: LdIcons.close,
           onPressed: closeWithCallback,
-          isOutline: true,
         ),
-        dialogButton(
+        ldButton(
           "OK",
-          icon: Icon(Icons.done_rounded),
+          tone: LdDialogTone.primary,
+          glyph: DialogGlyphs.check,
           onPressed: submit,
         ),
       ],
@@ -1568,34 +1613,23 @@ showSetOSAccount(
     }
 
     descWidget(String text) {
-      return Column(
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              text,
-              maxLines: 3,
-              softWrap: true,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 16),
-            ),
-          ),
-          Container(
-            height: 8,
-          ),
-        ],
-      );
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          text,
+          maxLines: 3,
+          softWrap: true,
+          overflow: TextOverflow.ellipsis,
+          style: C.body(color: C.textMuted),
+        ),
+      ).paddingOnly(bottom: 10);
     }
 
-    return CustomAlertDialog(
-      title: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.password_rounded, color: MyTheme.accent),
-          Text(translate('OS Account')).paddingOnly(left: 10),
-        ],
-      ),
+    return ldDialog(
+      title: LdDialogTitle(
+          title: translate('OS Account'), glyph: DialogGlyphs.user),
       content: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
           descWidget(translate("os_account_desk_tip")),
@@ -1609,15 +1643,15 @@ showSetOSAccount(
         ],
       ),
       actions: [
-        dialogButton(
+        ldButton(
           "Cancel",
-          icon: Icon(Icons.close_rounded),
+          glyph: LdIcons.close,
           onPressed: close,
-          isOutline: true,
         ),
-        dialogButton(
+        ldButton(
           "OK",
-          icon: Icon(Icons.done_rounded),
+          tone: LdDialogTone.primary,
+          glyph: DialogGlyphs.check,
           onPressed: submit,
         ),
       ],
@@ -1654,21 +1688,21 @@ Widget buildNoteTextField({
     },
   );
 
-  return TextField(
+  return LdDialogField(
+    controller: controller,
+    label: '',
     autofocus: true,
     keyboardType: TextInputType.multiline,
     textInputAction: TextInputAction.newline,
-    decoration: InputDecoration(
-      hintText: translate('input note here'),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-      ),
-      contentPadding: EdgeInsets.all(12),
-    ),
+    hintText: translate('input note here'),
+    // Grows from five lines to eight and then scrolls inside itself. The
+    // unbounded box this replaced only worked because a raw TextField was the
+    // direct child of a fixed-height SizedBox; the field now carries its own
+    // label and message, so it sizes itself instead.
     minLines: 5,
-    maxLines: null,
+    maxLines: 8,
     maxLength: 256,
-    controller: controller,
+    showCounter: true,
     focusNode: focusNode,
   ).workaroundFreezeLinuxMint();
 }
@@ -1683,18 +1717,18 @@ showAuditDialog(FFI ffi) async {
       close();
     }
 
-    return CustomAlertDialog(
-      title: Text(translate('Note')),
-      content: SizedBox(
-          width: 250,
-          height: 120,
-          child: buildNoteTextField(
-            controller: controller,
-            onEscape: close,
-          )),
+    return ldDialog(
+      title: LdDialogTitle(title: translate('Note'), glyph: LdIcons.rename),
+      content: buildNoteTextField(
+        controller: controller,
+        onEscape: close,
+      ),
       actions: [
-        dialogButton('Cancel', onPressed: close, isOutline: true),
-        dialogButton('OK', onPressed: submit)
+        ldButton('Cancel', glyph: LdIcons.close, onPressed: close),
+        ldButton('OK',
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check,
+            onPressed: submit)
       ],
       onSubmit: submit,
       onCancel: close,
@@ -1831,17 +1865,25 @@ Future<bool?> _showConnEndAuditDialogCloseCanceled({
       close(false);
     }
 
+    // The answers are built in the order they were: the note is the point of
+    // the dialog, so OK leads, and Cancel — which throws the note away — is
+    // last and quiet.
     final buttons = [
-      dialogButton('OK', onPressed: isInProgress ? null : submit)
+      ldButton('OK',
+          tone: LdDialogTone.primary,
+          glyph: DialogGlyphs.check,
+          busy: isInProgress,
+          onPressed: isInProgress ? null : submit)
     ];
     if (type == 'relay-hint' || type == 'relay-hint2') {
-      buttons.add(dialogButton('Retry', onPressed: () async {
+      buttons.add(ldButton('Retry', glyph: LdIcons.refresh, onPressed: () async {
         await set();
         close(true);
         ffi.ffiModel.reconnect(ffi.dialogManager, ffi.sessionId, false);
       }));
       if (type == 'relay-hint2') {
-        buttons.add(dialogButton('Connect via relay', onPressed: () async {
+        buttons.add(ldButton('Connect via relay', glyph: LdIcons.connect,
+            onPressed: () async {
           await set();
           close(true);
           ffi.ffiModel.reconnect(ffi.dialogManager, ffi.sessionId, true);
@@ -1849,69 +1891,48 @@ Future<bool?> _showConnEndAuditDialogCloseCanceled({
       }
     }
     if (closedByControlling) {
-      buttons.add(dialogButton('Cancel',
-          onPressed: isInProgress ? null : cancel, isOutline: true));
+      buttons.add(ldButton('Cancel',
+          glyph: LdIcons.close, onPressed: isInProgress ? null : cancel));
     }
 
-    Widget content;
+    final Widget? header;
+    final Widget content;
     if (closedByControlling) {
-      content = SelectionArea(
-          child: msgboxContent(
-              'info', 'Close', 'Are you sure to close the connection?'));
+      header = ldMessageTitle('info', 'Close');
+      content = ldMessage('Are you sure to close the connection?');
     } else {
-      content =
-          SelectionArea(child: msgboxContent(type, title ?? '', text ?? ''));
+      header = ldMessageTitle(type, title ?? '');
+      content = ldMessage(text ?? '');
     }
 
-    return CustomAlertDialog(
-      title: null,
-      content: SizedBox(
-          width: 350,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              content,
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 120,
-                child: buildNoteTextField(
-                  controller: controller,
-                  onEscape: cancel,
-                ),
-              ),
-              if (!isOptFixed) ...[
-                const SizedBox(height: 8),
-                InkWell(
-                  onTap: () {
-                    setState(() {
-                      askForNote = !askForNote;
-                    });
-                  },
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        value: askForNote,
-                        onChanged: (value) {
-                          setState(() {
-                            askForNote = value ?? false;
-                          });
-                        },
-                      ),
-                      Expanded(
-                        child: Text(
-                          translate('note-at-conn-end-tip'),
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              if (isInProgress)
-                const LinearProgressIndicator().marginOnly(top: 4),
-            ],
-          )),
+    return ldDialog(
+      title: header,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          content,
+          const SizedBox(height: 18),
+          buildNoteTextField(
+            controller: controller,
+            onEscape: cancel,
+          ),
+          if (!isOptFixed) ...[
+            const SizedBox(height: 10),
+            LdDialogCheck(
+              label: translate('note-at-conn-end-tip'),
+              value: askForNote,
+              onChanged: (value) {
+                setState(() {
+                  askForNote = value;
+                });
+              },
+            ),
+          ],
+          if (isInProgress)
+            const LinearProgressIndicator().marginOnly(top: 12),
+        ],
+      ),
       actions: buttons,
       onSubmit: submit,
       onCancel: cancel,
@@ -1927,12 +1948,15 @@ void showConfirmSwitchSidesDialog(
       closeConnection(id: id);
     }
 
-    return CustomAlertDialog(
-      content: msgboxContent('info', 'Switch Sides',
-          'Please confirm if you want to share your desktop?'),
+    return ldDialog(
+      title: ldMessageTitle('info', 'Switch Sides'),
+      content: ldMessage('Please confirm if you want to share your desktop?'),
       actions: [
-        dialogButton('Cancel', onPressed: close, isOutline: true),
-        dialogButton('OK', onPressed: submit),
+        ldButton('Cancel', glyph: LdIcons.close, onPressed: close),
+        ldButton('OK',
+            tone: LdDialogTone.primary,
+            glyph: LdIcons.switchSides,
+            onPressed: submit),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -2044,32 +2068,26 @@ void deleteConfirmDialog(Function onSubmit, String title) async {
         close();
       }
 
-      return CustomAlertDialog(
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.delete_rounded,
-              color: Colors.red,
-            ),
-            Expanded(
-              child: Text(title, overflow: TextOverflow.ellipsis).paddingOnly(
-                left: 10,
-              ),
-            ),
-          ],
+      return ldDialog(
+        width: DialogSkin.narrowWidth,
+        // The title is the whole dialog, so there is no body under it: an empty
+        // content pane is twenty pixels of nothing between the question and the
+        // answers.
+        title: LdDialogTitle(
+          title: title,
+          glyph: LdIcons.trash,
+          tone: C.bad,
         ),
-        content: SizedBox.shrink(),
         actions: [
-          dialogButton(
+          ldButton(
             "Cancel",
-            icon: Icon(Icons.close_rounded),
+            glyph: LdIcons.close,
             onPressed: close,
-            isOutline: true,
           ),
-          dialogButton(
+          ldButton(
             "OK",
-            icon: Icon(Icons.done_rounded),
+            tone: LdDialogTone.danger,
+            glyph: LdIcons.trash,
             onPressed: submit,
           ),
         ],
@@ -2096,13 +2114,14 @@ void editAbTagDialog(
       close();
     }
 
-    return CustomAlertDialog(
-      title: Text(translate("Edit Tag")),
+    return ldDialog(
+      title: LdDialogTitle(title: translate("Edit Tag"), glyph: LdIcons.group),
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            padding: const EdgeInsets.symmetric(vertical: 2.0),
             child: Wrap(
               children: tags
                   .map((e) => AddressBookTag(
@@ -2120,12 +2139,15 @@ void editAbTagDialog(
             ),
           ),
           // NOT use Offstage to wrap LinearProgressIndicator
-          if (isInProgress) const LinearProgressIndicator(),
+          if (isInProgress) const LinearProgressIndicator().marginOnly(top: 12),
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: submit),
+        ldButton("Cancel", glyph: LdIcons.close, onPressed: close),
+        ldButton("OK",
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check,
+            onPressed: submit),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -2147,28 +2169,32 @@ void editAbPeerNoteDialog(String id) {
       close();
     }
 
-    return CustomAlertDialog(
-      title: Text(translate("Edit note")),
+    return ldDialog(
+      title: LdDialogTitle(
+          title: translate("Edit note"), glyph: LdIcons.rename),
       content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          TextField(
+          LdDialogField(
             controller: controller,
+            label: translate('Note'),
             autofocus: true,
             maxLines: 3,
             minLines: 1,
             maxLength: 300,
-            decoration: InputDecoration(
-              labelText: translate('Note'),
-            ),
+            showCounter: true,
           ).workaroundFreezeLinuxMint(),
           // NOT use Offstage to wrap LinearProgressIndicator
-          if (isInProgress) const LinearProgressIndicator(),
+          if (isInProgress) const LinearProgressIndicator().marginOnly(top: 12),
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: submit),
+        ldButton("Cancel", glyph: LdIcons.close, onPressed: close),
+        ldButton("OK",
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check,
+            onPressed: submit),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -2201,43 +2227,39 @@ void renameDialog(
       close();
     }
 
-    return CustomAlertDialog(
-      title: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.edit_rounded, color: MyTheme.accent),
-          Text(translate('Rename')).paddingOnly(left: 10),
-        ],
-      ),
+    return ldDialog(
+      width: DialogSkin.narrowWidth,
+      title: LdDialogTitle(
+          title: translate('Rename'), glyph: LdIcons.rename),
       content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            child: Form(
-              key: formKey,
-              child: TextFormField(
-                controller: controller,
-                autofocus: true,
-                decoration: InputDecoration(labelText: translate('Name')),
-                validator: validator,
-              ).workaroundFreezeLinuxMint(),
-            ),
+          Form(
+            key: formKey,
+            child: LdDialogField(
+              controller: controller,
+              label: translate('Name'),
+              autofocus: true,
+              validator: validator,
+            ).workaroundFreezeLinuxMint(),
           ),
           // NOT use Offstage to wrap LinearProgressIndicator
-          Obx(() =>
-              isInProgress.value ? const LinearProgressIndicator() : Offstage())
+          Obx(() => isInProgress.value
+              ? const LinearProgressIndicator().marginOnly(top: 12)
+              : Offstage())
         ],
       ),
       actions: [
-        dialogButton(
+        ldButton(
           "Cancel",
-          icon: Icon(Icons.close_rounded),
+          glyph: LdIcons.close,
           onPressed: cancel,
-          isOutline: true,
         ),
-        dialogButton(
+        ldButton(
           "OK",
-          icon: Icon(Icons.done_rounded),
+          tone: LdDialogTone.primary,
+          glyph: DialogGlyphs.check,
           onPressed: submit,
         ),
       ],
@@ -2274,33 +2296,36 @@ void changeBot({Function()? callback}) async {
       }
     }
 
-    final codeField = TextField(
+    final codeField = LdDialogField(
       autofocus: true,
       controller: controller,
-      decoration: InputDecoration(
-        hintText: translate('Token'),
-      ),
+      label: '',
+      // A bot token is a secret to be pasted and compared, not read.
+      mono: true,
+      hintText: translate('Token'),
+      errorText: errorText == '' ? null : errorText,
     ).workaroundFreezeLinuxMint();
 
-    return CustomAlertDialog(
-      title: Text(translate("Telegram bot")),
+    return ldDialog(
+      title: LdDialogTitle(
+          title: translate("Telegram bot"), glyph: LdIcons.chat),
       content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           SelectableText(translate("enable-bot-desc"),
-                  style: TextStyle(fontSize: 12))
-              .marginOnly(bottom: 12),
-          Row(children: [Expanded(child: codeField)]),
-          if (errorText != '')
-            Text(errorText, style: TextStyle(color: Colors.red))
-                .marginOnly(top: 12),
+                  style: C.small(color: C.textMuted))
+              .marginOnly(bottom: 14),
+          codeField,
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        loading
-            ? CircularProgressIndicator()
-            : dialogButton("OK", onPressed: onVerify),
+        ldButton("Cancel", glyph: LdIcons.close, onPressed: close),
+        ldButton("OK",
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check,
+            busy: loading,
+            onPressed: loading ? null : onVerify),
       ],
       onCancel: close,
     );
@@ -2342,32 +2367,47 @@ void change2fa({Function()? callback}) async {
 
     getOnSubmit() => codeField.isReady ? onVerify : null;
 
-    return CustomAlertDialog(
-      title: Text(translate("enable-2fa-title")),
+    return ldDialog(
+      title: LdDialogTitle(
+          title: translate("enable-2fa-title"), glyph: LdIcons.shield),
       content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           SelectableText(translate("enable-2fa-desc"),
-                  style: TextStyle(fontSize: 12))
-              .marginOnly(bottom: 12),
-          SizedBox(
-              width: 160,
-              height: 160,
+                  style: C.small(color: C.textMuted))
+              .marginOnly(bottom: 16),
+          // The code has to stay on white to be readable by a phone camera, so
+          // it is matted rather than recoloured.
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: C.roundedSm,
+              ),
               child: QrImageView(
                 backgroundColor: Colors.white,
                 data: new2fa,
                 version: QrVersions.auto,
                 size: 160,
                 gapless: false,
-              )).marginOnly(bottom: 6),
-          SelectableText(secret ?? '', style: TextStyle(fontSize: 12))
-              .marginOnly(bottom: 12),
-          Row(children: [Expanded(child: codeField)]),
+              ),
+            ),
+          ).marginOnly(bottom: 12),
+          // The same secret in text, for a machine with no camera pointed at
+          // it. Set in the data face, because it is transcribed.
+          if ((secret ?? '').isNotEmpty)
+            LdDialogIdentity(secret!).marginOnly(bottom: 16),
+          codeField,
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: getOnSubmit()),
+        ldButton("Cancel", glyph: LdIcons.close, onPressed: close),
+        ldButton("OK",
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check,
+            onPressed: getOnSubmit()),
       ],
       onCancel: close,
     );
@@ -2402,21 +2442,21 @@ void enter2FaDialog(
       onChanged: () => submitReady.value = codeField.isReady,
     );
 
-    final trustField = Obx(() => CheckboxListTile(
-          contentPadding: const EdgeInsets.all(0),
-          dense: true,
-          controlAffinity: ListTileControlAffinity.leading,
-          title: Text(translate("Trust this device")),
+    final trustField = Obx(() => LdDialogCheck(
+          label: translate("Trust this device"),
           value: trustThisDevice.value,
           onChanged: (value) {
-            if (value == null) return;
             trustThisDevice.value = value;
           },
-        ));
+        ).paddingOnly(top: 6));
 
-    return CustomAlertDialog(
-        title: Text(translate('enter-2fa-title')),
+    return ldDialog(
+        width: DialogSkin.narrowWidth,
+        title: LdDialogTitle(
+            title: translate('enter-2fa-title'), glyph: LdIcons.shield),
         content: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
             codeField,
             if (bind.sessionGetEnableTrustedDevices(sessionId: sessionId))
@@ -2424,13 +2464,11 @@ void enter2FaDialog(
           ],
         ),
         actions: [
-          dialogButton('Cancel',
-              onPressed: cancel,
-              isOutline: true,
-              style: TextStyle(
-                  color: Theme.of(context).textTheme.bodyMedium?.color)),
-          Obx(() => dialogButton(
+          ldButton('Cancel', glyph: LdIcons.close, onPressed: cancel),
+          Obx(() => ldButton(
                 'OK',
+                tone: LdDialogTone.primary,
+                glyph: DialogGlyphs.check,
                 onPressed: submitReady.isTrue ? submit : null,
               )),
         ],
@@ -2469,23 +2507,32 @@ void showWindowsSessionsDialog(
       close();
     }
 
-    return CustomAlertDialog(
-      title: null,
+    return ldDialog(
+      title: ldMessageTitle(type, title),
       content: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          msgboxContent(type, title, text).marginOnly(bottom: 12),
-          ComboBox(
-              keys: sids,
-              values: names,
-              initialKey: selectedUserValue,
-              onChanged: (value) {
-                selectedUserValue = value;
-              }),
+          ldMessage(text).marginOnly(bottom: 18),
+          // Which signed-in account on the far machine is about to be taken
+          // over. The list is the decision, so it is drawn by the settings
+          // select rather than by a Material combo.
+          LdSelect(
+            keys: sids,
+            values: names,
+            initialKey: selectedUserValue,
+            width: double.infinity,
+            onChanged: (value) {
+              selectedUserValue = value;
+            },
+          ),
         ],
       ),
       actions: [
-        dialogButton('Connect', onPressed: submit, isOutline: false),
+        ldButton('Connect',
+            tone: LdDialogTone.primary,
+            glyph: LdIcons.connect,
+            onPressed: submit),
       ],
     );
   });
@@ -2552,19 +2599,19 @@ void addPeersToAbDialog(
       close();
     }
 
-    return CustomAlertDialog(
-      title: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(IconFont.addressBook, color: MyTheme.accent),
-          Text(translate('Add to address book')).paddingOnly(left: 10),
-        ],
+    return ldDialog(
+      width: DialogSkin.narrowWidth,
+      title: LdDialogTitle(
+        title: translate('Add to address book'),
+        glyph: LdIcons.addressBook,
       ),
       content: Obx(() => Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: [
               // https://github.com/flutter/flutter/issues/145081
               DropdownMenu(
+                width: DialogSkin.narrowWidth - DialogSkin.pad * 2,
                 initialSelection: currentName.value,
                 onSelected: (value) {
                   if (value != null) {
@@ -2573,27 +2620,57 @@ void addPeersToAbDialog(
                 },
                 dropdownMenuEntries: names
                     .map((e) => DropdownMenuEntry(
-                        value: e, label: gFFI.abModel.translatedName(e)))
+                        value: e,
+                        label: gFFI.abModel.translatedName(e),
+                        style: MenuItemButton.styleFrom(
+                            foregroundColor: C.text,
+                            textStyle: C.body())))
                     .toList(),
+                textStyle: C.body(),
+                menuStyle: MenuStyle(
+                  backgroundColor: const WidgetStatePropertyAll(C.surface),
+                  surfaceTintColor:
+                      const WidgetStatePropertyAll(Colors.transparent),
+                  shape: WidgetStatePropertyAll(RoundedRectangleBorder(
+                    borderRadius: C.rounded,
+                    side: const BorderSide(color: C.hairline),
+                  )),
+                ),
                 inputDecorationTheme: InputDecorationTheme(
-                    isDense: true, border: UnderlineInputBorder()),
+                  isDense: true,
+                  filled: true,
+                  fillColor: C.bg,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  border: OutlineInputBorder(
+                      borderRadius: C.roundedSm,
+                      borderSide: const BorderSide(color: C.hairline)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: C.roundedSm,
+                      borderSide: const BorderSide(color: C.hairline)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: C.roundedSm,
+                      borderSide: const BorderSide(color: C.accent)),
+                ),
                 enableFilter: true,
                 controller: controller,
               ),
               // NOT use Offstage to wrap LinearProgressIndicator
-              isInProgress.value ? const LinearProgressIndicator() : Offstage()
+              isInProgress.value
+                  ? const LinearProgressIndicator().marginOnly(top: 12)
+                  : Offstage()
             ],
           )),
       actions: [
-        dialogButton(
+        ldButton(
           "Cancel",
-          icon: Icon(Icons.close_rounded),
+          glyph: LdIcons.close,
           onPressed: cancel,
-          isOutline: true,
         ),
-        dialogButton(
+        ldButton(
           "OK",
-          icon: Icon(Icons.done_rounded),
+          tone: LdDialogTone.primary,
+          glyph: DialogGlyphs.check,
           onPressed: submit,
         ),
       ],
@@ -2627,64 +2704,62 @@ void setSharedAbPasswordDialog(String abName, Peer peer) {
       close();
     }
 
-    return CustomAlertDialog(
-      title: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.key, color: MyTheme.accent),
-          Text(translate(peer.password.isEmpty
-                  ? 'Set shared password'
-                  : 'Change Password'))
-              .paddingOnly(left: 10),
-        ],
+    return ldDialog(
+      title: LdDialogTitle(
+        title: translate(peer.password.isEmpty
+            ? 'Set shared password'
+            : 'Change Password'),
+        glyph: LdIcons.key,
       ),
-      content: Obx(() => Column(children: [
-            TextField(
-              controller: controller,
-              autofocus: true,
-              obscureText: !passwordVisible,
-              decoration: InputDecoration(
-                suffixIcon: IconButton(
-                  icon: Icon(
-                      passwordVisible ? Icons.visibility : Icons.visibility_off,
-                      color: MyTheme.lightTheme.primaryColor),
-                  onPressed: () {
-                    setState(() {
-                      passwordVisible = !passwordVisible;
-                    });
-                  },
-                ),
-              ),
-            ).workaroundFreezeLinuxMint(),
-            if (!gFFI.abModel.current.isPersonal())
-              Row(children: [
-                Icon(Icons.info, color: Colors.amber).marginOnly(right: 4),
-                Text(
-                  translate('share_warning_tip'),
-                  style: TextStyle(fontSize: 12),
-                )
-              ]).marginSymmetric(vertical: 10),
-            // NOT use Offstage to wrap LinearProgressIndicator
-            isInProgress.value ? const LinearProgressIndicator() : Offstage()
-          ])),
+      content: Obx(() => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LdDialogField(
+                  controller: controller,
+                  label: translate(DialogTextField.kPasswordTitle),
+                  glyph: LdIcons.lock,
+                  autofocus: true,
+                  obscureText: !passwordVisible,
+                  trailing: LdFieldButton(
+                    glyph:
+                        passwordVisible ? DialogGlyphs.eye : LdIcons.privacy,
+                    active: passwordVisible,
+                    onPressed: () {
+                      setState(() {
+                        passwordVisible = !passwordVisible;
+                      });
+                    },
+                  ),
+                ).workaroundFreezeLinuxMint(),
+                // Everyone the book is shared with will be able to use this
+                // password, which is a consequence that belongs on the screen
+                // rather than in a footnote.
+                if (!gFFI.abModel.current.isPersonal())
+                  LdDialogNote(translate('share_warning_tip'), tone: C.bad)
+                      .marginOnly(top: 12),
+                // NOT use Offstage to wrap LinearProgressIndicator
+                isInProgress.value
+                    ? const LinearProgressIndicator().marginOnly(top: 12)
+                    : Offstage()
+              ])),
       actions: [
-        dialogButton(
+        ldButton(
           "Cancel",
-          icon: Icon(Icons.close_rounded),
+          glyph: LdIcons.close,
           onPressed: cancel,
-          isOutline: true,
         ),
         if (peer.password.isNotEmpty)
-          dialogButton(
+          ldButton(
             "Remove",
-            icon: Icon(Icons.delete_outline_rounded),
+            tone: LdDialogTone.danger,
+            glyph: LdIcons.trash,
             onPressed: () => change(''),
-            buttonStyle: ButtonStyle(
-                backgroundColor: MaterialStatePropertyAll(Colors.red)),
           ),
-        Obx(() => dialogButton(
+        Obx(() => ldButton(
               "OK",
-              icon: Icon(Icons.done_rounded),
+              tone: LdDialogTone.primary,
+              glyph: DialogGlyphs.check,
               onPressed:
                   isInputEmpty.value ? null : () => change(controller.text),
             )),
@@ -2695,6 +2770,13 @@ void setSharedAbPasswordDialog(String abName, Peer peer) {
   });
 }
 
+/// The bare confirmation.
+///
+/// Every caller of this is taking something away — turning two-factor off,
+/// dropping the bot, deleting trusted devices — so the answer is drawn as
+/// destructive rather than as an ordinary OK. It is checked at each call site
+/// rather than assumed: `desktop_setting_page.dart`, `settings_page.dart` and
+/// `confrimDeleteTrustedDevicesDialog` are the only ones.
 void CommonConfirmDialog(OverlayDialogManager dialogManager, String content,
     VoidCallback onConfirm) {
   dialogManager.show((setState, close, context) {
@@ -2703,19 +2785,25 @@ void CommonConfirmDialog(OverlayDialogManager dialogManager, String content,
       onConfirm.call();
     }
 
-    return CustomAlertDialog(
+    return ldDialog(
+      width: DialogSkin.narrowWidth,
       content: Row(
         children: [
+          const Padding(
+            padding: EdgeInsets.only(right: 12, top: 1),
+            child: LdIcon(LdIcons.alert, size: 19, color: C.bad),
+          ),
           Expanded(
-            child: Text(content,
-                style: const TextStyle(fontSize: 15),
-                textAlign: TextAlign.start),
+            child: Text(content, style: C.h2(), textAlign: TextAlign.start),
           ),
         ],
-      ).marginOnly(bottom: 12),
+      ),
       actions: [
-        dialogButton(translate("Cancel"), onPressed: close, isOutline: true),
-        dialogButton(translate("OK"), onPressed: submit),
+        ldButton(translate("Cancel"), glyph: LdIcons.close, onPressed: close),
+        ldButton(translate("OK"),
+            tone: LdDialogTone.danger,
+            glyph: DialogGlyphs.check,
+            onPressed: submit),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -2753,9 +2841,12 @@ void changeUnlockPinDialog(String oldPin, Function() callback) {
       close();
     }
 
-    return CustomAlertDialog(
-      title: Text(translate("Set PIN")),
+    return ldDialog(
+      width: DialogSkin.narrowWidth,
+      title: LdDialogTitle(title: translate("Set PIN"), glyph: LdIcons.lock),
       content: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           DialogTextField(
             title: 'PIN',
@@ -2772,10 +2863,13 @@ void changeUnlockPinDialog(String oldPin, Function() callback) {
             maxLength: maxLength,
           )
         ],
-      ).marginOnly(bottom: 12),
+      ),
       actions: [
-        dialogButton(translate("Cancel"), onPressed: close, isOutline: true),
-        dialogButton(translate("OK"), onPressed: submit),
+        ldButton(translate("Cancel"), glyph: LdIcons.close, onPressed: close),
+        ldButton(translate("OK"),
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check,
+            onPressed: submit),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -2799,21 +2893,23 @@ void checkUnlockPinDialog(String correctPin, Function() passCallback) {
       close();
     }
 
-    return CustomAlertDialog(
-      content: Row(
-        children: [
-          Expanded(
-              child: PasswordWidget(
-            title: 'PIN',
-            controller: controller,
-            errorText: errorText,
-            hintText: '',
-          ))
-        ],
-      ).marginOnly(bottom: 12),
+    return ldDialog(
+      width: DialogSkin.narrowWidth,
+      // The same literal the field beside it uses, and for the same reason: it
+      // is not a `translate` key anywhere in the product, and this is a reskin.
+      title: const LdDialogTitle(title: 'PIN', glyph: LdIcons.lock),
+      content: PasswordWidget(
+        title: 'PIN',
+        controller: controller,
+        errorText: errorText,
+        hintText: '',
+      ),
       actions: [
-        dialogButton(translate("Cancel"), onPressed: close, isOutline: true),
-        dialogButton(translate("OK"), onPressed: submit),
+        ldButton(translate("Cancel"), glyph: LdIcons.close, onPressed: close),
+        ldButton(translate("OK"),
+            tone: LdDialogTone.primary,
+            glyph: DialogGlyphs.check,
+            onPressed: submit),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -2845,23 +2941,24 @@ void manageTrustedDeviceDialog() async {
   RxList<TrustedDevice> trustedDevices = (await TrustedDevice.get()).obs;
   RxList<Uint8List> selectedDevices = RxList.empty();
   gFFI.dialogManager.show((setState, close, context) {
-    return CustomAlertDialog(
-      title: Text(translate("Manage trusted devices")),
+    return ldDialog(
+      width: 560,
+      title: LdDialogTitle(
+          title: translate("Manage trusted devices"), glyph: LdIcons.shield),
       content: trustedDevicesTable(trustedDevices, selectedDevices),
       actions: [
-        Obx(() => dialogButton(translate("Delete"),
-                onPressed: selectedDevices.isEmpty
-                    ? null
-                    : () {
-                        confrimDeleteTrustedDevicesDialog(
-                          trustedDevices,
-                          selectedDevices,
-                        );
-                      },
-                isOutline: false)
-            .marginOnly(top: 12)),
-        dialogButton(translate("Close"), onPressed: close, isOutline: true)
-            .marginOnly(top: 12),
+        Obx(() => ldButton(translate("Delete"),
+            tone: LdDialogTone.danger,
+            glyph: LdIcons.trash,
+            onPressed: selectedDevices.isEmpty
+                ? null
+                : () {
+                    confrimDeleteTrustedDevicesDialog(
+                      trustedDevices,
+                      selectedDevices,
+                    );
+                  })),
+        ldButton(translate("Close"), glyph: LdIcons.close, onPressed: close),
       ],
       onCancel: close,
     );
@@ -2931,46 +3028,67 @@ Widget trustedDevicesTable(
   selectedDevices.listen((_) {
     setSelectAll();
   });
-  return FittedBox(
+  // A column head is a label, and an id, a platform and a count of days are
+  // measured values — so the heads are set as labels and the cells in the data
+  // face, the same way the peer table and the file listing set theirs.
+  Widget head(String label) => Text(translate(label).toUpperCase(),
+      style: C.micro(color: C.textFaint).copyWith(letterSpacing: 0.8));
+  Widget cell(String value) =>
+      Text(value, style: C.data(size: 12, color: C.text));
+  Widget tick(bool value, ValueChanged<bool> onChanged) => MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: () => onChanged(!value),
+          behavior: HitTestBehavior.opaque,
+          child: LdCheckMark(value: value),
+        ),
+      );
+
+  // Scrolled rather than scaled: the FittedBox this replaced shrank the whole
+  // table to fit, so a machine with a long hostname made every other row
+  // unreadable too.
+  return SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
     child: Obx(() => DataTable(
-          columns: [
-            DataColumn(
-                label: Checkbox(
-              value: selectAll.value,
-              onChanged: (value) {
-                if (value == true) {
-                  selectedDevices.clear();
-                  selectedDevices.addAll(devices.map((e) => e.hwid));
-                } else {
-                  selectedDevices.clear();
-                }
-              },
-            )),
-            DataColumn(label: Text(translate('Platform'))),
-            DataColumn(label: Text(translate('ID'))),
-            DataColumn(label: Text(translate('Username'))),
-            DataColumn(label: Text(translate('Days remaining'))),
-          ],
-          rows: devices.map((device) {
-            return DataRow(cells: [
-              DataCell(Checkbox(
-                value: selectedDevices.contains(device.hwid),
-                onChanged: (value) {
-                  if (value == null) return;
-                  if (value) {
-                    selectedDevices.remove(device.hwid);
-                    selectedDevices.add(device.hwid);
-                  } else {
-                    selectedDevices.remove(device.hwid);
-                  }
-                },
-              )),
-              DataCell(Text(device.platform)),
-              DataCell(Text(device.id)),
-              DataCell(Text(device.name)),
-              DataCell(Text(device.daysRemaining())),
-            ]);
-          }).toList(),
-        )),
+        headingRowHeight: 34,
+        dataRowMinHeight: 38,
+        dataRowMaxHeight: 38,
+        horizontalMargin: 0,
+        columnSpacing: 22,
+        dividerThickness: 1,
+        headingRowColor: const WidgetStatePropertyAll(C.chrome),
+        dataRowColor: const WidgetStatePropertyAll(Colors.transparent),
+        columns: [
+          DataColumn(
+              label: tick(selectAll.value, (value) {
+            if (value) {
+              selectedDevices.clear();
+              selectedDevices.addAll(devices.map((e) => e.hwid));
+            } else {
+              selectedDevices.clear();
+            }
+          })),
+          DataColumn(label: head('Platform')),
+          DataColumn(label: head('ID')),
+          DataColumn(label: head('Username')),
+          DataColumn(label: head('Days remaining')),
+        ],
+        rows: devices.map((device) {
+          return DataRow(cells: [
+            DataCell(tick(selectedDevices.contains(device.hwid), (value) {
+              if (value) {
+                selectedDevices.remove(device.hwid);
+                selectedDevices.add(device.hwid);
+              } else {
+                selectedDevices.remove(device.hwid);
+              }
+            })),
+            DataCell(cell(device.platform)),
+            DataCell(cell(device.id)),
+            DataCell(Text(device.name, style: C.body())),
+            DataCell(cell(device.daysRemaining())),
+          ]);
+        }).toList(),
+      )),
   );
 }

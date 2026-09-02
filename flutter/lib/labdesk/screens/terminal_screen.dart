@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../models/machine_row.dart';
 import '../theme/console_theme.dart';
+import '../theme/ld_icons.dart';
 
 /// One line of terminal output.
 class TerminalLine {
@@ -105,12 +106,19 @@ class _TerminalScreenState extends State<TerminalScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.terminal_rounded, size: 26, color: C.textFaint),
+            // The console's own terminal glyph, the bare prompt the sidebar
+            // draws. Material's terminal_rounded puts that prompt inside a
+            // window, so the empty state and the tab that leads to it were two
+            // different marks for the same screen.
+            const LdIcon(LdIcons.terminal, size: 26, color: C.textFaint),
             const SizedBox(height: 14),
             Text('No machine selected', style: C.h2()),
             const SizedBox(height: 6),
+            // Fixed height, matching the health and actions screens: see the
+            // note on HealthScreen's empty state.
             SizedBox(
               width: 320,
+              height: 34,
               child: Text(
                 'Choose a machine on the Fleet screen to open a shell on it.',
                 textAlign: TextAlign.center,
@@ -133,7 +141,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
           if (!widget.connected)
             GhostButton(
               label: 'Open session',
-              icon: Icons.play_arrow_rounded,
+              glyph: LdIcons.resume,
               busy: widget.busy,
               onPressed: widget.onOpenSession,
             ),

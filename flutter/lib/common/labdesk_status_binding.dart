@@ -28,9 +28,42 @@ class LabDeskStatusBinding {
 
   bool get isQuerying => store.isQuerying;
 
+  /// How long a query may stay in flight before it is written off. The Rust
+  /// side gives up on the ID server well inside this, so anything older is a
+  /// query whose answer is never coming.
+  static const queryTimeout = Duration(seconds: 8);
+
+  DateTime? _lastQueryAt;
+  DateTime? _lastResponseAt;
+
+  /// When the server last answered. Null until it has. This is the honest
+  /// "checked" stamp: asking is not the same as being told.
+  DateTime? get lastResponseAt => _lastResponseAt;
+
+  /// Whether the poller should ask again: never while a question is still
+  /// open, and otherwise once [every] has passed since the last ask.
+  bool isDue(DateTime now, Duration every) {
+    if (store.isQuerying) return false;
+    final last = _lastQueryAt;
+    return last == null || now.difference(last) >= every;
+  }
+
+  /// Write off a query that has outlived [queryTimeout]. Nothing else changes.
+  void expireStale(DateTime now) {
+    final last = _lastQueryAt;
+    if (store.isQuerying &&
+        last != null &&
+        now.difference(last) >= queryTimeout) {
+      store.endQuery();
+    }
+  }
+
   List<bool?> historyOf(String id) => List.unmodifiable(_history[id] ?? const []);
 
-  void beginQuery(Iterable<String> ids) => store.beginQuery(ids);
+  void beginQuery(Iterable<String> ids, {DateTime? at}) {
+    _lastQueryAt = at ?? DateTime.now();
+    store.beginQuery(ids);
+  }
 
   /// A query that errored or never came back.
   ///
@@ -56,6 +89,7 @@ class LabDeskStatusBinding {
       return;
     }
 
+    _lastResponseAt = now;
     store.applyResponse(onlines: up, offlines: down, at: now);
 
     for (final id in up) {
@@ -81,6 +115,8 @@ class LabDeskStatusBinding {
   void clear() {
     _history.clear();
     _samples.clear();
+    _lastQueryAt = null;
+    _lastResponseAt = null;
     store.clear();
   }
 

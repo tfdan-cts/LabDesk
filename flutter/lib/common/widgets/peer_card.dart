@@ -1379,6 +1379,14 @@ class MyGroupPeerCard extends BasePeerCard {
   void _update() => gFFI.groupModel.pull();
 }
 
+/// The RDP settings dialog, reachable from outside this library.
+///
+/// The peer card hid the port, username and password behind a pencil inside
+/// its own RDP menu entry, and the dialog that edits them is library-private.
+/// The console's row menu offers the same thing, so it needs a way in. This
+/// opens that dialog and does nothing else.
+void showRdpDialog(String id) => _rdpDialog(id);
+
 void _rdpDialog(String id) async {
   final maxLength = bind.mainMaxEncryptLen();
   final port = await bind.mainGetPeerOption(id: id, key: 'rdp_port');
