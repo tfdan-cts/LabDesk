@@ -25,12 +25,14 @@ import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:provider/provider.dart';
 
 import 'console_data.dart';
+import 'models/chat_transcript.dart';
 import 'models/console_rpc.dart';
 import 'models/machine_metrics.dart';
 import 'models/machine_row.dart';
 import 'screens/actions_screen.dart';
 import 'screens/connect_screen.dart';
 import 'screens/console_shell.dart';
+import 'screens/sessions_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/terminal_screen.dart';
 import 'screens/this_machine_screen.dart';
@@ -191,6 +193,13 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
 
   final _terminalLines = <String, List<TerminalLine>>{};
 
+  /// Chat for every outgoing session, read from the window that holds it.
+  /// Incoming connections are handled by the connection manager, which is a
+  /// separate process this window cannot ask; the Sessions screen says so.
+  final _chats = <String, SessionChat>{};
+  final _readLines = <String, int>{};
+  String? _openChatId;
+
   /// A window channel call that treats a closed or busy window as no answer.
   Future<dynamic> _ask(int windowId, String method, [dynamic args]) async {
     try {
@@ -233,6 +242,25 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         ..clear()
         ..addAll(terminal);
 
+      // Chat transcripts of the desktop sessions that are open.
+      final chats = <String, SessionChat>{};
+      for (final e in remote.entries) {
+        final s = decodeSessionChat(await _ask(e.value, kLabDeskRpcChatGet, e.key));
+        if (s != null) {
+          final read =
+              _openChatId == s.id ? s.lines.length : (_readLines[s.id] ?? 0);
+          _readLines[s.id] = read;
+          chats[s.id] = s.copyWith(unread: (s.lines.length - read).clamp(0, 999));
+        }
+      }
+      _readLines.removeWhere((id, _) => !chats.containsKey(id));
+      final chatsChanged = !mapEquals(
+          {for (final c in chats.values) c.id: c.lines.length},
+          {for (final c in _chats.values) c.id: c.lines.length});
+      _chats
+        ..clear()
+        ..addAll(chats);
+
       // Monitored machines: quality figures from an open desktop session, and
       // a probe of the machine every half minute.
       final now = DateTime.now();
@@ -250,7 +278,11 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
           _probe(id);
         }
       }
-      if (mounted && (changed || _section == ConsoleSection.fleet)) {
+      if (mounted &&
+          (changed ||
+              chatsChanged ||
+              _section == ConsoleSection.fleet ||
+              _section == ConsoleSection.sessions)) {
         setState(() {});
       }
     } finally {
@@ -801,6 +833,62 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         child: settingsPageBody(_settingsTab),
       );
 
+  /// Chat with every machine this client has a desktop session open to. The
+  /// messages go through the session's own chat model, so the floating chat in
+  /// the session window and this screen show one conversation.
+  Widget _sessions(BuildContext context) => SessionsScreen(
+        sessions: mergeSessionChats(_chats.values),
+        selectedId: _openChatId,
+        onSelect: (id) => setState(() {
+          _openChatId = id;
+          _readLines[id] = _chats[id]?.lines.length ?? 0;
+        }),
+        onSend: (id, text) async {
+          final w = _remoteWindowOf[id];
+          if (w == null) {
+            showToast('That session has closed.');
+            return;
+          }
+          final ok = await _ask(
+              w, kLabDeskRpcChatSend, jsonEncode({'id': id, 'text': text}));
+          if (ok != true) showToast('The session window could not send that.');
+          _pollSessions();
+        },
+      );
+
+  /// The name the far side is shown when this client connects. It lives in the
+  /// account payload the client keeps under `user_info`, so it is merged into
+  /// that rather than replacing it. Rust reads `display_name` first and falls
+  /// back to the OS user name, which is what this exists to replace.
+  String get _displayName {
+    try {
+      final j = jsonDecode(bind.mainGetLocalOption(key: 'user_info'));
+      if (j is Map) {
+        final d = (j['display_name'] as String?)?.trim();
+        if (d != null && d.isNotEmpty) return d;
+        final n = (j['name'] as String?)?.trim();
+        if (n != null && n.isNotEmpty) return n;
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  void _editDisplayName() {
+    renameDialog(
+      oldName: _displayName,
+      onSubmit: (name) async {
+        Map<String, dynamic> info = {};
+        try {
+          final j = jsonDecode(bind.mainGetLocalOption(key: 'user_info'));
+          if (j is Map) info = Map<String, dynamic>.from(j);
+        } catch (_) {}
+        info['display_name'] = name.trim();
+        await bind.mainSetLocalOption(key: 'user_info', value: jsonEncode(info));
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
   Widget _thisMachine(BuildContext context) {
     return ChangeNotifierProvider.value(
       value: gFFI.serverModel,
@@ -816,6 +904,8 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
           // in the move. The catalogue of the old interface is what caught it.
           onRefreshPassword: () => bind.mainUpdateTemporaryPassword(),
           onEditPassword: () => _goToSettings(SettingsTabKey.safety),
+          displayName: _displayName,
+          onEditDisplayName: _editDisplayName,
           onStartService: model.isStart ? null : () => start_service(true),
         ),
       ),
@@ -909,6 +999,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
               ConsoleSection.connect: _connect,
               ConsoleSection.thisMachine: _thisMachine,
               ConsoleSection.settings: _settings,
+              ConsoleSection.sessions: _sessions,
             },
           ),
         ],

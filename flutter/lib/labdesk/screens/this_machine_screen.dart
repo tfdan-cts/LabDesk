@@ -24,6 +24,8 @@ class ThisMachineScreen extends StatelessWidget {
     this.onRefreshPassword,
     this.onOpenIdMenu,
     this.onStartService,
+    this.displayName,
+    this.onEditDisplayName,
   });
 
   /// This machine's own id, as the client reports it.
@@ -48,6 +50,17 @@ class ThisMachineScreen extends StatelessWidget {
   /// Offered only while the service is stopped, which is the one moment it is
   /// useful. The old interface put this link under the status line.
   final VoidCallback? onStartService;
+
+  /// The name the far side sees when this machine connects out to it.
+  ///
+  /// It was never shown anywhere, so an operator only found out what it was by
+  /// looking at somebody else's screen — and the default is the account name or
+  /// the OS username, which is rarely what anybody wants announced. Null hides
+  /// the row entirely, which is what the design harness and any build that
+  /// cannot read the option get.
+  final String? displayName;
+
+  final VoidCallback? onEditDisplayName;
 
   @override
   Widget build(BuildContext context) {
@@ -138,6 +151,42 @@ class ThisMachineScreen extends StatelessWidget {
                           glyph: LdIcons.lock,
                           onPressed: onEditPassword,
                         ),
+                    ],
+                  ),
+                ],
+                if (displayName != null) ...[
+                  const SizedBox(height: 18),
+                  Container(height: 1, color: C.hairline),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SelectableText.rich(
+                          TextSpan(
+                            style: C.body(color: C.textMuted),
+                            children: [
+                              const TextSpan(
+                                  text: 'Shown to machines you connect to as '),
+                              TextSpan(
+                                text: displayName!.isEmpty
+                                    ? 'your account or sign-in name'
+                                    : displayName!,
+                                style: C.data(
+                                    size: 14, color: C.text, w: FontWeight.w700),
+                              ),
+                              const TextSpan(text: '.'),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (onEditDisplayName != null) ...[
+                        const SizedBox(width: 10),
+                        GhostButton(
+                          label: 'Change',
+                          glyph: LdIcons.settings,
+                          onPressed: onEditDisplayName,
+                        ),
+                      ],
                     ],
                   ),
                 ],

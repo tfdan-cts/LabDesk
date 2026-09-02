@@ -9,6 +9,19 @@ import 'machine_row.dart';
 const kLabDeskRpcAction = 'labdesk_action';
 const kLabDeskRpcSessionStats = 'labdesk_session_stats';
 
+/// Read one session's chat. Arguments: the peer id, as a bare string.
+/// Answers a JSON `SessionChat`, or null when the window holds no such
+/// session. See `chat_transcript.dart` for the shape.
+const kLabDeskRpcChatGet = 'labdesk_chat_get';
+
+/// Say something in one session's chat. Arguments: `{"id": ..., "text": ...}`
+/// as a JSON string. Answers true when the message went to the peer.
+///
+/// The message goes through the session's own `ChatModel`, which is what the
+/// floating chat in the session window uses, so both surfaces show the one
+/// conversation rather than two views that drift apart.
+const kLabDeskRpcChatSend = 'labdesk_chat_send';
+
 /// What Health shows for one machine, assembled from what the client could
 /// actually get: identity it already holds, the session window's quality
 /// figures, and the terminal window's probe of the machine itself.
