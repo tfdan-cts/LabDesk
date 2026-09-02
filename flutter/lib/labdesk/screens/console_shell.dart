@@ -8,6 +8,7 @@ import '../models/machine_row.dart';
 import '../theme/console_theme.dart';
 import '../theme/ld_icons.dart';
 import 'actions_screen.dart';
+import 'console_menu.dart';
 import 'fleet_console.dart';
 import 'health_screen.dart';
 import 'settings_screen.dart';
@@ -100,6 +101,7 @@ class ConsoleShell extends StatefulWidget {
     this.samples = const [],
     this.profiles = const [],
     this.profileName = 'Default',
+    this.onProfileSelected,
     this.isRefreshing = false,
     this.isLoading = false,
     this.lastRefreshed,
@@ -125,6 +127,11 @@ class ConsoleShell extends StatefulWidget {
   final List<ReachSample> samples;
   final List<ProfileRow> profiles;
   final String profileName;
+
+  /// The operator picked another server profile in the sidebar. Null leaves
+  /// the control as a label: a chevron that opens nothing is worse than none.
+  final ValueChanged<String>? onProfileSelected;
+
   final bool isRefreshing;
   final bool isLoading;
   final DateTime? lastRefreshed;
@@ -244,6 +251,8 @@ class _ConsoleShellState extends State<ConsoleShell> {
           _Sidebar(
             section: _section,
             profileName: widget.profileName,
+            profiles: widget.profiles,
+            onProfileSelected: widget.onProfileSelected,
             selected: _selected,
             onSelect: _setSection,
             subItems: widget.subItems,
@@ -377,6 +386,8 @@ class _Sidebar extends StatelessWidget {
     required this.profileName,
     required this.selected,
     required this.onSelect,
+    this.profiles = const [],
+    this.onProfileSelected,
     this.subItems = const {},
     this.selectedSubItem,
     this.onSubItemSelected,
@@ -384,6 +395,8 @@ class _Sidebar extends StatelessWidget {
 
   final ConsoleSection section;
   final String profileName;
+  final List<ProfileRow> profiles;
+  final ValueChanged<String>? onProfileSelected;
   final MachineRow? selected;
   final ValueChanged<ConsoleSection> onSelect;
   final Map<ConsoleSection, List<ConsoleSubItem>> subItems;
@@ -461,27 +474,52 @@ class _Sidebar extends StatelessWidget {
             ),
           ],
           Divider(height: 1, thickness: 1, color: C.hairline),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 12, 18, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Server profile', style: C.micro()),
-                const SizedBox(height: 5),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(profileName,
-                          overflow: TextOverflow.ellipsis, style: C.body()),
-                    ),
-                    LdIcon(LdIcons.chevronDown, size: 15, color: C.textFaint),
-                  ],
-                ),
-              ],
-            ),
-          ),
+          _profileControl(),
         ],
       ),
+    );
+  }
+
+  /// The active server profile, and the way to change it.
+  ///
+  /// This was a label with a chevron drawn beside it and nothing behind the
+  /// chevron. It now opens the console's own menu over the profiles the client
+  /// supplied; with no way to act on a pick it stays a label, without the
+  /// chevron, so it never promises what it cannot do.
+  Widget _profileControl() {
+    final canPick = onProfileSelected != null && profiles.isNotEmpty;
+    Widget face(bool focused, bool hovered) => Container(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 16),
+          color: hovered ? C.surfaceHi : Colors.transparent,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Server profile', style: C.micro()),
+              const SizedBox(height: 5),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(profileName,
+                        overflow: TextOverflow.ellipsis, style: C.body()),
+                  ),
+                  if (canPick)
+                    LdIcon(LdIcons.chevronDown,
+                        size: 15, color: focused ? C.accent : C.textFaint),
+                ],
+              ),
+            ],
+          ),
+        );
+    if (!canPick) return face(false, false);
+    return ConsoleMenuButton<String>(
+      tooltip: 'Switch server profile',
+      entries: () => [
+        const ConsoleMenuHeading<String>('Server profile'),
+        for (final p in profiles)
+          ConsoleMenuAction<String>(p.name, p.name, checked: p.active),
+      ],
+      onSelected: onProfileSelected!,
+      builder: face,
     );
   }
 }

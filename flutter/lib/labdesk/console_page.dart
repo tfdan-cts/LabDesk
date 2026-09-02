@@ -807,6 +807,12 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         samples: labdeskStatus.samples,
         profiles: _profiles,
         profileName: ServerProfilesModel.active.value,
+        // activate() rewrites the live server keys, saves, and asks the ID
+        // server again, which is exactly what the old home-screen dropdown did.
+        onProfileSelected: (name) async {
+          await ServerProfilesModel.activate(name);
+          if (mounted) setState(() {});
+        },
         isRefreshing: _refreshing || labdeskStatus.isQuerying,
         // The fleet is only genuinely loading before anything has been asked.
         isLoading: machines.isEmpty && _lastRefreshed == null,

@@ -4,6 +4,7 @@ import 'package:flutter_hbb/common/formatter/id_formatter.dart';
 import 'package:flutter_hbb/common/labdesk_peer_status.dart';
 import 'package:flutter_hbb/labdesk/models/machine_row.dart';
 import 'package:flutter_hbb/labdesk/screens/console_shell.dart';
+import 'package:flutter_hbb/labdesk/screens/settings_screen.dart';
 import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
 
 /// The shell is what makes the console the whole interface: the client hands it
@@ -57,6 +58,45 @@ void main() {
       ]) {
         expect(s.needsMachine, isTrue, reason: s.label);
       }
+    });
+  });
+
+  group('server profile control', () {
+    const profiles = [
+      ProfileRow(name: 'trapLab Tailnet', host: 'a', relay: 'a', api: '', hasKey: true, active: true),
+      ProfileRow(name: 'Personal Tailnet', host: 'b', relay: 'b', api: '', hasKey: true, active: false),
+    ];
+
+    testWidgets('the sidebar chevron opens the profiles and reports the pick',
+        (tester) async {
+      String? picked;
+      await tester.pumpWidget(_wrap(ConsoleShell(
+        machines: const [],
+        profiles: profiles,
+        profileName: 'trapLab Tailnet',
+        onProfileSelected: (n) => picked = n,
+      )));
+
+      await tester.tap(find.text('trapLab Tailnet'));
+      await tester.pumpAndSettle();
+      expect(find.text('Personal Tailnet'), findsOneWidget,
+          reason: 'the other profile must be on offer once the control opens');
+
+      await tester.tap(find.text('Personal Tailnet'));
+      await tester.pumpAndSettle();
+      expect(picked, 'Personal Tailnet');
+    });
+
+    testWidgets('with nothing to act on a pick, it is a label without a chevron',
+        (tester) async {
+      await tester.pumpWidget(_wrap(const ConsoleShell(
+        machines: [],
+        profiles: profiles,
+        profileName: 'trapLab Tailnet',
+      )));
+      await tester.tap(find.text('trapLab Tailnet'));
+      await tester.pumpAndSettle();
+      expect(find.text('Personal Tailnet'), findsNothing);
     });
   });
 
