@@ -127,14 +127,16 @@ void main() {
       }
     });
 
-    test("the windows marker goes inside the shell's own quoted script", () {
+    test('the windows marker is appended as a PowerShell statement', () {
+      // The channel on Windows is already PowerShell, so the probe is bare
+      // statements and the marker is one more of them. A nested
+      // `powershell -Command "..."` with escaped quotes left the far shell at a
+      // continuation prompt until the probe timed out (Foundry, 2026-09-02).
       final framed =
           MetricsCollector.framed(MetricsCollector.probeFor('Windows 11')!);
-      expect(framed, endsWith('"'),
-          reason: 'appending after the closing quote would leave the marker '
-              'outside the powershell command, where it would not run');
-      expect(framed.indexOf(MetricsCollector.endMarker),
-          lessThan(framed.length - 1));
+      expect(framed, isNot(startsWith('powershell')));
+      expect(framed,
+          endsWith("Write-Output ('LABDESK_END=' + \$(if (\$?) { 0 } else { 1 }))"));
     });
 
     test('an unreadable platform has no probe to frame', () {

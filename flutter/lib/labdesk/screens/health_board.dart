@@ -200,7 +200,11 @@ class HealthCard extends StatelessWidget {
   }
 
   String _footer(bool online, Map<String, Metric> session) {
-    if (!online) return 'Offline. Last seen ${machine.sinceSeen(now: now)} ago.';
+    if (!online) {
+      return machine.lastSeenOnline == null
+          ? 'Offline. Not seen online this session.'
+          : 'Offline. Last seen ${machine.sinceSeen(now: now)} ago.';
+    }
     final rtt = session['Round trip'];
     final codec = session['Codec'];
     final parts = <String>[];

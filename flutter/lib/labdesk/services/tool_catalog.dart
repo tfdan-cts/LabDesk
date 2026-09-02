@@ -29,8 +29,15 @@ class ToolCatalog {
   /// The tag every row carries. A row is this, a tab, then the fields.
   static const marker = 'LDROW';
 
-  /// The separator between the marker and the fields, and between fields.
+  /// The separator between the marker and the fields, and between fields, on
+  /// POSIX shells, whose PTY hands the byte through untouched.
   static const fieldSeparator = '\t';
+
+  /// The separator Windows commands print instead. ConPTY renders output
+  /// through the console, so a tab written by PowerShell arrives as spaces and
+  /// a tab-delimited row never matches; a printable character survives.
+  /// Verified on trapLab-Foundry, 2026-09-02: tab rows parsed as nothing.
+  static const windowsFieldSeparator = '|';
 
   /// The platform key for a platform string as the client reports it, or null
   /// when it is not one the toolbox knows. Null rather than a guess: a Linux
@@ -167,7 +174,7 @@ class ToolCatalog {
   // LDSEP line; the sed strips the "●" systemd puts in front of a failed unit,
   // which would otherwise shift every column.
   static const _servicesWindows =
-      r'''Get-CimInstance Win32_Service | ForEach-Object { "LDROW`t$($_.Name)`t$($_.DisplayName -replace '[\r\n\t]',' ' -replace '^(.{0,60}).*','$1')`t$($_.State)`t$($_.StartMode)" }''';
+      r'''Get-CimInstance Win32_Service | ForEach-Object { "LDROW|$($_.Name)|$($_.DisplayName -replace '[\r\n\t]',' ' -replace '^(.{0,60}).*','$1')|$($_.State)|$($_.StartMode)" }''';
 
   static const _servicesLinux =
       r'''{ systemctl list-unit-files --type=service --no-pager --plain --no-legend; echo LDSEP; systemctl list-units --type=service --all --no-pager --plain --no-legend | sed 's/^[^A-Za-z0-9]*//'; } | awk 'BEGIN{s=0} /^LDSEP$/{s=1;next} s==0{n=$1; sub(/\.service$/,"",n); m[n]=$2; next} NF>=4{n=$1; sub(/\.service$/,"",n); d=""; for(i=5;i<=NF;i++) d=d (i>5?" ":"") $i; if(length(d)>60) d=substr(d,1,60); printf "LDROW\t%s\t%s\t%s\t%s\n",n,d,$3,((n in m)?m[n]:"-")}' ''';
@@ -179,7 +186,7 @@ class ToolCatalog {
   // Get-Process reports; a null on a protected process casts to 0 rather than
   // printing an empty column.
   static const _processesWindows =
-      r'''Get-Process | Sort-Object CPU -Descending | Select-Object -First 40 | ForEach-Object { "LDROW`t$($_.Id)`t$($_.ProcessName)`t$([math]::Round([double]$_.CPU,1))`t$([math]::Round($_.WorkingSet64/1MB,1))" }''';
+      r'''Get-Process | Sort-Object CPU -Descending | Select-Object -First 40 | ForEach-Object { "LDROW|$($_.Id)|$($_.ProcessName)|$([math]::Round([double]$_.CPU,1))|$([math]::Round($_.WorkingSet64/1MB,1))" }''';
 
   static const _processesLinux =
       r'''ps -eo pid,comm,pcpu,pmem --sort=-pcpu | head -41 | awk 'NR>1{printf "LDROW\t%s\t%s\t%s\t%s\n",$1,$2,$3,$4}' ''';
@@ -191,7 +198,7 @@ class ToolCatalog {
   // is 200 columns wide and a row that wraps loses its marker on the second
   // line, so a long message would arrive as a row and a fragment.
   static const _eventsWindows =
-      r'''Get-WinEvent -LogName System -MaxEvents 50 -ErrorAction SilentlyContinue | ForEach-Object { "LDROW`t$($_.Id)`t$($_.LevelDisplayName)`t$($_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss'))`t$($_.ProviderName)`t$($_.Message -replace '[\r\n\t]',' ' -replace '^(.{0,100}).*','$1')" }''';
+      r'''Get-WinEvent -LogName System -MaxEvents 50 -ErrorAction SilentlyContinue | ForEach-Object { "LDROW|$($_.Id)|$($_.LevelDisplayName)|$($_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss'))|$($_.ProviderName)|$($_.Message -replace '[\r\n\t]',' ' -replace '^(.{0,100}).*','$1')" }''';
 
   static const _eventsLinux =
       r'''journalctl -n 50 --no-pager -o short-iso -p warning 2>/dev/null | awk 'NF>3{p=$3; sub(/:$/,"",p); sub(/\[[0-9]+\]$/,"",p); m=""; for(i=4;i<=NF;i++) m=m (i>4?" ":"") $i; if(length(m)>100) m=substr(m,1,100); printf "LDROW\t%s\t%s\t%s\t%s\t%s\n","-","warning",$1,p,m}' ''';
@@ -203,7 +210,7 @@ class ToolCatalog {
   // a 64-bit machine only appears under WOW6432Node. Linux tries dpkg and
   // falls back to rpm, which covers Debian and Red Hat families with one line.
   static const _softwareWindows =
-      r'''Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } | Sort-Object DisplayName | ForEach-Object { "LDROW`t$($_.DisplayName -replace '[\r\n\t]',' ' -replace '^(.{0,60}).*','$1')`t$($_.DisplayVersion)`t$($_.Publisher -replace '[\r\n\t]',' ' -replace '^(.{0,40}).*','$1')" }''';
+      r'''Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } | Sort-Object DisplayName | ForEach-Object { "LDROW|$($_.DisplayName -replace '[\r\n\t]',' ' -replace '^(.{0,60}).*','$1')|$($_.DisplayVersion)|$($_.Publisher -replace '[\r\n\t]',' ' -replace '^(.{0,40}).*','$1')" }''';
 
   static const _softwareLinux =
       r'''{ dpkg-query -W -f='${Package}\t${Version}\n' 2>/dev/null || rpm -qa --qf '%{NAME}\t%{VERSION}-%{RELEASE}\n' 2>/dev/null; } | awk -F'\t' 'NF>=2{printf "LDROW\t%s\t%s\t-\n",$1,$2}' ''';
@@ -215,7 +222,7 @@ class ToolCatalog {
   // pseudo filesystems dropped so tmpfs and cgroup mounts do not fill the
   // table.
   static const _diskWindows =
-      r'''Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { "LDROW`t$($_.DeviceID)`t$($_.VolumeName)`t$([math]::Round(($_.Size-$_.FreeSpace)/1GB,1))`t$([math]::Round($_.FreeSpace/1GB,1))`t$([math]::Round($_.Size/1GB,1))" }''';
+      r'''Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { "LDROW|$($_.DeviceID)|$($_.VolumeName)|$([math]::Round(($_.Size-$_.FreeSpace)/1GB,1))|$([math]::Round($_.FreeSpace/1GB,1))|$([math]::Round($_.Size/1GB,1))" }''';
 
   // Positioned from the capacity column outwards rather than by field number:
   // a device name or a mount point can contain a space, and counting from the
@@ -226,7 +233,7 @@ class ToolCatalog {
   // Network. Loopback is dropped everywhere: it is on every machine and says
   // nothing about the one being looked at.
   static const _networkWindows =
-      r'''Get-NetIPAddress -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notmatch '^(127\.|::1$)' } | ForEach-Object { "LDROW`t$($_.InterfaceAlias)`t$($_.IPAddress)`t$($_.PrefixLength)`t$($_.AddressFamily)" }''';
+      r'''Get-NetIPAddress -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notmatch '^(127\.|::1$)' } | ForEach-Object { "LDROW|$($_.InterfaceAlias)|$($_.IPAddress)|$($_.PrefixLength)|$($_.AddressFamily)" }''';
 
   static const _networkLinux =
       r'''ip -o addr show 2>/dev/null | awk '$3=="inet"||$3=="inet6"{split($4,a,"/"); if(a[1]=="127.0.0.1"||a[1]=="::1")next; printf "LDROW\t%s\t%s\t%s\t%s\n",$2,a[1],a[2],$3}' ''';

@@ -48,6 +48,10 @@ class ProbeReader {
 
   ProbeOutcome get outcome => _outcome;
 
+  /// Everything the channel delivered, for diagnosing a probe that parsed
+  /// nothing usable.
+  String get raw => _buffer.toString();
+
   bool get isFinished => _outcome.state != ProbeState.running;
 
   /// Feed whatever arrived from the channel. Chunks are bytes off a PTY, so a

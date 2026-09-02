@@ -19,6 +19,19 @@ class ToolParsers {
   ToolParsers._();
 
   static const _rowPrefix = '${ToolCatalog.marker}${ToolCatalog.fieldSeparator}';
+  static const _rowPrefixWindows =
+      '${ToolCatalog.marker}${ToolCatalog.windowsFieldSeparator}';
+
+  /// The separator a row uses, from the character right after the marker:
+  /// a tab from a POSIX shell, a bar from PowerShell through ConPTY. Null when
+  /// the line is not a row at all.
+  static String? _separatorOf(String line) {
+    if (line.startsWith(_rowPrefix)) return ToolCatalog.fieldSeparator;
+    if (line.startsWith(_rowPrefixWindows)) {
+      return ToolCatalog.windowsFieldSeparator;
+    }
+    return null;
+  }
 
   /// The tagged rows in [lines], as raw field lists, in the order they arrived.
   static List<List<String>> rows(List<String> lines) {
@@ -27,10 +40,11 @@ class ToolParsers {
       // The channel strips carriage returns, but a command's own output can
       // still carry one, and it would ride along on the last field.
       final line = raw.replaceAll('\r', '');
-      if (!line.startsWith(_rowPrefix)) continue;
+      final sep = _separatorOf(line);
+      if (sep == null) continue;
       out.add(line
-          .substring(_rowPrefix.length)
-          .split(ToolCatalog.fieldSeparator)
+          .substring(ToolCatalog.marker.length + sep.length)
+          .split(sep)
           .map((f) => f.trim())
           .toList(growable: false));
     }
@@ -62,8 +76,11 @@ class ToolParsers {
     for (final raw in lines) {
       final line = raw.replaceAll('\r', '').trimRight();
       if (line.trim().isEmpty) continue;
-      out.add([line.startsWith(_rowPrefix)
-          ? line.substring(_rowPrefix.length).replaceAll('\t', '  ')
+      final sep = _separatorOf(line);
+      out.add([sep != null
+          ? line
+              .substring(ToolCatalog.marker.length + sep.length)
+              .replaceAll(sep, '  ')
           : line]);
     }
     return ToolTable(columns: ToolCatalog.columnsFor(ToolId.scripts), rows: out);
