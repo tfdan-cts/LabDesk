@@ -121,7 +121,7 @@ pre-releases, so it will not show them.
 Add `--silent-install` to run one without any interface:
 
 ```powershell
-.\LabDesk-1.4.9-x86_64-install.exe --silent-install
+.\LabDesk-1.2.0-x86_64-install.exe --silent-install
 ```
 
 ### Uninstalling

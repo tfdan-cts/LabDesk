@@ -38,6 +38,14 @@ hooks* below.
 A release may contain only the work the owner explicitly ordered. If `labdesk-next` carries
 anything else, do not cut the release: surface it and wait.
 
+## Versions
+
+LabDesk carries its own semantic version, separate from the RustDesk core's. It is written in
+five files that must agree and is only ever changed by `scripts/set-version.ps1`; a release is
+the tag `v<version>` the owner creates when the release pull request lands. The rules, the list
+of files and the reason the first self-reported version is 1.2.0 are in `docs/VERSIONING.md`;
+every version has an entry in `CHANGELOG.md`.
+
 ## The gate suite
 
 Run all of these from `flutter/` and get them green before opening a pull request.

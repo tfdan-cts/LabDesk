@@ -130,7 +130,7 @@ produced.
 ## Verifying a machine ended up in the right state
 
 ```powershell
-Get-AuthenticodeSignature .\LabDesk-1.4.9-x86_64-install.exe |
+Get-AuthenticodeSignature .\LabDesk-1.2.0-x86_64-install.exe |
   Format-List Status, SignerCertificate, TimeStamperCertificate
 ```
 
