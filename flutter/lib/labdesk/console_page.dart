@@ -25,16 +25,23 @@ import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:provider/provider.dart';
 
 import 'console_data.dart';
+import 'models/automation_models.dart';
 import 'models/chat_transcript.dart';
 import 'models/console_rpc.dart';
 import 'models/machine_metrics.dart';
 import 'models/machine_row.dart';
+import 'models/tool_models.dart';
 import 'screens/actions_screen.dart';
+import 'screens/automation_screen.dart';
 import 'screens/connect_screen.dart';
 import 'screens/console_shell.dart';
 import 'screens/sessions_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/terminal_screen.dart';
+import 'screens/tools_screen.dart';
+import 'services/automation_engine.dart';
+import 'services/tool_catalog.dart';
+import 'services/tool_parsers.dart';
 import 'screens/this_machine_screen.dart';
 import 'theme/console_theme.dart';
 import 'theme/ld_icons.dart';
@@ -110,6 +117,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       _pollReachability();
+      _runAutomation();
       _ticks++;
       if (_ticks.isEven) _pollSessions();
       if (_section == ConsoleSection.fleet ||
@@ -132,6 +140,8 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         .mainGetLocalOption(key: _kMonitoredKey)
         .split(',')
         .where((s) => s.isNotEmpty));
+    _automation.rules = decodeRules(bind.mainGetLocalOption(key: _kRulesKey));
+    _library = ScriptLibrary.decode(bind.mainGetLocalOption(key: _kScriptsKey));
     // Ask once on open so the fleet is not blank while waiting for the client's
     // own poll to come round.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -190,6 +200,20 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   static const _kMonitoredKey = 'labdesk-monitored';
   static const _probeEvery = Duration(seconds: 30);
   final _monitored = <String>{};
+
+  /// Rules that act on machines. Evaluated by this tick, so they run only
+  /// while the console is open; the screen says so.
+  static const _kRulesKey = 'labdesk-automation';
+  final _automation = AutomationEngine();
+
+  /// The toolbox: which machines are picked, which tool is open, what each
+  /// machine answered, and the operator's saved scripts.
+  static const _kScriptsKey = 'labdesk-scripts';
+  final _toolSelected = <String>{};
+  ToolId? _tool;
+  final _toolResults = <String, ToolRunResult>{};
+  final _toolBusy = <String>{};
+  var _library = ScriptLibrary.empty;
 
   final _terminalLines = <String, List<TerminalLine>>{};
 
@@ -321,6 +345,211 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
       if (mounted) setState(() {});
     }
   }
+
+  void _runAutomation() {
+    if (_automation.rules.isEmpty) return;
+    final machines = _machines;
+    final fired = _automation.tick(
+      now: DateTime.now(),
+      status: {
+        for (final m in machines) m.id: labdeskStatus.store.stateOf(m.id).status
+      },
+      metrics: {for (final id in _monitored) id: _healthFor(id).remote},
+      machines: {for (final m in machines) m.id},
+    );
+    for (final f in fired) {
+      _execute(f);
+    }
+    if (fired.isNotEmpty && mounted && _section == ConsoleSection.automation) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _execute(Firing f) async {
+    final id = f.machineId;
+    switch (f.action) {
+      case RunCommand(:final command, :final platformHint):
+        final platform = _rowOf(id)?.platform ?? '';
+        if (platformHint != null &&
+            !platform.toLowerCase().startsWith(platformHint.toLowerCase())) {
+          _automation.recordOutcome(
+              f.id, false, 'skipped: $platform is not $platformHint');
+          break;
+        }
+        final ffi = await LabDeskMachineLink.open(id);
+        if (ffi == null) {
+          _automation.recordOutcome(f.id, false,
+              'could not connect: no saved password, or it was refused');
+          break;
+        }
+        final out = await LabDeskTerminalRpc.runOn(ffi, id, command);
+        final code = out['exitCode'];
+        _automation.recordOutcome(
+            f.id, code == 0, (out['reason'] as String?) ?? 'exit $code');
+      case Notify(:final message):
+        showToast(message.isEmpty ? '${f.rule.name} fired' : message);
+        _automation.recordOutcome(f.id, true);
+      case WakeOnLan():
+        await bind.mainWol(id: id);
+        _automation.recordOutcome(f.id, true, 'magic packet sent');
+      case MonitorOn():
+        if (!_monitored.contains(id)) _toggleMonitor(id);
+        _automation.recordOutcome(f.id, true);
+      case OpenSession():
+        if (mounted) connect(context, id);
+        _automation.recordOutcome(f.id, true);
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _saveRules(List<Rule> rules) {
+    _automation.rules = rules;
+    bind.mainSetLocalOption(key: _kRulesKey, value: encodeRules(rules));
+    setState(() {});
+  }
+
+  Widget _automationScreen(BuildContext context) => AutomationScreen(
+        rules: _automation.rules,
+        log: _automation.log.entries,
+        machines: _machines,
+        monitoredIds: _monitored,
+        now: DateTime.now(),
+        onSave: _saveRules,
+        onToggle: (id, on) => _saveRules([
+          for (final r in _automation.rules)
+            r.id == id ? r.copyWith(enabled: on) : r,
+        ]),
+        onRunNow: (id) {
+          for (final f in _automation.runNow(
+            ruleId: id,
+            now: DateTime.now(),
+            machines: {for (final m in _machines) m.id},
+          )) {
+            _execute(f);
+          }
+        },
+      );
+
+  /// Run one command on one machine over whatever shell is available and hand
+  /// back the raw answer, or a map naming why there was none.
+  Future<Map<String, dynamic>> _shell(String id, String command) async {
+    final tw = _terminalWindowOf[id];
+    if (tw != null) {
+      final r = await _ask(tw, kWindowEventLabDeskTermRun,
+          jsonEncode({'id': id, 'command': command}));
+      if (r is String) return jsonDecode(r) as Map<String, dynamic>;
+      return {'lines': <String>[], 'reason': 'The terminal window did not answer.'};
+    }
+    final ffi = await LabDeskMachineLink.open(id);
+    if (ffi == null) {
+      return {
+        'lines': <String>[],
+        'reason': 'Could not connect: the machine did not accept the saved '
+            'password, or has none saved.',
+      };
+    }
+    return LabDeskTerminalRpc.runOn(ffi, id, command);
+  }
+
+  Future<void> _runTool(ToolId tool, Set<String> ids) async {
+    setState(() {
+      _tool = tool;
+      _toolResults.clear();
+      _toolBusy.addAll(ids);
+    });
+    await Future.wait(ids.map((id) async {
+      final platform = _rowOf(id)?.platform ?? '';
+      final cmd = ToolCatalog.commandFor(tool, platform);
+      final result = cmd == null
+          ? ToolRunResult(
+              machineId: id,
+              error: 'No ${tool.label.toLowerCase()} command for $platform.',
+            )
+          : ToolParsers.result(id, tool, await _shell(id, cmd.command));
+      if (!mounted) return;
+      setState(() {
+        _toolResults[id] = result;
+        _toolBusy.remove(id);
+      });
+    }));
+  }
+
+  Future<void> _toolAction(
+      ToolId tool, ToolAction action, String id, String? target) async {
+    final platform = _rowOf(id)?.platform ?? '';
+    final cmd = ToolCatalog.actionFor(tool, action, platform, target: target);
+    if (cmd == null) {
+      showToast('No ${action.label.toLowerCase()} command for $platform.');
+      return;
+    }
+    setState(() => _toolBusy.add(id));
+    final out = await _shell(id, cmd.command);
+    if (!mounted) return;
+    setState(() => _toolBusy.remove(id));
+    final reason = out['reason'];
+    final code = out['exitCode'];
+    if (reason is String && reason.isNotEmpty) {
+      showToast(reason);
+    } else if (code is int && code != 0) {
+      showToast('${action.label}: exit $code'
+          '${ToolParsers.firstMessage(List<String>.from(out['lines'] ?? const [])) ?? ''}');
+    } else {
+      showToast('${action.label}: done on ${_rowOf(id)?.displayName ?? id}');
+      // Power actions end the shell on the far side; re-list for the rest.
+      if (tool.listsSomething && !action.isDestructive) _runTool(tool, {id});
+    }
+  }
+
+  Future<void> _runScript(SavedScript script, Set<String> ids) async {
+    setState(() {
+      _tool = ToolId.scripts;
+      _toolResults.clear();
+      _toolBusy.addAll(ids);
+    });
+    await Future.wait(ids.map((id) async {
+      final platform = _rowOf(id)?.platform ?? '';
+      final result = script.platform.matches(platform)
+          ? ToolParsers.result(
+              id, ToolId.scripts, await _shell(id, script.oneLine))
+          : ToolRunResult(
+              machineId: id,
+              error: 'This script is for ${script.platform.label}; '
+                  '${_rowOf(id)?.displayName ?? id} runs $platform.',
+            );
+      if (!mounted) return;
+      setState(() {
+        _toolResults[id] = result;
+        _toolBusy.remove(id);
+      });
+    }));
+  }
+
+  void _saveLibrary(ScriptLibrary next) {
+    _library = next;
+    bind.mainSetLocalOption(key: _kScriptsKey, value: next.encode());
+    setState(() {});
+  }
+
+  Widget _toolsScreen(BuildContext context) => ToolsScreen(
+        machines: _machines,
+        selectedIds: _toolSelected,
+        onSelectionChanged: (ids) => setState(() => _toolSelected
+          ..clear()
+          ..addAll(ids)),
+        tool: _tool,
+        onToolChanged: (t) => setState(() {
+          _tool = t;
+          _toolResults.clear();
+        }),
+        results: _toolResults,
+        busyIds: _toolBusy,
+        onRun: _runTool,
+        onAction: _toolAction,
+        library: _library,
+        onSaveScript: (s) => _saveLibrary(_library.upsert(s)),
+        onDeleteScript: (id) => _saveLibrary(_library.remove(id)),
+        onRunScript: _runScript,
+      );
 
   void _toggleMonitor(String id) {
     if (_monitored.remove(id)) {
@@ -1000,6 +1229,8 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
               ConsoleSection.thisMachine: _thisMachine,
               ConsoleSection.settings: _settings,
               ConsoleSection.sessions: _sessions,
+              ConsoleSection.automation: _automationScreen,
+              ConsoleSection.tools: _toolsScreen,
             },
           ),
         ],
