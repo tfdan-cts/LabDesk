@@ -107,7 +107,9 @@ class ConsoleShell extends StatefulWidget {
     this.now,
     this.healthFor,
     this.terminalLines = const [],
+    this.terminalLinesFor,
     this.connectedIds = const {},
+    this.terminalIds,
     this.onRunAction,
     this.onTerminalSubmit,
     this.initialSection = ConsoleSection.connect,
@@ -133,7 +135,18 @@ class ConsoleShell extends StatefulWidget {
   final MachineHealth Function(String machineId)? healthFor;
 
   final List<TerminalLine> terminalLines;
+
+  /// Terminal output for one machine. When supplied it wins over
+  /// [terminalLines], which has no way to keep two machines' shells apart.
+  final List<TerminalLine> Function(String machineId)? terminalLinesFor;
+
   final Set<String> connectedIds;
+
+  /// Machines with a terminal session open. The Terminal screen keys on this
+  /// rather than [connectedIds], because a desktop session alone gives it no
+  /// shell to run commands in. Null means "same as connectedIds".
+  final Set<String>? terminalIds;
+
   final void Function(String machineId, MachineAction action)? onRunAction;
   final void Function(String machineId, String command)? onTerminalSubmit;
   final ConsoleSection initialSection;
@@ -287,8 +300,11 @@ class _ConsoleShellState extends State<ConsoleShell> {
       case ConsoleSection.terminal:
         return TerminalScreen(
           machine: _selected,
-          lines: widget.terminalLines,
-          connected: _connected,
+          lines: _selectedId != null && widget.terminalLinesFor != null
+              ? widget.terminalLinesFor!(_selectedId!)
+              : widget.terminalLines,
+          connected: _selectedId != null &&
+              (widget.terminalIds ?? widget.connectedIds).contains(_selectedId),
           onSubmit: _selectedId == null
               ? null
               : (cmd) => widget.onTerminalSubmit?.call(_selectedId!, cmd),

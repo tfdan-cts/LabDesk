@@ -78,6 +78,10 @@ const String kWindowEventGetSessionIdList = "get_session_id_list";
 const String kWindowEventRemoteWindowCoords = "remote_window_coords";
 const String kWindowEventSetFullscreen = "set_fullscreen";
 
+const String kWindowEventLabDeskTerminalList = "labdesk_terminal_list";
+const String kWindowEventLabDeskProbe = "labdesk_probe";
+const String kWindowEventLabDeskTermRun = "labdesk_term_run";
+
 const String kWindowEventMoveTabToNewWindow = "move_tab_to_new_window";
 const String kWindowEventGetCachedSessionData = "get_cached_session_data";
 const String kWindowEventOpenMonitorSession = "open_monitor_session";

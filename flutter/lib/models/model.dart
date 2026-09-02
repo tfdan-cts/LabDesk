@@ -956,7 +956,8 @@ class FfiModel with ChangeNotifier {
       _restartReconnectDelayTimer = null;
       reconnect(dialogManager, sessionId, false);
     } else if (type == 'wait-remote-accept-nook') {
-      showWaitAcceptDialog(sessionId, type, title, text, dialogManager);
+      showWaitAcceptDialog(sessionId, type, title, text, dialogManager,
+          peerId: peerId);
     } else if (type == 'on-uac' || type == 'on-foreground-elevated') {
       showOnBlockDialog(sessionId, type, title, text, dialogManager);
     } else if (type == 'wait-uac') {
@@ -3720,6 +3721,11 @@ class FFI {
   // Getter for terminal models
   Map<int, TerminalModel> get terminalModels => _terminalModels;
 
+  // Headless terminals (LabDesk probe and command runs) have no TerminalModel
+  // and no view, so they take their events raw instead of being routed to one.
+  final Map<int, void Function(Map<String, dynamic>)> _rawTerminalListeners =
+      {};
+
   FFI(SessionID? sId) {
     sessionId = sId ?? (isDesktop ? Uuid().v4obj() : _constSessionId);
     imageModel = ImageModel(WeakReference(this));
@@ -4078,8 +4084,23 @@ class FFI {
     _terminalModels.remove(terminalId);
   }
 
+  void setRawTerminalListener(
+      int terminalId, void Function(Map<String, dynamic>)? listener) {
+    if (listener == null) {
+      _rawTerminalListeners.remove(terminalId);
+    } else {
+      _rawTerminalListeners[terminalId] = listener;
+    }
+  }
+
   void routeTerminalResponse(Map<String, dynamic> evt) {
     final int terminalId = TerminalModel.getTerminalIdFromEvt(evt);
+
+    final rawListener = _rawTerminalListeners[terminalId];
+    if (rawListener != null) {
+      rawListener(evt);
+      return;
+    }
 
     // Route to specific terminal model if it exists
     final model = _terminalModels[terminalId];

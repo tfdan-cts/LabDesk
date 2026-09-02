@@ -26,7 +26,7 @@ class MetricsCollector {
   /// Linux: CPU from /proc/stat sampled twice, memory from /proc/meminfo, disk
   /// from the root filesystem, uptime from /proc/uptime. Deliberately avoids
   /// top and vmstat, whose output differs between distributions.
-  static const _linux = r'''awk '/^cpu /{a=$2+$4;t=$2+$4+$5}END{print a,t}' /proc/stat > /tmp/.ld1; sleep 1; awk -v p="$(cat /tmp/.ld1)" '/^cpu /{split(p,q," ");a=$2+$4;t=$2+$4+$5;d=t-q[2];if(d>0)printf "LABDESK_CPU=%.1f\n",(a-q[1])*100/d}' /proc/stat; awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{if(t>0){printf "LABDESK_MEM_USED=%d\nLABDESK_MEM_TOTAL=%d\n",(t-a)*1024,t*1024}}' /proc/meminfo; df -B1 / | awk 'NR==2{printf "LABDESK_DISK_USED=%d\nLABDESK_DISK_TOTAL=%d\n",$3,$2}'; awk '{printf "LABDESK_UPTIME=%d\n",$1}' /proc/uptime''';
+  static const _linux = r'''p=$(awk '/^cpu /{print $2+$4,$2+$4+$5}' /proc/stat); sleep 1; awk -v p="$p" '/^cpu /{split(p,q," ");a=$2+$4;t=$2+$4+$5;d=t-q[2];if(d>0)printf "LABDESK_CPU=%.1f\n",(a-q[1])*100/d}' /proc/stat; awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{if(t>0){printf "LABDESK_MEM_USED=%d\nLABDESK_MEM_TOTAL=%d\n",(t-a)*1024,t*1024}}' /proc/meminfo; df -B1 / | awk 'NR==2{printf "LABDESK_DISK_USED=%d\nLABDESK_DISK_TOTAL=%d\n",$3,$2}'; awk '{printf "LABDESK_UPTIME=%d\n",$1}' /proc/uptime''';
 
   /// Windows: CIM rather than the deprecated wmic, in one PowerShell call.
   static const _windows =

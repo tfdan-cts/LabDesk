@@ -10,6 +10,8 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/input_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/desktop/pages/remote_page.dart';
+import 'package:flutter_hbb/labdesk/models/console_rpc.dart';
+import 'package:flutter_hbb/models/model.dart' show FFI;
 import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/desktop/widgets/material_mod_popup_menu.dart'
@@ -389,6 +391,14 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
     return widget.params["windowId"];
   }
 
+  /// The session this window holds for a peer, or null when it holds none.
+  FFI? _ffiOf(String peerId) {
+    for (final tab in tabController.state.value.tabs) {
+      if (tab.key == peerId) return (tab.page as RemotePage).ffi;
+    }
+    return null;
+  }
+
   Future<bool> handleWindowCloseButton() async {
     final connLength = tabController.length;
     if (connLength == 1) {
@@ -508,6 +518,36 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           .map((e) => '${e.key},${(e.page as RemotePage).ffi.sessionId}')
           .toList()
           .join(';');
+    } else if (call.method == kLabDeskRpcSessionStats) {
+      // The console's Health screen asking about a session this window holds.
+      final ffi = _ffiOf(call.arguments as String);
+      if (ffi == null) return null;
+      final d = ffi.qualityMonitorModel.data;
+      return jsonEncode({
+        'speed': d.speed,
+        'fps': d.fps,
+        'delay': d.delay,
+        'targetBitrate': d.targetBitrate,
+        'codecFormat': d.codecFormat,
+        'chroma': d.chroma,
+      });
+    } else if (call.method == kLabDeskRpcAction) {
+      // The console's Actions screen. The operator has already confirmed
+      // anything destructive there, so no second dialog is raised here.
+      final args = jsonDecode(call.arguments);
+      final ffi = _ffiOf(args['id'] as String);
+      if (ffi == null) return false;
+      switch (args['action']) {
+        case 'screenshot':
+          await bind.sessionTakeScreenshot(
+              sessionId: ffi.sessionId,
+              display: ffi.ffiModel.pi.currentDisplay);
+          return true;
+        case 'reboot':
+          await bind.sessionRestartRemoteDevice(sessionId: ffi.sessionId);
+          return true;
+      }
+      return false;
     } else if (call.method == kWindowEventGetCachedSessionData) {
       // Ready to show new window and close old tab.
       final args = jsonDecode(call.arguments);

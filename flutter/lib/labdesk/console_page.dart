@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
@@ -16,14 +19,18 @@ import 'package:flutter_hbb/desktop/widgets/server_profile_switcher.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
+import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:provider/provider.dart';
 
 import 'console_data.dart';
+import 'models/console_rpc.dart';
+import 'models/machine_metrics.dart';
 import 'models/machine_row.dart';
 import 'screens/actions_screen.dart';
 import 'screens/connect_screen.dart';
 import 'screens/console_shell.dart';
 import 'screens/settings_screen.dart';
+import 'screens/terminal_screen.dart';
 import 'screens/this_machine_screen.dart';
 import 'theme/console_theme.dart';
 import 'theme/ld_icons.dart';
@@ -97,11 +104,19 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     // second, and rebuilding the hosted connect page or a settings page once a
     // second is work nobody asked for.
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted &&
-          (_section == ConsoleSection.fleet ||
-              _section == ConsoleSection.connect)) {
+      if (!mounted) return;
+      _pollReachability();
+      _ticks++;
+      if (_ticks.isEven) _pollSessions();
+      if (_section == ConsoleSection.fleet ||
+          _section == ConsoleSection.connect) {
         setState(() {});
       }
+    });
+    bind.mainIsUsingPublicServer().then((public) {
+      // The intervals the peer page it replaced used: a public server is
+      // shared and is asked less often.
+      _pollEvery = Duration(seconds: public ? 10 : 4);
     });
     // The peer stores fill from events, not from a getter, so the load has to
     // be asked for. Recent and favourites are local reads. LAN discovery is a
@@ -123,6 +138,188 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     _tick?.cancel();
     _sectionRequest.dispose();
     super.dispose();
+  }
+
+  /// The reachability poll the peer page used to run. That page is no longer
+  /// mounted, and without this the dots were only ever asked for once, on
+  /// open, and again on Refresh: a machine coming up stayed red until the
+  /// operator happened to press the button.
+  var _pollEvery = const Duration(seconds: 4);
+
+  void _pollReachability() {
+    final now = DateTime.now();
+    labdeskStatus.expireStale(now);
+    if (!labdeskStatus.isDue(now, _pollEvery)) return;
+    final ids = {for (final p in _peers) p.id}.toList(growable: false);
+    if (ids.isEmpty) return;
+    labdeskStatus.beginQuery(ids, at: now);
+    bind.queryOnlines(ids: ids);
+  }
+
+  /// Which window holds a live session to a machine, by kind.
+  ///
+  /// Sessions run in their own windows, and the main window kept no record of
+  /// them, which is why Health, Terminal and two of the Actions shipped in a
+  /// permanent "no session" state. The windows already answer "what do you
+  /// hold" for the tab bar, so the console asks each of them every two seconds
+  /// rather than inventing an event system for the same fact.
+  final _remoteWindowOf = <String, int>{};
+  final _terminalWindowOf = <String, int>{};
+  var _ticks = 0;
+  var _askingWindows = false;
+
+  /// What Health has learned, per machine: the session window's quality
+  /// figures, and the terminal window's probe of the machine itself.
+  final _sessionStats = <String, Map<String, dynamic>>{};
+  final _probes = <String, Map<String, dynamic>>{};
+  final _probedAt = <String, DateTime>{};
+  final _probing = <String>{};
+  String? _healthMachine;
+
+  final _terminalLines = <String, List<TerminalLine>>{};
+
+  /// A window channel call that treats a closed or busy window as no answer.
+  Future<dynamic> _ask(int windowId, String method, [dynamic args]) async {
+    try {
+      return await DesktopMultiWindow.invokeMethod(windowId, method, args);
+    } catch (e) {
+      debugPrint('labdesk: window $windowId did not answer $method: $e');
+      return null;
+    }
+  }
+
+  Future<void> _pollSessions() async {
+    if (_askingWindows) return;
+    _askingWindows = true;
+    try {
+      final remote = <String, int>{};
+      final terminal = <String, int>{};
+      for (final w in rustDeskWinManager.windowsOfType(WindowType.RemoteDesktop)) {
+        final list = await _ask(w, kWindowEventGetRemoteList);
+        if (list is String) {
+          for (final id in list.split(',')) {
+            if (id.isNotEmpty) remote[id] = w;
+          }
+        }
+      }
+      for (final w in rustDeskWinManager.windowsOfType(WindowType.Terminal)) {
+        final list = await _ask(w, kWindowEventLabDeskTerminalList);
+        if (list is String) {
+          for (final id in list.split(',')) {
+            if (id.isNotEmpty) terminal[id] = w;
+          }
+        }
+      }
+      if (!mounted) return;
+      final changed = !mapEquals(remote, _remoteWindowOf) ||
+          !mapEquals(terminal, _terminalWindowOf);
+      _remoteWindowOf
+        ..clear()
+        ..addAll(remote);
+      _terminalWindowOf
+        ..clear()
+        ..addAll(terminal);
+
+      final id = _healthMachine;
+      if (id != null && _section == ConsoleSection.health) {
+        final rw = remote[id];
+        if (rw != null) {
+          final s = await _ask(rw, kLabDeskRpcSessionStats, id);
+          if (s is String) {
+            _sessionStats[id] = jsonDecode(s) as Map<String, dynamic>;
+          }
+        }
+        final tw = terminal[id];
+        final at = _probedAt[id];
+        if (tw != null &&
+            !_probing.contains(id) &&
+            (at == null ||
+                DateTime.now().difference(at) > const Duration(seconds: 30))) {
+          _probe(id, tw);
+        }
+      }
+      if (mounted && (changed || _section == ConsoleSection.health)) {
+        setState(() {});
+      }
+    } finally {
+      _askingWindows = false;
+    }
+  }
+
+  Future<void> _probe(String id, int windowId) async {
+    _probing.add(id);
+    try {
+      final platform = _rowOf(id)?.platform ?? '';
+      final r = await _ask(windowId, kWindowEventLabDeskProbe,
+          jsonEncode({'id': id, 'platform': platform}));
+      if (r is String) _probes[id] = jsonDecode(r) as Map<String, dynamic>;
+      _probedAt[id] = DateTime.now();
+    } finally {
+      _probing.remove(id);
+      if (mounted) setState(() {});
+    }
+  }
+
+  MachineRow? _rowOf(String id) {
+    for (final m in _machines) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  MachineHealth _healthFor(String id) {
+    // Remembered so the poll knows which machine to ask about. Set from a
+    // build, deliberately: Health is the only screen that wants it, and this is
+    // the moment it says so.
+    _healthMachine = id;
+    final row = _rowOf(id);
+    if (row == null) return MachineHealth.empty;
+    return buildMachineHealth(
+      machine: row,
+      connected:
+          _remoteWindowOf.containsKey(id) || _terminalWindowOf.containsKey(id),
+      sessionStats: _sessionStats[id],
+      probe: _probes[id],
+    );
+  }
+
+  /// One command, run in the terminal window's hidden shell for this machine,
+  /// with its output brought back as plain lines.
+  Future<void> _terminalSubmit(String id, String command) async {
+    final lines = _terminalLines.putIfAbsent(id, () => []);
+    setState(() => lines.add(TerminalLine(command, kind: TerminalLineKind.input)));
+    final w = _terminalWindowOf[id];
+    if (w == null) {
+      setState(() => lines.add(const TerminalLine(
+          'No terminal session is open to this machine. Open one first.',
+          kind: TerminalLineKind.notice)));
+      return;
+    }
+    final r = await _ask(w, kWindowEventLabDeskTermRun,
+        jsonEncode({'id': id, 'command': command}));
+    if (!mounted) return;
+    setState(() {
+      if (r is! String) {
+        lines.add(const TerminalLine('The terminal window did not answer.',
+            kind: TerminalLineKind.error));
+        return;
+      }
+      final out = jsonDecode(r) as Map<String, dynamic>;
+      for (final l in out['lines'] as List? ?? const []) {
+        lines.add(TerminalLine(l.toString()));
+      }
+      final code = out['exitCode'];
+      final reason = out['reason'];
+      if (reason is String && reason.isNotEmpty) {
+        lines.add(TerminalLine(reason, kind: TerminalLineKind.notice));
+      } else if (out['timedOut'] == true) {
+        lines.add(const TerminalLine(
+            'No end of output after 30 s. The command may still be running.',
+            kind: TerminalLineKind.notice));
+      } else if (code is int && code != 0) {
+        lines.add(TerminalLine('exit $code', kind: TerminalLineKind.error));
+      }
+    });
   }
 
   Future<void> _refresh() async {
@@ -216,10 +413,23 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
       case 'transfer':
         connect(context, machineId, isFileTransfer: true);
         break;
+      case 'screenshot':
+      case 'reboot':
+        // Both act on a remote desktop session, which lives in its own window.
+        // The screen only enables them while some session is open; a terminal
+        // alone is not enough, and this is where that is said.
+        final w = _remoteWindowOf[machineId];
+        if (w == null) {
+          showToast('Open a remote desktop session to this machine first.');
+          break;
+        }
+        _ask(w, kLabDeskRpcAction,
+                jsonEncode({'id': machineId, 'action': action.id}))
+            .then((ok) {
+          if (ok != true) showToast('The session window could not do that.');
+        });
+        break;
       default:
-        // screenshot and reboot need an open session. The screen disables them
-        // while there is none, so reaching here would mean the screen and this
-        // switch disagree about what is possible.
         debugPrint('labdesk: no handler for action ${action.id}');
     }
   }
@@ -600,9 +810,17 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         isRefreshing: _refreshing || labdeskStatus.isQuerying,
         // The fleet is only genuinely loading before anything has been asked.
         isLoading: machines.isEmpty && _lastRefreshed == null,
-        lastRefreshed: _lastRefreshed,
+        // Stamped when the server answered, not when the button was pressed:
+        // a query that never came back must not read as a fresh check.
+        lastRefreshed: labdeskStatus.lastResponseAt,
         onRefresh: _refresh,
-        connectedIds: const {},
+        // Actions that need a session need a desktop session; the terminal
+        // screen needs a terminal. Health counts either as "connected".
+        connectedIds: _remoteWindowOf.keys.toSet(),
+        terminalIds: _terminalWindowOf.keys.toSet(),
+        healthFor: _healthFor,
+        terminalLinesFor: (id) => _terminalLines[id] ?? const [],
+        onTerminalSubmit: _terminalSubmit,
         onRunAction: _runAction,
         sectionRequest: _sectionRequest,
         onSectionChanged: (s) => setState(() => _section = s),

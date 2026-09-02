@@ -401,6 +401,11 @@ class RustDeskMultiWindowManager {
     return MultiWindowCallResult(wnds[0], res);
   }
 
+  /// The open windows of one type, for callers that need to ask each of them
+  /// something rather than call the active one.
+  List<int> windowsOfType(WindowType type) =>
+      List.unmodifiable(_findWindowsByType(type));
+
   List<int> _findWindowsByType(WindowType type) {
     switch (type) {
       case WindowType.Main:
