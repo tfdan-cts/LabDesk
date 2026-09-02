@@ -148,7 +148,6 @@ void main() {
     for (final section in [
       ConsoleSection.connect,
       ConsoleSection.fleet,
-      ConsoleSection.health,
       ConsoleSection.terminal,
       ConsoleSection.actions,
     ]) {

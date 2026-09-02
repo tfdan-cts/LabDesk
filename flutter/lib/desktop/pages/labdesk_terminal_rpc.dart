@@ -5,6 +5,7 @@ import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/labdesk/services/metrics_collector.dart';
 import 'package:flutter_hbb/labdesk/services/probe_reader.dart';
 import 'package:flutter_hbb/labdesk/services/terminal_text.dart';
+import 'package:flutter_hbb/models/model.dart' show FFI;
 import 'package:flutter_hbb/models/terminal_model.dart';
 
 import '../../models/platform_model.dart';
@@ -47,13 +48,22 @@ class LabDeskTerminalRpc {
     return ids.join(',');
   }
 
-  /// Read the peer's own CPU, memory, disk and uptime.
+  /// Read the peer's own CPU, memory, disk and uptime, over the terminal
+  /// window's connection to it.
   static Future<Map<String, dynamic>> probe(
       String peerId, String platform) async {
     final ffi = TerminalConnectionManager.getExistingConnection(peerId);
     if (ffi == null || ffi.closed) {
       return _probeFailed('no terminal session');
     }
+    return probeOn(ffi, peerId, platform);
+  }
+
+  /// The same probe over any connection to the peer, so the console's own
+  /// headless link can ask without a terminal window being open.
+  static Future<Map<String, dynamic>> probeOn(
+      FFI ffi, String peerId, String platform) async {
+    if (ffi.closed) return _probeFailed('connection closed');
     final metricsProbe = MetricsCollector.probeFor(platform);
     if (metricsProbe == null) {
       return _probeFailed('unsupported platform');
@@ -138,12 +148,20 @@ class LabDeskTerminalRpc {
     };
   }
 
-  /// Run one command on the peer and read back what it printed.
+  /// Run one command on the peer and read back what it printed, over the
+  /// terminal window's connection.
   static Future<Map<String, dynamic>> run(String peerId, String command) async {
     final ffi = TerminalConnectionManager.getExistingConnection(peerId);
     if (ffi == null || ffi.closed) {
       return _runFailed('no terminal session');
     }
+    return runOn(ffi, peerId, command);
+  }
+
+  /// The same command run over any connection to the peer.
+  static Future<Map<String, dynamic>> runOn(
+      FFI ffi, String peerId, String command) async {
+    if (ffi.closed) return _runFailed('connection closed');
     final session = _runSessions.putIfAbsent(peerId, () => _RunSession());
     if (session.done != null) {
       return _runFailed('busy');

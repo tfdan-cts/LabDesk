@@ -10,27 +10,36 @@ import '../theme/ld_icons.dart';
 import 'actions_screen.dart';
 import 'console_menu.dart';
 import 'fleet_console.dart';
-import 'health_screen.dart';
+import 'health_board.dart';
 import 'settings_screen.dart';
 import 'terminal_screen.dart';
 
 enum ConsoleSection {
   connect,
   fleet,
-  health,
+  sessions,
   terminal,
+  tools,
+  automation,
   actions,
   thisMachine,
   settings,
 }
+
+/// The two views of the fleet. Health used to be a section of its own that
+/// showed one machine, chosen on Fleet first; it is a tab here so the whole
+/// fleet's figures sit beside the reachability table they belong with.
+enum FleetTab { machines, health }
 
 extension ConsoleSectionInfo on ConsoleSection {
   String get label => switch (this) {
         ConsoleSection.connect => 'Connect',
         ConsoleSection.thisMachine => 'This machine',
         ConsoleSection.fleet => 'Fleet',
-        ConsoleSection.health => 'Health',
+        ConsoleSection.sessions => 'Sessions',
         ConsoleSection.terminal => 'Terminal',
+        ConsoleSection.tools => 'Tools',
+        ConsoleSection.automation => 'Automation',
         ConsoleSection.actions => 'Actions',
         ConsoleSection.settings => 'Settings',
       };
@@ -39,7 +48,9 @@ extension ConsoleSectionInfo on ConsoleSection {
         ConsoleSection.connect => LdIcons.connect,
         ConsoleSection.thisMachine => LdIcons.machine,
         ConsoleSection.fleet => LdIcons.fleet,
-        ConsoleSection.health => LdIcons.health,
+        ConsoleSection.sessions => LdIcons.display,
+        ConsoleSection.tools => LdIcons.actions,
+        ConsoleSection.automation => LdIcons.refresh,
         ConsoleSection.terminal => LdIcons.terminal,
         ConsoleSection.actions => LdIcons.actions,
         ConsoleSection.settings => LdIcons.settings,
@@ -51,6 +62,9 @@ extension ConsoleSectionInfo on ConsoleSection {
         ConsoleSection.connect ||
         ConsoleSection.thisMachine ||
         ConsoleSection.fleet ||
+        ConsoleSection.sessions ||
+        ConsoleSection.tools ||
+        ConsoleSection.automation ||
         ConsoleSection.settings =>
           false,
         _ => true,
@@ -108,6 +122,9 @@ class ConsoleShell extends StatefulWidget {
     this.onRefresh,
     this.now,
     this.healthFor,
+    this.monitoredIds = const {},
+    this.probingIds = const {},
+    this.onToggleMonitor,
     this.terminalLines = const [],
     this.terminalLinesFor,
     this.connectedIds = const {},
@@ -140,6 +157,12 @@ class ConsoleShell extends StatefulWidget {
 
   /// Health for a machine, resolved lazily so the shell holds no state.
   final MachineHealth Function(String machineId)? healthFor;
+
+  /// Machines the client is monitoring over its own connection, and the ones
+  /// it is asking right now. The Health tab shows both and offers the toggle.
+  final Set<String> monitoredIds;
+  final Set<String> probingIds;
+  final ValueChanged<String>? onToggleMonitor;
 
   final List<TerminalLine> terminalLines;
 
@@ -190,6 +213,7 @@ class ConsoleShell extends StatefulWidget {
 
 class _ConsoleShellState extends State<ConsoleShell> {
   late ConsoleSection _section = widget.initialSection;
+  FleetTab _fleetTab = FleetTab.machines;
   String? _selectedId;
   String? _busyActionId;
 
@@ -285,26 +309,38 @@ class _ConsoleShellState extends State<ConsoleShell> {
     if (host != null) return host(context);
     switch (_section) {
       case ConsoleSection.fleet:
-        return FleetConsole(
-          machines: widget.machines,
-          samples: widget.samples,
-          isRefreshing: widget.isRefreshing,
-          isLoading: widget.isLoading,
-          lastRefreshed: widget.lastRefreshed,
-          selectedId: _selectedId,
-          onSelect: _select,
-          now: widget.now,
-          embedded: true,
-        );
-      case ConsoleSection.health:
-        return HealthScreen(
-          machine: _selected,
-          health: _selectedId == null
-              ? MachineHealth.empty
-              : (widget.healthFor?.call(_selectedId!) ?? MachineHealth.empty),
-          onConnect: _selectedId == null
-              ? null
-              : () => widget.onRunAction?.call(_selectedId!, kMachineActions.first),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _FleetTabs(
+              tab: _fleetTab,
+              onChanged: (t) => setState(() => _fleetTab = t),
+            ),
+            Expanded(
+              child: switch (_fleetTab) {
+                FleetTab.machines => FleetConsole(
+                    machines: widget.machines,
+                    samples: widget.samples,
+                    isRefreshing: widget.isRefreshing,
+                    isLoading: widget.isLoading,
+                    lastRefreshed: widget.lastRefreshed,
+                    selectedId: _selectedId,
+                    onSelect: _select,
+                    now: widget.now,
+                    embedded: true,
+                  ),
+                FleetTab.health => HealthBoard(
+                    machines: widget.machines,
+                    healthFor: (id) =>
+                        widget.healthFor?.call(id) ?? MachineHealth.empty,
+                    monitoredIds: widget.monitoredIds,
+                    probingIds: widget.probingIds,
+                    onToggleMonitor: widget.onToggleMonitor,
+                    now: widget.now,
+                  ),
+              },
+            ),
+          ],
         );
       case ConsoleSection.terminal:
         return TerminalScreen(
@@ -337,6 +373,12 @@ class _ConsoleShellState extends State<ConsoleShell> {
         );
       case ConsoleSection.settings:
         return SettingsScreen(profiles: widget.profiles);
+      case ConsoleSection.sessions:
+      case ConsoleSection.tools:
+      case ConsoleSection.automation:
+        // Supplied by the client through [hosted] once built; until then the
+        // section says so rather than showing an empty frame.
+        return _HostedElsewhere(section: _section);
       case ConsoleSection.connect:
       case ConsoleSection.thisMachine:
         // These two are always supplied by the client, because connecting and
@@ -345,6 +387,78 @@ class _ConsoleShellState extends State<ConsoleShell> {
         // harness, so it says that rather than pretending to be either.
         return _HostedElsewhere(section: _section);
     }
+  }
+}
+
+/// The two views of Fleet, as a strip under the title bar. Plain text tabs on
+/// a hairline, the way the table headers sit, not a Material tab bar with its
+/// ink and its animated indicator.
+class _FleetTabs extends StatelessWidget {
+  const _FleetTabs({required this.tab, required this.onChanged});
+
+  final FleetTab tab;
+  final ValueChanged<FleetTab> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      decoration: BoxDecoration(
+        color: C.bg,
+        border: Border(bottom: BorderSide(color: C.hairline)),
+      ),
+      child: Row(
+        children: [
+          for (final t in FleetTab.values) ...[
+            _FleetTabItem(
+              label: t == FleetTab.machines ? 'Machines' : 'Health',
+              active: t == tab,
+              onTap: () => onChanged(t),
+            ),
+            const SizedBox(width: 22),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _FleetTabItem extends StatelessWidget {
+  const _FleetTabItem(
+      {required this.label, required this.active, required this.onTap});
+
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.only(top: 12),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: active ? C.accent : Colors.transparent,
+                width: 2,
+              ),
+            ),
+          ),
+          child: Text(
+            label,
+            style: C.small(
+              color: active ? C.text : C.textMuted,
+              w: active ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

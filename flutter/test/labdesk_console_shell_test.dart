@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/common/formatter/id_formatter.dart';
 import 'package:flutter_hbb/common/labdesk_peer_status.dart';
+import 'package:flutter_hbb/labdesk/models/machine_metrics.dart';
 import 'package:flutter_hbb/labdesk/models/machine_row.dart';
 import 'package:flutter_hbb/labdesk/screens/console_shell.dart';
 import 'package:flutter_hbb/labdesk/screens/settings_screen.dart';
@@ -52,12 +53,53 @@ void main() {
         expect(s.needsMachine, isFalse, reason: s.label);
       }
       for (final s in [
-        ConsoleSection.health,
         ConsoleSection.terminal,
         ConsoleSection.actions,
       ]) {
         expect(s.needsMachine, isTrue, reason: s.label);
       }
+    });
+  });
+
+  group('Fleet tabs', () {
+    const rows = [
+      MachineRow(id: '1', hostname: 'alpha', platform: 'Linux', status: LabDeskPeerStatus.online),
+      MachineRow(id: '2', hostname: 'beta', platform: 'Windows', status: LabDeskPeerStatus.offline),
+    ];
+
+    testWidgets('Health is a tab inside Fleet and shows every machine at once',
+        (tester) async {
+      String? toggled;
+      await tester.pumpWidget(_wrap(ConsoleShell(
+        machines: rows,
+        initialSection: ConsoleSection.fleet,
+        healthFor: (id) => MachineHealth(machineId: id, connected: false),
+        onToggleMonitor: (id) => toggled = id,
+      )));
+      // The tab, and the machine table's own heading.
+      expect(find.text('Machines'), findsWidgets);
+      await tester.tap(find.text('Health'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('alpha'), findsOneWidget);
+      expect(find.text('beta'), findsOneWidget);
+      // Only a reachable machine offers monitoring.
+      expect(find.text('Monitor'), findsOneWidget);
+      await tester.tap(find.text('Monitor'));
+      await tester.pumpAndSettle();
+      expect(toggled, '1');
+    });
+
+    testWidgets('a monitored machine says so', (tester) async {
+      await tester.pumpWidget(_wrap(ConsoleShell(
+        machines: rows,
+        initialSection: ConsoleSection.fleet,
+        monitoredIds: const {'1'},
+        healthFor: (id) => MachineHealth(machineId: id, connected: true),
+      )));
+      await tester.tap(find.text('Health'));
+      await tester.pumpAndSettle();
+      expect(find.text('Monitoring'), findsOneWidget);
     });
   });
 

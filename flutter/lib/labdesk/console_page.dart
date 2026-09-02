@@ -15,6 +15,8 @@ import 'package:flutter_hbb/common/widgets/peer_card.dart' show showRdpDialog;
 import 'package:flutter_hbb/desktop/pages/connection_page.dart' show OnlineStatusWidget;
 import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
+import 'package:flutter_hbb/desktop/pages/labdesk_machine_link.dart';
+import 'package:flutter_hbb/desktop/pages/labdesk_terminal_rpc.dart';
 import 'package:flutter_hbb/desktop/widgets/server_profile_switcher.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -124,6 +126,10 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     bind.mainLoadRecentPeers();
     bind.mainLoadFavPeers();
     bind.mainLoadLanPeers();
+    _monitored.addAll(bind
+        .mainGetLocalOption(key: _kMonitoredKey)
+        .split(',')
+        .where((s) => s.isNotEmpty));
     // Ask once on open so the fleet is not blank while waiting for the client's
     // own poll to come round.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -137,6 +143,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   void dispose() {
     _tick?.cancel();
     _sectionRequest.dispose();
+    LabDeskMachineLink.closeAll();
     super.dispose();
   }
 
@@ -169,12 +176,18 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   var _askingWindows = false;
 
   /// What Health has learned, per machine: the session window's quality
-  /// figures, and the terminal window's probe of the machine itself.
+  /// figures, and a probe of the machine itself over the console's own link
+  /// (or a terminal window's connection, when one is open).
   final _sessionStats = <String, Map<String, dynamic>>{};
   final _probes = <String, Map<String, dynamic>>{};
   final _probedAt = <String, DateTime>{};
   final _probing = <String>{};
-  String? _healthMachine;
+
+  /// Machines the operator asked to be monitored. Persisted, so the board
+  /// comes back the way it was left.
+  static const _kMonitoredKey = 'labdesk-monitored';
+  static const _probeEvery = Duration(seconds: 30);
+  final _monitored = <String>{};
 
   final _terminalLines = <String, List<TerminalLine>>{};
 
@@ -220,8 +233,10 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         ..clear()
         ..addAll(terminal);
 
-      final id = _healthMachine;
-      if (id != null && _section == ConsoleSection.health) {
+      // Monitored machines: quality figures from an open desktop session, and
+      // a probe of the machine every half minute.
+      final now = DateTime.now();
+      for (final id in _monitored.toList()) {
         final rw = remote[id];
         if (rw != null) {
           final s = await _ask(rw, kLabDeskRpcSessionStats, id);
@@ -229,16 +244,13 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
             _sessionStats[id] = jsonDecode(s) as Map<String, dynamic>;
           }
         }
-        final tw = terminal[id];
         final at = _probedAt[id];
-        if (tw != null &&
-            !_probing.contains(id) &&
-            (at == null ||
-                DateTime.now().difference(at) > const Duration(seconds: 30))) {
-          _probe(id, tw);
+        if (!_probing.contains(id) &&
+            (at == null || now.difference(at) > _probeEvery)) {
+          _probe(id);
         }
       }
-      if (mounted && (changed || _section == ConsoleSection.health)) {
+      if (mounted && (changed || _section == ConsoleSection.fleet)) {
         setState(() {});
       }
     } finally {
@@ -246,18 +258,49 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     }
   }
 
-  Future<void> _probe(String id, int windowId) async {
+  /// Ask a machine about itself. A terminal window's connection is used when
+  /// one is open; otherwise the console opens a link of its own.
+  Future<void> _probe(String id) async {
     _probing.add(id);
+    if (mounted) setState(() {});
     try {
       final platform = _rowOf(id)?.platform ?? '';
-      final r = await _ask(windowId, kWindowEventLabDeskProbe,
-          jsonEncode({'id': id, 'platform': platform}));
-      if (r is String) _probes[id] = jsonDecode(r) as Map<String, dynamic>;
+      final tw = _terminalWindowOf[id];
+      dynamic r;
+      if (tw != null) {
+        r = await _ask(tw, kWindowEventLabDeskProbe,
+            jsonEncode({'id': id, 'platform': platform}));
+        if (r is String) r = jsonDecode(r);
+      } else {
+        final ffi = await LabDeskMachineLink.open(id);
+        r = ffi == null
+            ? {
+                'state': 'failed',
+                'reason': 'Could not connect: the machine did not accept the '
+                    'saved password, or has none saved.',
+                'metrics': <Map<String, dynamic>>[],
+              }
+            : await LabDeskTerminalRpc.probeOn(ffi, id, platform);
+      }
+      if (r is Map) _probes[id] = Map<String, dynamic>.from(r);
       _probedAt[id] = DateTime.now();
     } finally {
       _probing.remove(id);
       if (mounted) setState(() {});
     }
+  }
+
+  void _toggleMonitor(String id) {
+    if (_monitored.remove(id)) {
+      LabDeskMachineLink.close(id);
+      _probes.remove(id);
+      _probedAt.remove(id);
+    } else {
+      _monitored.add(id);
+      _probe(id);
+    }
+    bind.mainSetLocalOption(key: _kMonitoredKey, value: _monitored.join(','));
+    setState(() {});
   }
 
   MachineRow? _rowOf(String id) {
@@ -268,16 +311,13 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   }
 
   MachineHealth _healthFor(String id) {
-    // Remembered so the poll knows which machine to ask about. Set from a
-    // build, deliberately: Health is the only screen that wants it, and this is
-    // the moment it says so.
-    _healthMachine = id;
     final row = _rowOf(id);
     if (row == null) return MachineHealth.empty;
     return buildMachineHealth(
       machine: row,
-      connected:
-          _remoteWindowOf.containsKey(id) || _terminalWindowOf.containsKey(id),
+      connected: _remoteWindowOf.containsKey(id) ||
+          _terminalWindowOf.containsKey(id) ||
+          LabDeskMachineLink.isOpen(id),
       sessionStats: _sessionStats[id],
       probe: _probes[id],
     );
@@ -289,22 +329,31 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     final lines = _terminalLines.putIfAbsent(id, () => []);
     setState(() => lines.add(TerminalLine(command, kind: TerminalLineKind.input)));
     final w = _terminalWindowOf[id];
-    if (w == null) {
-      setState(() => lines.add(const TerminalLine(
-          'No terminal session is open to this machine. Open one first.',
-          kind: TerminalLineKind.notice)));
-      return;
+    Map<String, dynamic>? out;
+    if (w != null) {
+      final r = await _ask(w, kWindowEventLabDeskTermRun,
+          jsonEncode({'id': id, 'command': command}));
+      if (r is String) out = jsonDecode(r) as Map<String, dynamic>;
+    } else {
+      // No terminal window: the console's own link carries the shell.
+      final ffi = await LabDeskMachineLink.open(id);
+      if (ffi == null) {
+        if (!mounted) return;
+        setState(() => lines.add(const TerminalLine(
+            'Could not connect: the machine did not accept the saved '
+            'password, or has none saved.',
+            kind: TerminalLineKind.notice)));
+        return;
+      }
+      out = await LabDeskTerminalRpc.runOn(ffi, id, command);
     }
-    final r = await _ask(w, kWindowEventLabDeskTermRun,
-        jsonEncode({'id': id, 'command': command}));
     if (!mounted) return;
     setState(() {
-      if (r is! String) {
+      if (out == null) {
         lines.add(const TerminalLine('The terminal window did not answer.',
             kind: TerminalLineKind.error));
         return;
       }
-      final out = jsonDecode(r) as Map<String, dynamic>;
       for (final l in out['lines'] as List? ?? const []) {
         lines.add(TerminalLine(l.toString()));
       }
@@ -823,8 +872,18 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         // Actions that need a session need a desktop session; the terminal
         // screen needs a terminal. Health counts either as "connected".
         connectedIds: _remoteWindowOf.keys.toSet(),
-        terminalIds: _terminalWindowOf.keys.toSet(),
+        // A shell is available through a terminal window or the console's link;
+        // the link opens on demand, so every machine with a saved password
+        // counts.
+        terminalIds: {
+          ..._terminalWindowOf.keys,
+          ...LabDeskMachineLink.openIds,
+          ..._savedPasswords,
+        },
         healthFor: _healthFor,
+        monitoredIds: _monitored,
+        probingIds: _probing,
+        onToggleMonitor: _toggleMonitor,
         terminalLinesFor: (id) => _terminalLines[id] ?? const [],
         onTerminalSubmit: _terminalSubmit,
         onRunAction: _runAction,
