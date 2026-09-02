@@ -406,7 +406,9 @@ class _Sidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 216,
+      // Wide enough for "This machine" and a profile name beside its chevron;
+      // the 216 it was left a gutter of nothing to the right of every label.
+      width: 184,
       color: C.chrome,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -421,7 +423,10 @@ class _Sidebar extends StatelessWidget {
                 // different things.
                 SvgPicture.asset('assets/icon.svg', width: 24, height: 24),
                 const SizedBox(width: 10),
-                Text('LabDesk', style: C.h1()),
+                Flexible(
+                  child: Text('LabDesk',
+                      overflow: TextOverflow.ellipsis, style: C.h1()),
+                ),
               ],
             ),
           ),
@@ -577,11 +582,14 @@ class _NavItemState extends State<_NavItem> {
                 LdIcon(widget.section.glyph,
                     size: 16, color: widget.active ? C.accent : fg),
                 const SizedBox(width: 10),
-                Text(
-                  widget.section.label,
-                  style: C.small(
-                    color: fg,
-                    w: widget.active ? FontWeight.w700 : FontWeight.w500,
+                Flexible(
+                  child: Text(
+                    widget.section.label,
+                    overflow: TextOverflow.ellipsis,
+                    style: C.small(
+                      color: fg,
+                      w: widget.active ? FontWeight.w700 : FontWeight.w500,
+                    ),
                   ),
                 ),
               ],
