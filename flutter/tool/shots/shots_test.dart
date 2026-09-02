@@ -14,9 +14,14 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_hbb/common/labdesk_peer_status.dart';
+import 'package:flutter_hbb/labdesk/models/machine_metrics.dart';
 import 'package:flutter_hbb/labdesk/models/machine_row.dart';
 import 'package:flutter_hbb/labdesk/models/reach_sample.dart';
+import 'package:flutter_hbb/labdesk/screens/actions_screen.dart';
 import 'package:flutter_hbb/labdesk/screens/console_shell.dart';
+import 'package:flutter_hbb/labdesk/screens/health_screen.dart';
+import 'package:flutter_hbb/labdesk/screens/terminal_screen.dart';
+import 'package:flutter_hbb/labdesk/screens/this_machine_screen.dart';
 import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
 
 const _outDir = 'tool/shots/out';
@@ -188,6 +193,64 @@ void main() {
     // its children shows it.
     await tester.tap(find.text('CTS Hosted Server'));
     await _shoot(tester, 'console-fleet-selected');
+  });
+
+  // The three screens with a machine behind them. The shell's own shots catch
+  // only the empty states, so every glyph these screens draw once a machine is
+  // picked - the platform mark, the action rows, the panel buttons - was going
+  // unlooked-at.
+  testWidgets('screen shots with a machine', (tester) async {
+    await tester.binding.setSurfaceSize(_size);
+    tester.view.physicalSize = _size;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final machine = _machines(DateTime(2026, 8, 30, 10, 30)).first;
+
+    await tester.pumpWidget(_frame(HealthScreen(
+      machine: machine,
+      health: MachineHealth(
+        machineId: machine.id,
+        connected: false,
+        identity: const [
+          Metric(label: 'Hostname', value: 'traplab-foundry', source: MetricSource.known),
+          Metric(label: 'Platform', value: 'Windows', source: MetricSource.known),
+          Metric(label: 'User', value: 'minigun', source: MetricSource.known),
+          Metric.unavailable('Uptime'),
+        ],
+        session: const [Metric.unavailable('Round trip'), Metric.unavailable('Throughput')],
+        remote: const [Metric.unavailable('CPU'), Metric.unavailable('Memory')],
+      ),
+      onConnect: () {},
+    )));
+    await _shoot(tester, 'screen-health-machine');
+
+    await tester.pumpWidget(_frame(TerminalScreen(
+      machine: machine,
+      lines: const [
+        TerminalLine('uname -a', kind: TerminalLineKind.input),
+        TerminalLine('Windows 11 Pro 10.0.26200'),
+      ],
+      onOpenSession: () {},
+    )));
+    await _shoot(tester, 'screen-terminal-machine');
+
+    await tester.pumpWidget(_frame(ActionsScreen(
+      machine: machine,
+      connected: true,
+      onRun: (_) {},
+    )));
+    await _shoot(tester, 'screen-actions-machine');
+
+    await tester.pumpWidget(_frame(ThisMachineScreen(
+      machineId: '1935 956 186',
+      password: 'k7m2vq',
+      serviceRunning: true,
+      onEditPassword: () {},
+      onRefreshPassword: () {},
+      onOpenIdMenu: () {},
+    )));
+    await _shoot(tester, 'screen-this-machine');
   });
 }
 

@@ -112,12 +112,9 @@ Widget _tools({
         ),
         const SizedBox(height: 6),
         Row(
-          textDirection: isLocal ? TextDirection.ltr : TextDirection.rtl,
           children: [
             Expanded(
               child: Row(
-                mainAxisAlignment:
-                    isLocal ? MainAxisAlignment.start : MainAxisAlignment.end,
                 children: [
                   FmToolButton(
                       glyph: FmGlyphs.home, tooltip: 'Home', onPressed: () {}),
@@ -143,9 +140,7 @@ Widget _tools({
               key: sendKey,
               child: FmSendButton(
                 label: isLocal ? 'Send' : 'Receive',
-                glyph: LdIcons.arrowRight,
-                quarterTurns: isLocal ? 0 : 2,
-                reversed: !isLocal,
+                glyph: LdIcons.fileTransfer,
                 onPressed: canSend ? () {} : null,
               ),
             ),
@@ -180,21 +175,6 @@ Widget _bread(List<String> parts) {
     ],
   );
 }
-
-/// The path bar in its typed state, which is the other half of the control.
-Widget _pathField(String path) => Row(
-      children: [
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 8),
-          child: LdIcon(FmGlyphs.folder, size: 15, color: C.textFaint),
-        ),
-        Expanded(
-          child: Text(path, style: C.data(size: 12.5, color: C.text)),
-        ),
-        Container(width: 1.6, height: 15, color: C.accent),
-        const SizedBox(width: 8),
-      ],
-    );
 
 Widget _columns({
   required double nameWidth,
@@ -300,6 +280,7 @@ Widget _queue() {
       style: C.body(color: C.text).copyWith(fontWeight: FontWeight.w600));
 
   return FmPane(
+    rail: true,
     children: [
       FmPaneHeader(
         title: 'Transfer file',
@@ -458,7 +439,7 @@ void main() {
                         isLocal: false,
                         title: 'Remote Computer',
                         platformGlyph: LdIcons.windows,
-                        location: _pathField(r'C:\lab\incoming'),
+                        location: _bread(['C:', 'lab', 'incoming']),
                         entries: _remote,
                         selected: const {},
                         sorted: 'Size',

@@ -91,7 +91,8 @@ class _MachineHeader extends StatelessWidget {
             borderRadius: C.roundedSm,
             border: Border.all(color: C.hairline),
           ),
-          child: Icon(_platformIcon(machine.platform), size: 18, color: C.textMuted),
+          alignment: Alignment.center,
+          child: LdIcon(_platformGlyph(machine.platform), size: 18, color: C.textMuted),
         ),
         const SizedBox(width: 14),
         // Flexible with an ellipsis, for the same reason the console's title
@@ -124,17 +125,23 @@ class _MachineHeader extends StatelessWidget {
         _ConnectionPill(connected: connected),
         const Spacer(),
         if (!connected)
-          GhostButton(label: 'Connect', icon: Icons.link_rounded, onPressed: onConnect),
+          GhostButton(label: 'Connect', glyph: LdIcons.connect, onPressed: onConnect),
       ],
     );
   }
 
-  static IconData _platformIcon(String p) {
+  /// The same reading the peer table and the session tab bar take, so one
+  /// machine carries one mark wherever it appears. The fallback is the box
+  /// itself rather than a shell prompt: an unrecognised platform is still a
+  /// machine, and [LdIcons.terminal] already means something else one screen
+  /// away.
+  static String _platformGlyph(String p) {
     final s = p.toLowerCase();
-    if (s.contains('win')) return Icons.window_rounded;
-    if (s.contains('mac') || s.contains('darwin')) return Icons.laptop_mac_rounded;
-    if (s.contains('android')) return Icons.phone_android_rounded;
-    return Icons.terminal_rounded;
+    if (s.contains('win')) return LdIcons.windows;
+    if (s.contains('mac') || s.contains('darwin')) return LdIcons.macos;
+    if (s.contains('android')) return LdIcons.android;
+    if (s.contains('linux') || s.contains('nix')) return LdIcons.linux;
+    return LdIcons.machine;
   }
 }
 
@@ -183,7 +190,7 @@ class _NotConnectedNotice extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline_rounded, size: 16, color: C.textMuted),
+          const LdIcon(LdIcons.info, size: 16, color: C.textMuted),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -325,8 +332,13 @@ class _PickAMachine extends StatelessWidget {
           const SizedBox(height: 14),
           Text('No machine selected', style: C.h2()),
           const SizedBox(height: 6),
+          // Fixed height, and the same 26/14/6 rhythm the terminal and actions
+          // screens use. Left to size itself, the block's height moved with
+          // the length of its own sentence, and the three empty states landed
+          // at three different heights on three tabs of the same console.
           SizedBox(
             width: 320,
+            height: 34,
             child: Text(
               'Choose a machine on the Fleet screen to see what LabDesk can read from it.',
               textAlign: TextAlign.center,

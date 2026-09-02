@@ -1,7 +1,10 @@
-// Renders the console's one toggle and one checkbox in every state they claim,
-// so the spec can be looked at in one place rather than inferred from the five
-// screens that use it. Not part of the CI gate: it lives outside test/ and is
-// run by hand with `flutter test tool/shots/toggle_spec_test.dart`.
+// Renders the console's one toggle, one checkbox and one radio in every state
+// they claim, so the spec can be looked at in one place rather than inferred
+// from the five screens that use it. The last pair is an answer button, which
+// is here for one reason: the disabled rule is one rule — no fill, the frame at
+// 60% of the hairline, everything on it faint — and a rule stated in three
+// places is a rule that drifts. Not part of the CI gate: it lives outside test/
+// and is run by hand with `flutter test tool/shots/toggle_spec_test.dart`.
 //
 // It also carries the only check on [LdToggle.stateLabel]. That option ships
 // unused — it exists so the connection manager can adopt the shared toggle
@@ -18,6 +21,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
+import 'package:flutter_hbb/labdesk/theme/dialog_skin.dart';
+import 'package:flutter_hbb/labdesk/theme/settings_skin.dart';
 
 const _out = 'tool/shots/out';
 
@@ -38,7 +43,7 @@ Widget _cell(String caption, Widget control) => SizedBox(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(height: 24, child: Center(child: control)),
+          SizedBox(height: 36, child: Center(child: control)),
           const SizedBox(height: 12),
           Text(caption, textAlign: TextAlign.center, style: C.micro()),
         ],
@@ -49,7 +54,7 @@ void main() {
   setUpAll(_loadFonts);
 
   testWidgets('the console toggle and checkbox, every state', (tester) async {
-    const size = Size(680, 340);
+    const size = Size(680, 500);
     await tester.binding.setSurfaceSize(size);
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -88,6 +93,24 @@ void main() {
                     const LdCheckbox(on: false, focused: true)),
                 _cell('ticked, disabled',
                     const LdCheckbox(on: true, enabled: false)),
+                _cell('empty, disabled',
+                    const LdCheckbox(on: false, enabled: false)),
+                _cell('radio, selected',
+                    const LdRadioMark(selected: true)),
+                _cell('radio, selected, disabled',
+                    const LdRadioMark(selected: true, enabled: false)),
+                // The same disabled rule, on the third kind of control: no
+                // fill, the frame at 60% of the hairline, the label faint.
+                _cell('answer', LdDialogButton(
+                    label: 'OK',
+                    tone: LdDialogTone.primary,
+                    glyph: DialogGlyphs.check,
+                    onPressed: () {})),
+                _cell('answer, disabled', const LdDialogButton(
+                    label: 'OK',
+                    tone: LdDialogTone.primary,
+                    glyph: DialogGlyphs.check,
+                    onPressed: null)),
               ],
             ),
           ),

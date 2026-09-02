@@ -165,34 +165,32 @@ class _FmToolButtonState extends State<FmToolButton> {
   }
 }
 
-/// The one consequential control in a pane: send this selection to the other
+/// The one consequential control in a pane: move this selection to the other
 /// machine.
 ///
 /// It is the only filled surface in the window, which is the whole reason it
-/// can be found. Disabled it keeps its shape and stops claiming it can act —
-/// the old button dimmed the accent instead, so an empty selection and a full
-/// one differed by twenty per cent of one colour.
+/// can be found, and it is built identically in both panes so Send and Receive
+/// read as one pair of controls rather than as two ranks. Disabled it keeps the
+/// fill and drops to the surface ramp: an outlined disabled state made the pane
+/// with nothing selected look like it had been given a quieter button.
+///
+/// No direction arrow. Two mirrored arrows facing each other across the gap
+/// between the panes were the loudest thing in the window and said nothing the
+/// two words do not; direction is drawn where it is data, on the job tiles.
 class FmSendButton extends StatefulWidget {
   const FmSendButton({
     super.key,
     required this.label,
     required this.glyph,
     required this.onPressed,
-    this.reversed = false,
-    this.quarterTurns = 0,
   });
 
   /// Already translated.
   final String label;
+
+  /// Leading, as on every other labelled control in the console.
   final String glyph;
   final VoidCallback? onPressed;
-
-  /// Glyph first. The two panes mirror each other, so the arrow always sits on
-  /// the side the files are leaving by.
-  final bool reversed;
-
-  /// The direction the arrow points, in quarter turns of [LdIcons.arrowRight].
-  final int quarterTurns;
 
   @override
   State<FmSendButton> createState() => _FmSendButtonState();
@@ -205,12 +203,7 @@ class _FmSendButtonState extends State<FmSendButton> {
   @override
   Widget build(BuildContext context) {
     final enabled = widget.onPressed != null;
-    final fg = enabled ? C.bg : C.textFaint;
-    final glyph = RotatedBox(
-      quarterTurns: widget.quarterTurns,
-      child: LdIcon(widget.glyph, size: 16, color: fg),
-    );
-    final text = Text(widget.label, style: C.small(color: fg, w: FontWeight.w700));
+    final fg = enabled ? C.primaryFg : C.textFaint;
 
     return MouseRegion(
       cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
@@ -230,16 +223,19 @@ class _FmSendButtonState extends State<FmSendButton> {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: !enabled
-                ? Colors.transparent
-                : (_hover ? const Color(0xFF9C90F8) : C.accent),
+                ? C.surfaceHi
+                : (_hover ? C.primaryFillHover : C.primaryFill),
             borderRadius: C.roundedSm,
             border: Border.all(color: enabled ? Colors.transparent : C.hairline),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
-            children: widget.reversed
-                ? [glyph, const SizedBox(width: 8), text]
-                : [text, const SizedBox(width: 8), glyph],
+            children: [
+              LdIcon(widget.glyph, size: 16, color: fg),
+              const SizedBox(width: 8),
+              Text(widget.label,
+                  style: C.small(color: fg, w: FontWeight.w700)),
+            ],
           ),
         ),
       ),
@@ -247,20 +243,32 @@ class _FmSendButtonState extends State<FmSendButton> {
   }
 }
 
-/// The frame around a pane, and around the queue beside them.
+/// The frame around a pane.
 ///
 /// One margin, one hairline, one radius, and a clip — so the column-head band
 /// can run to the panel's own edges instead of floating inside it.
+///
+/// [rail] drops the frame and leaves the column on the background plane behind
+/// a single rule. The job queue takes it: it is not a third file system, and
+/// three identical panels side by side said it was.
 class FmPane extends StatelessWidget {
-  const FmPane({super.key, required this.children});
+  const FmPane({super.key, required this.children, this.rail = false});
 
   final List<Widget> children;
+  final bool rail;
 
   @override
   Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.all(FmSkin.gap),
-        clipBehavior: Clip.antiAlias,
-        decoration: FmSkin.panel,
+        margin: rail
+            ? const EdgeInsets.fromLTRB(
+                FmSkin.gap * 2, FmSkin.gap, FmSkin.gap, FmSkin.gap)
+            : const EdgeInsets.all(FmSkin.gap),
+        padding: rail ? const EdgeInsets.only(left: FmSkin.gap * 2) : null,
+        clipBehavior: rail ? Clip.none : Clip.antiAlias,
+        decoration: rail
+            ? const BoxDecoration(
+                border: Border(left: BorderSide(color: C.hairline)))
+            : FmSkin.panel,
         child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
       );

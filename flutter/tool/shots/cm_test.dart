@@ -48,6 +48,10 @@ Future<void> _loadFonts() async {
   await load('JetBrainsMono', 'assets/fonts/JetBrainsMono-Medium.ttf');
 }
 
+/// The shots draw live controls, so every answer is handed a callback: a button
+/// with nothing behind it now renders as the dead control it is.
+void _noop() {}
+
 /// One permission, at the size and in the order the window lists them.
 class _Perm {
   const _Perm(this.glyph, this.label, this.on);
@@ -211,7 +215,7 @@ Widget _requestWindow({
       permissions: _permissions(locked: false),
       actions: [
         if (withElevate) ...[
-          const CmActionButton(
+          const CmActionButton(onPressed: _noop, 
             label: 'Accept and Elevate',
             tone: CmTone.accent,
             glyph: LdIcons.shield,
@@ -223,7 +227,7 @@ Widget _requestWindow({
           Expanded(
             child: KeyedSubtree(
               key: acceptHoverKey,
-              child: const CmActionButton(
+              child: const CmActionButton(onPressed: _noop, 
                 label: 'Accept',
                 tone: CmTone.accent,
                 glyph: LdIcons.lock,
@@ -232,7 +236,7 @@ Widget _requestWindow({
           ),
           const SizedBox(width: 8),
           const Expanded(
-            child: CmActionButton(
+            child: CmActionButton(onPressed: _noop, 
               label: 'Cancel',
               tone: CmTone.neutral,
               glyph: LdIcons.close,
@@ -273,7 +277,7 @@ Widget _sessionWindow({
         if (inVoiceCall) ...[
           Row(children: const [
             Expanded(
-              child: CmActionButton(
+              child: CmActionButton(onPressed: _noop, 
                 label: 'Audio input',
                 tone: CmTone.accent,
                 glyph: LdIcons.mic,
@@ -281,7 +285,7 @@ Widget _sessionWindow({
             ),
             SizedBox(width: 8),
             Expanded(
-              child: CmActionButton(
+              child: CmActionButton(onPressed: _noop, 
                 label: 'Stop voice call',
                 tone: CmTone.danger,
                 glyph: LdIcons.callEnd,
@@ -290,7 +294,7 @@ Widget _sessionWindow({
           ]),
           const SizedBox(height: 8),
         ],
-        const CmActionButton(
+        const CmActionButton(onPressed: _noop, 
           label: 'Disconnect',
           tone: CmTone.danger,
           glyph: LdIcons.disconnect,
@@ -445,12 +449,12 @@ void main() {
           width: 280,
           child: Row(children: const [
             Expanded(
-              child: CmActionButton(
+              child: CmActionButton(onPressed: _noop, 
                   label: 'Accept', tone: CmTone.accent, glyph: LdIcons.lock),
             ),
             SizedBox(width: 8),
             Expanded(
-              child: CmActionButton(
+              child: CmActionButton(onPressed: _noop, 
                   label: 'Cancel', tone: CmTone.neutral, glyph: LdIcons.close),
             ),
           ]),

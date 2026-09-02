@@ -253,44 +253,18 @@ final TooltipThemeData toolbarTooltipTheme = TooltipThemeData(
   padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
 );
 
-/// The box a menu row wears when its setting is on.
-///
-/// Material's own `Checkbox` is a fixed 18 across and its `Radio` a fixed 20 —
-/// neither takes a size — so on a 30-high row set in 12px type they sat a size
-/// and a half above everything else in the console, and the selected radio was
-/// mark for mark the glyph the toolbar uses for "recording". These are drawn
-/// instead: the box to the 15 and the radius 5 that the settings pages' own
-/// checkbox theme produces, and the ring is literally [LdRadioMark], the same
-/// object a settings page builds, so the two can never drift.
-class ToolbarMenuCheck extends StatelessWidget {
-  const ToolbarMenuCheck({super.key, required this.value, this.enabled = true});
-
-  final bool value;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final on = value && enabled;
-    return AnimatedContainer(
-      duration: C.fast,
-      width: 15,
-      height: 15,
-      decoration: BoxDecoration(
-        color: value ? (enabled ? C.accent : C.accentDim) : Colors.transparent,
-        borderRadius: BorderRadius.circular(5),
-        border: Border.all(
-          color: value ? (enabled ? C.accent : C.accentDim) : C.hairline,
-          width: 1.4,
-        ),
-      ),
-      child: value
-          ? Center(
-              child: LdIcon(LdIcons.check,
-                  size: 11, color: on ? C.bg : C.textFaint))
-          : null,
-    );
-  }
-}
+// The marks a menu row wears when its setting is on are the console's own
+// [LdCheckbox] and [LdRadioMark], not Material's.
+//
+// Material's `Checkbox` is a fixed 18 across and its `Radio` a fixed 20 —
+// neither takes a size — so on a 30-high row set in 12px type they sat a size
+// and a half above everything else in the console, and the selected radio was
+// mark for mark the glyph the toolbar uses for "recording". This file drew its
+// own pair for a while, which meant the toolbar's box was a 15 while the
+// settings pages' was a 16 and the two drifted every time either moved. They
+// are now literally the objects a settings page builds, at [LdCheckbox.size],
+// so a menu opened off the toolbar and a menu opened off a machine row cannot
+// disagree about what a mark is.
 
 /// A menu row carrying a setting that is on or off.
 ///
@@ -317,7 +291,7 @@ Widget toolbarCheckMenuItem({
     child: MenuItemButton(
       key: key,
       onPressed: onChanged == null ? null : () => onChanged(!on),
-      trailingIcon: ToolbarMenuCheck(value: on, enabled: onChanged != null),
+      trailingIcon: LdCheckbox(on: on, enabled: onChanged != null),
       child: child,
     ),
   );
@@ -993,45 +967,64 @@ class CmIdentity extends StatelessWidget {
 
     return Container(
       decoration: CmSkin.panel,
-      padding: const EdgeInsets.all(12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // The question is a header band with a rule under it, which is what a
+          // console dialog is: the accent glyph, the title, then the hairline
+          // that runs the full width of the panel. Set inside the panel's own
+          // padding — as an indented divider under an indented line — it was a
+          // heading that happened to have a rule, and the one window in the
+          // product that asks a person a question looked like nothing else that
+          // asks a person a question.
           if (pending) ...[
-            Row(
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 1),
+                    child: LdIcon(LdIcons.shield, size: 17, color: C.accent),
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(child: Text(statusLabel, style: C.h2())),
+                ],
+              ),
+            ),
+            const Divider(height: 1, thickness: 1, color: C.hairline),
+          ],
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Padding(
-                  padding: EdgeInsets.only(top: 1),
-                  child: LdIcon(LdIcons.shield, size: 17, color: C.text),
-                ),
-                const SizedBox(width: 9),
-                Expanded(child: Text(statusLabel, style: C.h2())),
+                identity,
+                const SizedBox(height: 12),
+                kind,
+                if (!pending) ...[
+                  const SizedBox(height: 9),
+                  Row(
+                    children: [
+                      CmStatusDot(color: statusColor),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(statusLabel,
+                            style: C.small(color: C.textMuted),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      if (elapsed != null)
+                        Text(elapsed!,
+                            style: C.data(size: 12, color: C.textMuted)),
+                    ],
+                  ),
+                ],
               ],
             ),
-            const Divider(height: 21, thickness: 1, color: C.hairline),
-          ],
-          identity,
-          const SizedBox(height: 12),
-          kind,
-          if (!pending) ...[
-            const SizedBox(height: 9),
-            Row(
-              children: [
-                CmStatusDot(color: statusColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(statusLabel,
-                      style: C.small(color: C.textMuted),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                ),
-                if (elapsed != null)
-                  Text(elapsed!, style: C.data(size: 12, color: C.textMuted)),
-              ],
-            ),
-          ],
+          ),
         ],
       ),
     );
@@ -1194,6 +1187,15 @@ class _CmPermissionPanelState extends State<CmPermissionPanel> {
 /// When the deployment forbids changing permissions the row keeps saying what it
 /// says and stops offering: no hover, no pointer, everything one step back. A
 /// control that looks live and does nothing is worse than one that admits it.
+///
+/// Two things it deliberately does not do. It does not carry a tooltip: the
+/// window is 250 wide at its narrowest and a tooltip opened on one permission
+/// covered the *label* of the two under it, so pointing at one line of a consent
+/// list hid two others. The string is still handed to [Semantics], where a
+/// screen reader can have it without anything being painted over. And below 240
+/// the ON/OFF word steps aside and the label drops a point, because at that
+/// width the label is the part that cannot be guessed — the knob beside it is
+/// still saying the same thing by its position.
 class CmPermissionRow extends StatefulWidget {
   const CmPermissionRow({
     super.key,
@@ -1211,6 +1213,7 @@ class CmPermissionRow extends StatefulWidget {
   final String label;
 
   /// Already translated and already carrying the state, exactly as it was.
+  /// Spoken, not painted: it is the row's [Semantics] label.
   final String tooltip;
   final bool on;
   final bool canModify;
@@ -1237,9 +1240,8 @@ class _CmPermissionRowState extends State<CmPermissionRow> {
         ? (widget.on ? C.accent : C.textFaint)
         : (widget.on ? C.textMuted : C.textFaint);
 
-    return Tooltip(
-      message: widget.tooltip,
-      waitDuration: Duration.zero,
+    return Semantics(
+      label: widget.tooltip,
       // The row this replaced was an InkWell, so it took keyboard focus and
       // answered Enter. That is kept: the page it sits on is wrapped in an
       // ExcludeFocus in the shipping configuration, and the right way to have
@@ -1258,49 +1260,55 @@ class _CmPermissionRowState extends State<CmPermissionRow> {
         },
         child: GestureDetector(
           onTap: live ? () => widget.onChanged(!widget.on) : null,
-          child: AnimatedContainer(
-            duration: C.fast,
-            curve: Curves.easeOut,
-            height: CmSkin.rowHeight,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: (_hover || _focus) && live
-                  ? C.surfaceHi
-                  : Colors.transparent,
-              borderRadius: C.roundedSm,
-              border: Border.all(
-                  color: _focus && live ? C.text : Colors.transparent),
-            ),
-            child: Row(
-              children: [
-                LdIcon(widget.glyph, size: 15, color: glyphColor),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(widget.label,
-                      style: C.small(color: labelColor, w: FontWeight.w600),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                ),
-                const SizedBox(width: 6),
-                SizedBox(
-                  width: 25,
-                  child: Text(
-                    widget.on ? 'ON' : 'OFF',
-                    textAlign: TextAlign.right,
-                    style: C.data(
-                      size: 10,
-                      color: live
-                          ? (widget.on ? C.text : C.textFaint)
-                          : (widget.on ? C.textMuted : C.textFaint),
-                      w: FontWeight.w700,
-                    ),
+          child: LayoutBuilder(builder: (context, constraints) {
+            final tight = constraints.maxWidth < 240;
+            return AnimatedContainer(
+              duration: C.fast,
+              curve: Curves.easeOut,
+              height: CmSkin.rowHeight,
+              padding: EdgeInsets.symmetric(horizontal: tight ? 6 : 8),
+              decoration: BoxDecoration(
+                color:
+                    (_hover || _focus) && live ? C.surfaceHi : Colors.transparent,
+                borderRadius: C.roundedSm,
+                border: Border.all(
+                    color: _focus && live ? C.text : Colors.transparent),
+              ),
+              child: Row(
+                children: [
+                  LdIcon(widget.glyph, size: 15, color: glyphColor),
+                  SizedBox(width: tight ? 7 : 9),
+                  Expanded(
+                    child: Text(widget.label,
+                        style: C
+                            .small(color: labelColor, w: FontWeight.w600)
+                            .copyWith(fontSize: tight ? 11 : null),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
                   ),
-                ),
-                const SizedBox(width: 8),
-                CmToggleTrack(on: widget.on, live: live),
-              ],
-            ),
-          ),
+                  if (!tight) ...[
+                    const SizedBox(width: 6),
+                    SizedBox(
+                      width: 25,
+                      child: Text(
+                        widget.on ? 'ON' : 'OFF',
+                        textAlign: TextAlign.right,
+                        style: C.data(
+                          size: 10,
+                          color: live
+                              ? (widget.on ? C.text : C.textFaint)
+                              : (widget.on ? C.textMuted : C.textFaint),
+                          w: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                  SizedBox(width: tight ? 6 : 8),
+                  CmToggleTrack(on: widget.on, live: live),
+                ],
+              ),
+            );
+          }),
         ),
       ),
     );
@@ -1401,12 +1409,19 @@ class _CmActionButtonState extends State<CmActionButton> {
   @override
   Widget build(BuildContext context) {
     final neutral = widget.tone == CmTone.neutral;
+    final live = widget.onPressed != null || widget.onTapDown != null;
     final tint = switch (widget.tone) {
       CmTone.accent => C.accent,
       CmTone.danger => C.bad,
       CmTone.neutral => C.hairline,
     };
-    final fg = widget.tone == CmTone.danger ? C.bad : C.text;
+    // A dead answer says so the way every other dead control in the console
+    // does: the fill goes, the frame drops to [C.disabledBorder] and the label
+    // and its glyph step back to [C.textFaint]. A greyed-down tone would still
+    // have read as the consequential button.
+    final fg = !live
+        ? C.textFaint
+        : (widget.tone == CmTone.danger ? C.bad : C.text);
 
     // Kept focusable, and given a ring: the buttons this replaced were InkWells
     // and answered the keyboard, and an answer to a consent question that can
@@ -1414,7 +1429,8 @@ class _CmActionButtonState extends State<CmActionButton> {
     // this page takes focus at all stays the decision of the ExcludeFocus the
     // page is wrapped in.
     final button = FocusableActionDetector(
-      mouseCursor: SystemMouseCursors.click,
+      enabled: live,
+      mouseCursor: live ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onShowHoverHighlight: (v) => setState(() => _hover = v),
       onShowFocusHighlight: (v) => setState(() => _focus = v),
       actions: {
@@ -1424,10 +1440,12 @@ class _CmActionButtonState extends State<CmActionButton> {
         }),
       },
       child: GestureDetector(
-        onTapDown: (details) {
-          setState(() => _down = true);
-          widget.onTapDown?.call(details);
-        },
+        onTapDown: !live
+            ? null
+            : (details) {
+                setState(() => _down = true);
+                widget.onTapDown?.call(details);
+              },
         onTapUp: (_) => setState(() => _down = false),
         onTapCancel: () => setState(() => _down = false),
         onTap: widget.onPressed,
@@ -1439,20 +1457,30 @@ class _CmActionButtonState extends State<CmActionButton> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: neutral
-                ? (_hover || _focus ? C.surfaceHi : Colors.transparent)
-                : tint.withOpacity(_hover || _focus ? 0.22 : 0.12),
+            color: !live
+                ? Colors.transparent
+                : neutral
+                    ? (_hover || _focus ? C.surfaceHi : Colors.transparent)
+                    : tint.withOpacity(_hover || _focus ? 0.22 : 0.12),
             borderRadius: C.roundedSm,
             border: Border.all(
-              // The ring is the console's text colour, not its accent: on a
-              // consent pair an accent ring around Cancel would say the wrong
-              // thing about which button it is.
-              color: _focus
-                  ? C.text
-                  : (neutral
-                      ? C.hairline
-                      : tint.withOpacity(_hover ? 0.9 : 0.65)),
-              width: _focus ? 1.8 : (neutral ? 1 : 1.4),
+              // The ring is [C.focusRing] at [C.focusRingWidth], the one the
+              // whole console answers the keyboard with. This pair used to draw
+              // its own white ring on the argument that an accent ring around
+              // Cancel misnames it; what it actually did was make the only
+              // window in the product that asks a question the only window
+              // whose focus looks like something else. The tones say which
+              // button is which; the ring says where the keyboard is.
+              color: !live
+                  ? C.disabledBorder
+                  : _focus
+                      ? C.focusRing
+                      : (neutral
+                          ? C.hairline
+                          : tint.withOpacity(_hover ? 0.9 : 0.65)),
+              width: _focus && live
+                  ? C.focusRingWidth
+                  : (neutral || !live ? 1 : 1.4),
             ),
           ),
           child: Row(

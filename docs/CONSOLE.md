@@ -58,10 +58,18 @@ was `ConnectionPage`, which is now the **Connect** section, unchanged.
 The main window's first tab keeps `kTabLabelHomePage` as its key, because the rest of the client
 asks whether the home page is showing by that key. Only its label and its body changed.
 
-## What is still not wired
+## Sessions, and what the console learns from them
 
-Capture screen and restart a machine need a session that is already open, and the main window
-keeps no registry of open sessions, because each one runs in its own window on desktop. Those two
-actions render disabled with their explanation intact, and the Health screen says plainly why its
-panels are empty, rather than showing controls that do nothing. Wiring a session registry is the
-next piece of work, not this one.
+Each session runs in its own window, so the main window never held a record of them. It now asks
+every remote-desktop and terminal window what it holds, every two seconds, over the window channel
+the tab bar already used (`get_remote_list`, `labdesk_terminal_list`). That answer is the session
+registry, and it is what makes three sections real:
+
+| Section | Source |
+|---|---|
+| Health | Identity from the peer store; round trip, throughput, frame rate and codec asked of the remote-desktop window (`labdesk_session_stats`); CPU, memory, disk and uptime read by a probe run in a hidden terminal on the terminal window's connection (`labdesk_probe`). Anything not obtained renders as `--`, never zero. The probe re-runs every 30 s while Health is showing. |
+| Terminal | A command typed here runs in a persistent hidden shell on the terminal window's connection (`labdesk_term_run`); the output comes back as plain lines with ANSI stripped and the exit code. It needs a terminal session open to that machine; a desktop session alone is not a shell. |
+| Actions | Capture screen and Restart route to the remote-desktop window holding the session (`labdesk_action`). The console confirms Restart before sending. Without a desktop session both stay disabled. |
+
+Reachability is polled from the console itself, every 4 s (10 s against a public server), and the
+"Checked" stamp is the server's last answer rather than the time the button was pressed.

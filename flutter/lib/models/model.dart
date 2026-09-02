@@ -542,10 +542,17 @@ class FfiModel with ChangeNotifier {
         close();
       }
 
+      // Three answers, one of which is the point of the prompt. In reading
+      // order, with the answer last, as every other dialog in the product puts
+      // them: "Save as" is the primary, the clipboard is the other way to take
+      // the same shot, and Cancel is dismissive whatever it is passed as.
+      // Asked for as three plain `dialogButton`s in the other order they
+      // arrived as three identical filled slabs with Cancel on the end.
       final List<Widget> buttons = [
-        dialogButton('${translate('Save as')}...', onPressed: saveAs),
-        dialogButton('Copy to clipboard', onPressed: copyToClipboard),
         dialogButton('Cancel', onPressed: cancel),
+        dialogButton('Copy to clipboard',
+            onPressed: copyToClipboard, isOutline: true),
+        dialogButton('${translate('Save as')}...', onPressed: saveAs),
       ];
       dialogManager.dismissAll();
       dialogManager.show(

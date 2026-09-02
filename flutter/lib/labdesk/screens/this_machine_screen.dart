@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme/console_theme.dart';
+import '../theme/ld_icons.dart';
 
 /// What this machine is, for the operator sitting at it.
 ///
@@ -72,7 +73,7 @@ class ThisMachineScreen extends StatelessWidget {
                   trailing: onOpenIdMenu == null
                       ? null
                       : _IconButton(
-                          icon: Icons.more_vert_rounded,
+                          glyph: LdIcons.more,
                           tooltip: 'ID options',
                           onTap: onOpenIdMenu!,
                         ),
@@ -100,13 +101,13 @@ class ThisMachineScreen extends StatelessWidget {
                     children: [
                       if (onRefreshPassword != null && passwordIsTemporary)
                         _IconButton(
-                          icon: Icons.refresh_rounded,
+                          glyph: LdIcons.refresh,
                           tooltip: 'Generate a new one',
                           onTap: onRefreshPassword!,
                         ),
                       if (onEditPassword != null)
                         _IconButton(
-                          icon: Icons.edit_outlined,
+                          glyph: LdIcons.rename,
                           tooltip: 'Change how this machine is secured',
                           onTap: onEditPassword!,
                         ),
@@ -246,7 +247,7 @@ class _Field extends StatelessWidget {
         ),
         if (onCopy != null)
           _IconButton(
-            icon: Icons.copy_rounded,
+            glyph: LdIcons.clipboard,
             tooltip: 'Copy',
             onTap: onCopy!,
           ),
@@ -258,12 +259,15 @@ class _Field extends StatelessWidget {
 
 class _IconButton extends StatefulWidget {
   const _IconButton({
-    required this.icon,
+    required this.glyph,
     required this.tooltip,
     required this.onTap,
   });
 
-  final IconData icon;
+  /// A path from [LdIcons]. Four Material glyphs used to sit on this card —
+  /// the copy, the refresh, the pencil and the overflow — which is every icon
+  /// the screen draws.
+  final String glyph;
   final String tooltip;
   final VoidCallback onTap;
 
@@ -292,7 +296,8 @@ class _IconButtonState extends State<_IconButton> {
               color: _hover ? C.surfaceHi : Colors.transparent,
               borderRadius: C.roundedSm,
             ),
-            child: Icon(widget.icon,
+            alignment: Alignment.center,
+            child: LdIcon(widget.glyph,
                 size: 16, color: _hover ? C.text : C.textMuted),
           ),
         ),

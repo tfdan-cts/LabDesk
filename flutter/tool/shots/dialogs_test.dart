@@ -48,10 +48,17 @@ Future<void> _loadFonts() async {
 
 /// The desk a modal is raised over.
 ///
-/// Deliberately not the console's own background: these dialogs appear over a
-/// session window, over a file transfer, over whatever the person was doing. A
-/// modal that only reads against its own palette is a modal that fails on the
-/// first machine with a document open.
+/// Deliberately not the console's own flat background: these dialogs appear
+/// over a session window, over a file transfer, over whatever the person was
+/// doing, so the ground is uneven.
+///
+/// It used to carry a flat cream rectangle pinned to the bottom-left corner as
+/// a stand-in for "a document is open". Nothing in the product draws that, and
+/// what it actually produced was a hard-edged grey slab wherever the dialog's
+/// shadow crossed the corner of it — a harness artefact being read as the
+/// shadow's fault. The shadow over a genuinely light remote desktop is not
+/// something this sheet can show, and it is better to not show it than to show
+/// it wrong.
 Widget _desk(List<Widget> dialogs) => Stack(fit: StackFit.expand, children: [
       Container(
         decoration: const BoxDecoration(
@@ -62,13 +69,6 @@ Widget _desk(List<Widget> dialogs) => Stack(fit: StackFit.expand, children: [
             stops: [0, 0.55, 1],
           ),
         ),
-      ),
-      Positioned(
-        left: 0,
-        bottom: 0,
-        width: 340,
-        height: 260,
-        child: Container(color: const Color(0xFFF2F1EE)),
       ),
       Center(
         child: Row(
@@ -227,8 +227,11 @@ Widget _conflictDialog({required bool identical, Key? hoverKey}) {
           label: 'Skip', glyph: DialogGlyphs.skip, onPressed: () {}),
       KeyedSubtree(
         key: hoverKey,
+        // Labelled with the verb it performs. "OK" on the one answer that
+        // destroys a file the operator cannot get back is the label of a
+        // dialog that has not been read.
         child: LdDialogButton(
-          label: 'OK',
+          label: 'Overwrite',
           tone: LdDialogTone.danger,
           glyph: LdIcons.fileTransfer,
           onPressed: () {},
@@ -281,12 +284,14 @@ Widget _deleteDialog() {
       title: 'Delete',
       glyph: LdIcons.trash,
       tone: C.bad,
-      subtitle: 'Chemline Natural Bridge',
     ),
     onSubmit: () {},
     onCancel: () {},
-    // No body: the title is the whole dialog, which is how
-    // `deleteConfirmDialog` builds it.
+    // The machine goes in the body, in the data face, exactly as the restart
+    // confirmation beside it puts its machine there. It used to ride in the
+    // title as a subtitle, which made this the one dialog in the product with
+    // no body and its own framing.
+    content: const LdDialogIdentity('Chemline Natural Bridge'),
     actions: [
       LdDialogButton(label: 'Cancel', glyph: LdIcons.close, onPressed: () {}),
       LdDialogButton(
@@ -303,17 +308,19 @@ Widget _deleteDialog() {
 Widget _errorDialog() {
   return LdDialog(
     width: DialogSkin.width,
-    onSubmit: () {},
-    onCancel: () {},
-    content: const LdDialogMessage(
+    title: const LdDialogTitle(
       title: 'Connection Error',
-      text: 'Failed to connect to the remote machine: the connection was reset '
-          'by the relay.',
       glyph: LdIcons.alert,
       tone: C.bad,
     ),
+    onSubmit: () {},
+    onCancel: () {},
+    content: const LdDialogMessage(
+      text: 'Failed to connect to the remote machine: the connection was reset '
+          'by the relay.',
+    ),
     actions: [
-      LdDialogButton(label: 'Cancel', onPressed: () {}),
+      LdDialogButton(label: 'Cancel', glyph: LdIcons.close, onPressed: () {}),
       LdDialogButton(
         label: 'Reconnect',
         tone: LdDialogTone.primary,
@@ -329,13 +336,12 @@ Widget _errorDialog() {
 Widget _elevationDialog() {
   return LdDialog(
     width: DialogSkin.width,
+    title: const LdDialogTitle(title: 'Privacy mode', glyph: LdIcons.shield),
     onSubmit: () {},
     onCancel: () {},
     content: const LdDialogMessage(
-      title: 'Privacy mode',
       text: 'The remote window is elevated and cannot be controlled until this '
           'session is elevated too.\n\nRequest elevation from the remote user?',
-      glyph: LdIcons.shield,
     ),
     actions: [
       LdDialogButton(label: 'Wait', glyph: DialogGlyphs.waiting, onPressed: () {}),
@@ -503,6 +509,46 @@ Widget _elevationFormDialog() {
         label: 'OK',
         tone: LdDialogTone.primary,
         glyph: DialogGlyphs.check,
+        onPressed: () {},
+      ),
+    ],
+  );
+}
+
+/// `FfiModel._handleScreenshot` — the session window's screenshot prompt, and
+/// the dialog that made the case for reskinning `CustomAlertDialog` and
+/// `dialogButton` themselves rather than one call site at a time. A live
+/// capture of it showed three identical filled violet Material slabs under no
+/// header at all.
+///
+/// Built here exactly as those two now build it. The call site passes
+/// `title: null` and puts its heading inside `msgboxContent`, which
+/// `CustomAlertDialog` lifts into the frame's own title row; the type
+/// `custom-nook-nocancel-hasclose` matches no entry in the mark table, so the
+/// header carries no glyph. The width is `contentBoxConstraints`' default 500.
+/// The tones are what `dialogButton` reads off the labels: "Save as" is the
+/// primary, the clipboard is the second way to take the same shot, and Cancel
+/// is dismissive whatever the caller passed.
+///
+/// Strings are what `translate` returns with the default language;
+/// `screenshot-action-tip` is src/lang/en.rs:254.
+Widget _screenshotDialog() {
+  return LdDialog(
+    width: 500,
+    title: const LdDialogTitle(title: 'Take screenshot'),
+    content: const LdDialogMessage(
+      text: 'Please select how to continue with the screenshot.',
+    ),
+    actions: [
+      LdDialogButton(label: 'Cancel', glyph: LdIcons.close, onPressed: () {}),
+      LdDialogButton(
+          label: 'Copy to clipboard',
+          glyph: LdIcons.clipboard,
+          onPressed: () {}),
+      LdDialogButton(
+        label: 'Save as...',
+        tone: LdDialogTone.primary,
+        glyph: LdIcons.fileTransfer,
         onPressed: () {},
       ),
     ],
@@ -689,6 +735,17 @@ void main() {
       const Size(1560, 660),
     );
     await _shoot(tester, 'dialog-forms');
+  });
+
+  testWidgets('dialogs: the raw path, reskinned at the source', (tester) async {
+    await _pump(
+      tester,
+      _desk([
+        _captioned('a screenshot, and what to do with it', _screenshotDialog()),
+      ]),
+      const Size(700, 420),
+    );
+    await _shoot(tester, 'dialog-screenshot');
   });
 
   testWidgets('dialogs: an answer that cannot be given yet', (tester) async {

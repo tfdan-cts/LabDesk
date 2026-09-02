@@ -37,6 +37,43 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
   final _svcIsUsingPublicServer = true.obs;
   Timer? _updateTimer;
 
+  // The two links this widget offers used to be InkWells, which is the one
+  // Material object left on the console's status line: a rectangular ink wash
+  // spreading out of the tap point across a row of 14px text. The console
+  // states hover with colour, so the hover is held here instead. Nothing the
+  // widget says, or the states it says it in, changes.
+  bool _hoverStart = false;
+  bool _hoverSetup = false;
+
+  /// A link drawn the console's way: underlined, and lit to the surface's own
+  /// accent while the pointer is on it.
+  Widget _link(
+    String label, {
+    required bool hovered,
+    required ValueChanged<bool> onHover,
+    required VoidCallback onTap,
+  }) {
+    final accent = Theme.of(context).colorScheme.primary;
+    final color = hovered ? accent : DefaultTextStyle.of(context).style.color;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => onHover(true),
+      onExit: (_) => onHover(false),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: em,
+            color: color,
+            decoration: TextDecoration.underline,
+            decorationColor: color,
+          ),
+        ),
+      ),
+    );
+  }
+
   double get em => 14.0;
   double? get height => bind.isIncomingOnly() ? null : em * 3;
 
@@ -68,14 +105,14 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
     final isIncomingOnly = bind.isIncomingOnly();
     startServiceWidget() => Offstage(
           offstage: !_svcStopped.value,
-          child: InkWell(
-                  onTap: () async {
-                    await start_service(true);
-                  },
-                  child: Text(translate("Start service"),
-                      style: TextStyle(
-                          decoration: TextDecoration.underline, fontSize: em)))
-              .marginOnly(left: em),
+          child: _link(
+            translate("Start service"),
+            hovered: _hoverStart,
+            onHover: (v) => setState(() => _hoverStart = v),
+            onTap: () async {
+              await start_service(true);
+            },
+          ).marginOnly(left: em),
         );
 
     setupServerWidget() => Flexible(
@@ -88,20 +125,11 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
               children: [
                 Text(', ', style: TextStyle(fontSize: em)),
                 Flexible(
-                  child: InkWell(
+                  child: _link(
+                    translate('setup_server_tip'),
+                    hovered: _hoverSetup,
+                    onHover: (v) => setState(() => _hoverSetup = v),
                     onTap: onUsePublicServerGuide,
-                    child: Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            translate('setup_server_tip'),
-                            style: TextStyle(
-                                decoration: TextDecoration.underline,
-                                fontSize: em),
-                          ),
-                        ),
-                      ],
-                    ),
                   ),
                 )
               ],

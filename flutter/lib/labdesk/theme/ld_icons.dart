@@ -346,6 +346,25 @@ class LdIcons {
   static const home = 'M3.5 11.25L12 4l8.5 7.25 M5.75 9.5V19a1 1 0 0 0 1 1h10.5'
       'a1 1 0 0 0 1-1V9.5 M9.75 20v-5.5h4.5V20';
   static const resume = 'M8.5 5.75l10 6.25-10 6.25z';
+
+  /// An explanation the operator has not asked for. The ring is [recent]'s
+  /// ring, to the unit, so the two round glyphs in the set are the same circle
+  /// rather than two circles drawn a fortnight apart.
+  static const info = 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17z '
+      'M12 11v5.5 M12 7.75h.01';
+
+  /// A still taken off the remote display: the picture, not the camera.
+  /// [camera] is the far machine's webcam being watched and [record] is the
+  /// session being written, so neither can stand for a screenshot without
+  /// saying something the action does not do.
+  static const screenshot =
+      'M4.5 5.5h15a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-11'
+      'a1 1 0 0 1 1-1z M7.75 9h.01 M3.5 15.5l4.5-4.5 4 4 2.5-2.5 6 6';
+
+  /// Waiting. A bare three-quarter arc on [recent]'s circle, spun by
+  /// [LdSpinner]. No arrowhead: an arrow makes it [refresh], which is a thing
+  /// the operator can ask for rather than a thing that is happening.
+  static const spinner = 'M12 3.5a8.5 8.5 0 1 0 8.5 8.5';
 }
 
 /// Renders one glyph from [LdIcons].
@@ -388,4 +407,40 @@ class LdIcon extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The console's busy mark.
+///
+/// A Material `CircularProgressIndicator` is one of the most recognisable
+/// objects the framework draws — a butt-capped arc that stretches and shrinks
+/// as it turns — and it was appearing on buttons and rows that had otherwise
+/// been redrawn glyph by glyph. This is the set's own arc, at the set's stroke
+/// and cap, turning at a constant rate.
+class LdSpinner extends StatefulWidget {
+  const LdSpinner({super.key, this.size = 14, this.color});
+
+  final double size;
+  final Color? color;
+
+  @override
+  State<LdSpinner> createState() => _LdSpinnerState();
+}
+
+class _LdSpinnerState extends State<LdSpinner> with SingleTickerProviderStateMixin {
+  late final AnimationController _turn = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _turn.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => RotationTransition(
+        turns: _turn,
+        child: LdIcon(LdIcons.spinner, size: widget.size, color: widget.color),
+      );
 }

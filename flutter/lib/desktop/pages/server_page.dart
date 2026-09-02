@@ -612,8 +612,9 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
 
   /// One permission, as a labelled row that states its own condition.
   ///
-  /// The tooltip keeps the exact message the tile carried, because it is the
-  /// one place the full label survives when the row has to elide it.
+  /// The message the tile carried is kept, and is now what the row is called
+  /// to a screen reader rather than something painted over the two rows under
+  /// it.
   Widget buildPermissionIcon(bool enabled, String glyph, Function(bool)? onTap,
       String tooltipText,
       {required bool canModify}) {

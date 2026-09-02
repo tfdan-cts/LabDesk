@@ -118,62 +118,23 @@ Widget ldButton(
       busy: busy,
     );
 
-/// `msgboxContent`'s own translation rules, carried over unchanged so that not
-/// one string moves: a "Failed: reason" line is translated a clause at a time,
-/// and a message whose first word is a `_tip` key is translated in two halves.
-String _msgboxText(String text) {
-  if (text.indexOf('Failed') == 0 && text.indexOf(': ') > 0) {
-    List<String> words = text.split(': ');
-    for (var i = 0; i < words.length; ++i) {
-      words[i] = translate(words[i]);
-    }
-    return words.join(': ');
-  }
-  List<String> words = text.split(' ');
-  if (words.length > 1 && words[0].endsWith('_tip')) {
-    words[0] = translate(words[0]);
-    final rest = text.substring(words[0].length + 1);
-    return '${words[0]} ${translate(rest)}';
-  }
-  return translate(text);
-}
-
-/// What kind of thing a message is, in the console's own marks.
+/// The header of a dialog whose whole content is something the product has to
+/// say — the same [LdDialogTitle] row every other dialog opens with, so a
+/// message box is not the one modal in the product with no header.
 ///
-/// The same set `msgboxIcon` drew, at 19 pixels instead of 50: an icon three
-/// lines tall is the loudest thing in the dialog and it is never the most
-/// important one. Red is reserved for a failure, exactly as it was.
-(String?, Color) _msgboxMark(String type) {
-  if (type.contains("error") || type == "re-input-password") {
-    return (LdIcons.alert, C.bad);
-  }
-  if (type.contains("success")) return (DialogGlyphs.check, C.ok);
-  if (type == "wait-uac" || type == "wait-remote-accept-nook") {
-    return (DialogGlyphs.waiting, C.accent);
-  }
-  if (type == 'on-uac' || type == 'on-foreground-elevated') {
-    return (LdIcons.shield, C.accent);
-  }
-  if (type == "input-password" || type == "custom-os-password") {
-    return (LdIcons.lock, C.accent);
-  }
-  if (type.contains('info')) return (DialogGlyphs.info, C.accent);
-  return (null, C.accent);
-}
+/// The mark table and the translation rules live on [LdMsgboxContent] in
+/// common.dart, because the raw `msgBox` path needs exactly the same two and a
+/// second copy of them here is a second copy that drifts.
+Widget? ldMessageTitle(String type, String title) =>
+    LdMsgboxContent(type, title, '').header();
 
 /// The body of a dialog whose whole content is something the product has to
-/// say. Replaces `msgboxContent`.
-Widget ldMessage(String type, String title, String text, {String? detail}) {
-  final mark = _msgboxMark(type);
-  return LdDialogMessage(
-    title: translate(title),
-    text: _msgboxText(text),
-    glyph: mark.$1,
-    tone: mark.$2,
-    detail: detail,
-    onLinkTap: (url) => launchUrl(Uri.parse(url)),
-  );
-}
+/// say. Replaces `msgboxContent`. Pairs with [ldMessageTitle].
+Widget ldMessage(String text, {String? detail}) => LdDialogMessage(
+      text: ldMsgboxText(text),
+      detail: detail,
+      onLinkTap: (url) => launchUrl(Uri.parse(url)),
+    );
 
 void clientClose(SessionID sessionId, FFI ffi) async {
   if (allowAskForNoteAtEndOfConnection(ffi, true)) {
@@ -1032,7 +993,8 @@ void wrongPasswordDialog(SessionID sessionId,
     }
 
     return ldDialog(
-        content: ldMessage(type, title, text),
+        title: ldMessageTitle(type, title),
+        content: ldMessage(text),
         onSubmit: submit,
         onCancel: cancel,
         actions: [
@@ -1286,7 +1248,8 @@ void showWaitUacDialog(
   dialogManager.show(
       tag: '$sessionId-wait-uac',
       (setState, close, context) => ldDialog(
-            content: ldMessage(type, 'Wait', 'wait_accept_uac_tip'),
+            title: ldMessageTitle(type, 'Wait'),
+            content: ldMessage('wait_accept_uac_tip'),
             actions: [
               ldButton(
                 'OK',
@@ -1435,7 +1398,8 @@ void showOnBlockDialog(
     }
 
     return ldDialog(
-      content: ldMessage(type, title,
+      title: ldMessageTitle(type, title),
+      content: ldMessage(
           "${translate(text)}${type.contains('uac') ? '\n' : '\n\n'}${translate('request_elevation_tip')}"),
       actions: [
         ldButton('Wait', glyph: DialogGlyphs.waiting, onPressed: close),
@@ -1459,7 +1423,8 @@ void showElevationError(SessionID sessionId, String type, String title,
     }
 
     return ldDialog(
-      content: ldMessage(type, title, text),
+      title: ldMessageTitle(type, title),
+      content: ldMessage(text),
       actions: [
         ldButton('Cancel', glyph: LdIcons.close, onPressed: () {
           close();
@@ -1494,9 +1459,8 @@ void showWaitAcceptDialog(SessionID sessionId, String type, String title,
     }
 
     return ldDialog(
+      title: ldMessageTitle(type, 'Waiting for approval at $name'),
       content: ldMessage(
-        type,
-        'Waiting for approval at $name',
         'Someone at $name has to accept this session before anything shows here.',
         detail: '$name did not take a password: it has no permanent password '
             'set, or it approves every session by hand. To connect unattended, '
@@ -1931,15 +1895,18 @@ Future<bool?> _showConnEndAuditDialogCloseCanceled({
           glyph: LdIcons.close, onPressed: isInProgress ? null : cancel));
     }
 
-    Widget content;
+    final Widget? header;
+    final Widget content;
     if (closedByControlling) {
-      content =
-          ldMessage('info', 'Close', 'Are you sure to close the connection?');
+      header = ldMessageTitle('info', 'Close');
+      content = ldMessage('Are you sure to close the connection?');
     } else {
-      content = ldMessage(type, title ?? '', text ?? '');
+      header = ldMessageTitle(type, title ?? '');
+      content = ldMessage(text ?? '');
     }
 
     return ldDialog(
+      title: header,
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1982,8 +1949,8 @@ void showConfirmSwitchSidesDialog(
     }
 
     return ldDialog(
-      content: ldMessage('info', 'Switch Sides',
-          'Please confirm if you want to share your desktop?'),
+      title: ldMessageTitle('info', 'Switch Sides'),
+      content: ldMessage('Please confirm if you want to share your desktop?'),
       actions: [
         ldButton('Cancel', glyph: LdIcons.close, onPressed: close),
         ldButton('OK',
@@ -2541,11 +2508,12 @@ void showWindowsSessionsDialog(
     }
 
     return ldDialog(
+      title: ldMessageTitle(type, title),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ldMessage(type, title, text).marginOnly(bottom: 18),
+          ldMessage(text).marginOnly(bottom: 18),
           // Which signed-in account on the far machine is about to be taken
           // over. The list is the decision, so it is drawn by the settings
           // select rather than by a Material combo.

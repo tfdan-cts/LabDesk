@@ -314,6 +314,7 @@ class _FileManagerPageState extends State<FileManagerPage>
         );
 
     return FmPane(
+      rail: true,
       children: [
         FmPaneHeader(
           title: translate('Transfer file'),
@@ -591,17 +592,13 @@ class _FileManagerViewState extends State<FileManagerView> {
                 ],
               ),
               const SizedBox(height: 6),
-              // What can be done to what is in it. The two panes mirror each
-              // other, so the send button always sits on the side the files
-              // leave by.
+              // What can be done to what is in it. The two panes are built the
+              // same way round: mirroring them put Send and Receive nose to
+              // nose across the gap, which is a gutter of arrows, not a layout.
               Row(
-                textDirection: isLocal ? TextDirection.ltr : TextDirection.rtl,
                 children: [
                   Expanded(
                     child: Row(
-                      mainAxisAlignment: isLocal
-                          ? MainAxisAlignment.start
-                          : MainAxisAlignment.end,
                       children: [
                         FmToolButton(
                           glyph: FmGlyphs.home,
@@ -761,11 +758,9 @@ class _FileManagerViewState extends State<FileManagerView> {
                         label: isLocal
                             ? translate('Send')
                             : translate(isWeb ? 'Download' : 'Receive'),
-                        glyph: LdIcons.arrowRight,
-                        // The arrow points at the machine the files are going
-                        // to, which is the other pane.
-                        quarterTurns: isLocal ? 0 : 2,
-                        reversed: !isLocal,
+                        // The same mark on both, because it is the same act:
+                        // the word is what says which way it goes.
+                        glyph: LdIcons.fileTransfer,
                         onPressed: SelectedItems.valid(selectedItems.items)
                             ? () {
                                 final otherSideData =

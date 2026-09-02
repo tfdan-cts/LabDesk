@@ -13,6 +13,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -53,6 +54,7 @@ Widget _tab({
   required bool hover,
   bool showDivider = true,
   bool closeVisible = false,
+  Key? closeKey,
 }) {
   final glyphColor = TabSkin.glyphColor(selected, hover);
   return TabSurface(
@@ -62,7 +64,10 @@ Widget _tab({
     // Every session window marks its current tab; the main window does not.
     showIndicator: true,
     showDivider: showDivider,
-    close: TabCloseButton(visible: closeVisible, onClose: () {}),
+    close: KeyedSubtree(
+      key: closeKey,
+      child: TabCloseButton(visible: closeVisible, onClose: () {}),
+    ),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       Padding(
         padding: const EdgeInsets.only(right: TabSkin.glyphGap),
@@ -95,7 +100,7 @@ Widget _windowButton(String glyph, {bool hover = false, bool close = false}) {
   );
 }
 
-Widget _bar() {
+Widget _bar(Key closeKey) {
   return SizedBox(
     height: _barHeight,
     child: ColoredBox(
@@ -116,7 +121,9 @@ Widget _bar() {
           hover: false,
           showDivider: false,
         ),
-        // Under the cursor, with its close affordance showing.
+        // Under the cursor, with its close affordance showing. The pointer is
+        // parked on the affordance itself in the shot, which is the only state
+        // in which anything in this strip is allowed to go red.
         _tab(
           name: 'Homebox',
           platform: LdIcons.linux,
@@ -124,6 +131,7 @@ Widget _bar() {
           selected: false,
           hover: true,
           closeVisible: true,
+          closeKey: closeKey,
         ),
         _tab(
           name: 'mac-mini-render',
@@ -138,9 +146,10 @@ Widget _bar() {
         const SizedBox(width: 10),
         _windowButton(LdIcons.minus),
         _windowButton(LdIcons.maximize),
-        // Held under the cursor, because the one destructive control in the
-        // chrome is worth seeing in the state that says so.
-        _windowButton(LdIcons.close, hover: true, close: true),
+        // At rest, like every other window button. It carries red on hover and
+        // at no other time; drawn hovered here it read as a strip that ships
+        // with a red block in the corner.
+        _windowButton(LdIcons.close, close: true),
       ]),
     ),
   );
@@ -155,6 +164,8 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
+    const closeKey = ValueKey('tab-close');
+
     await tester.pumpWidget(RepaintBoundary(
       key: const ValueKey('shot'),
       child: MaterialApp(
@@ -163,13 +174,33 @@ void main() {
         home: Scaffold(
           backgroundColor: C.bg,
           body: Column(children: [
-            _bar(),
+            _bar(closeKey),
             // The plane the current tab opens onto.
-            Expanded(child: Container(color: C.bg)),
+            Expanded(
+              child: Container(
+                color: C.bg,
+                alignment: Alignment.topLeft,
+                padding: const EdgeInsets.only(left: 12, top: 14),
+                child: Text(
+                  'the pointer is on the second tab’s close mark — the one red '
+                  'thing in the strip, and only while it is pointed at',
+                  style: C.micro(color: C.textFaint),
+                ),
+              ),
+            ),
           ]),
         ),
       ),
     ));
+    await tester.pumpAndSettle();
+
+    // Park the pointer on the close mark itself: the affordance is quiet on a
+    // hovered tab and only answers in red once the cursor is on it, and a shot
+    // that never puts it there cannot show the difference.
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byKey(closeKey)));
     await tester.pumpAndSettle();
     // The hover planes are animated, so let them land before the shot.
     await tester.pump(C.fast);

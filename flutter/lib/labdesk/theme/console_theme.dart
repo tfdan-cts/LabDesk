@@ -59,6 +59,25 @@ class C {
   static const bad = Color(0xFFF06A6A);
   static const idle = Color(0xFF6B6B7A);
 
+  /// One focus ring for the whole console, on buttons and on marks alike.
+  ///
+  /// There were two: a button rang in [text] while a checkbox rang in [accent],
+  /// so the keyboard spoke one language on the answers at the foot of a dialog
+  /// and another on the option above them. The accent is the one that survives —
+  /// it is already the console's "this is the current thing" colour.
+  static const focusRing = accent;
+  static const focusRingWidth = 1.8;
+
+  /// One disabled rule for the whole console: no fill, the frame at 60% of the
+  /// [hairline], and everything on it — label, glyph, knob, tick — in
+  /// [textFaint]. It holds for the toggle, the checkbox, the radio and every
+  /// button.
+  ///
+  /// Nothing disabled keeps the accent. A dimmed accent is still the accent: a
+  /// locked toggle painted in [accentDim] sat one shade off the live one and
+  /// read as available at the glance an operator actually gives it.
+  static final disabledBorder = hairline.withOpacity(0.6);
+
   static const radius = 8.0;
   static const radiusSm = 6.0;
   static final rounded = BorderRadius.circular(radius);
@@ -371,9 +390,9 @@ class _LdToggleState extends State<LdToggle> {
     final enabled = widget.enabled;
     final tappable = widget.onChanged != null && enabled;
     final on = widget.value;
-    final track = !enabled
-        ? (on ? C.accentDim.withOpacity(0.35) : C.surface)
-        : (on ? C.accent : C.surfaceHi);
+    // [C.disabledBorder]'s rule: a locked toggle drops the fill entirely rather
+    // than dimming it. The knob's position is what still says which way it is.
+    final track = !enabled ? Colors.transparent : (on ? C.accent : C.surfaceHi);
     final knob = !enabled ? C.textFaint : (on ? C.bg : C.textMuted);
 
     Widget pill = AnimatedContainer(
@@ -386,9 +405,11 @@ class _LdToggleState extends State<LdToggle> {
         color: track,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: on
-              ? Colors.transparent
-              : (_hover && tappable ? C.textFaint : C.hairline),
+          color: !enabled
+              ? C.disabledBorder
+              : on
+                  ? Colors.transparent
+                  : (_hover && tappable ? C.textFaint : C.hairline),
         ),
       ),
       child: AnimatedAlign(
@@ -471,15 +492,15 @@ class LdCheckbox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fill = on
-        ? (enabled ? C.accent : C.accentDim)
-        : Colors.transparent;
-    final border = on
-        ? Colors.transparent
-        : !enabled
-            ? C.hairline.withOpacity(0.6)
+    // [C.disabledBorder]'s rule, and the same 1.4 ring the radio carries so the
+    // two marks are one family at one size.
+    final fill = on && enabled ? C.accent : Colors.transparent;
+    final border = !enabled
+        ? C.disabledBorder
+        : on
+            ? C.accent
             : focused
-                ? C.accent
+                ? C.focusRing
                 : (hover ? C.textFaint : C.hairline);
 
     return AnimatedContainer(
@@ -490,13 +511,17 @@ class LdCheckbox extends StatelessWidget {
       decoration: BoxDecoration(
         color: fill,
         borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: border),
+        border: Border.all(
+            color: border,
+            width: focused && enabled ? C.focusRingWidth : 1.4),
       ),
-      // The tick stays the near-black cut-out even when the box is disabled.
-      // Greying it as well put a #6B6B7A mark on a #5B4FBE fill, which is a
-      // tick nobody can see: a locked option still has to say which way it is.
+      // A locked option still has to say which way it is, so the tick survives
+      // being disabled — in [C.textFaint] on no fill, because the disabled rule
+      // takes the accent away rather than dimming it.
       child: on
-          ? const Center(child: LdIcon(LdIcons.check, size: 12, color: C.bg))
+          ? Center(
+              child: LdIcon(LdIcons.check,
+                  size: 12, color: enabled ? C.bg : C.textFaint))
           : null,
     );
   }

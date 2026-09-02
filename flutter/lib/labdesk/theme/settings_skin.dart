@@ -481,6 +481,11 @@ class _LdRadioRowState extends State<LdRadioRow> {
 }
 
 /// The ring itself, so a radio drawn outside a row still matches one.
+///
+/// One size everywhere, and it is [LdCheckbox.size] with the same 1.4 ring: a
+/// radio and a checkbox sit in the same column of a settings page and in the
+/// same dialog body, so a radio a couple of pixels off the tick beside it reads
+/// as a mistake rather than as a different kind of choice.
 class LdRadioMark extends StatelessWidget {
   const LdRadioMark({super.key, required this.selected, this.enabled = true});
 
@@ -489,15 +494,17 @@ class LdRadioMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final on = selected && enabled;
     return AnimatedContainer(
       duration: C.fast,
-      width: 16,
-      height: 16,
+      width: LdCheckbox.size,
+      height: LdCheckbox.size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(
-          color: selected ? (enabled ? C.accent : C.accentDim) : C.hairline,
+          // [C.disabledBorder]'s rule: a locked radio keeps no accent at all.
+          color: !enabled
+              ? C.disabledBorder
+              : (selected ? C.accent : C.hairline),
           width: 1.4,
         ),
       ),
@@ -508,7 +515,9 @@ class LdRadioMark extends StatelessWidget {
           height: selected ? 8 : 0,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: on ? C.accent : (selected ? C.accentDim : Colors.transparent),
+            color: !selected
+                ? Colors.transparent
+                : (enabled ? C.accent : C.textFaint),
           ),
         ),
       ),
@@ -710,31 +719,32 @@ class _LdButtonState extends State<LdButton> {
   @override
   Widget build(BuildContext context) {
     final enabled = widget.onPressed != null;
-    final (bg, fg, border) = switch (widget.kind) {
-      // The shared filled primary. One tint, one foreground, same as the
-      // installer's confirm and Connect's go.
-      LdButtonKind.primary => (
-          !enabled
-              ? C.surface
-              : _down
-                  ? C.primaryFillDown
-                  : (_hover ? C.primaryFillHover : C.primaryFill),
-          enabled ? C.primaryFg : C.textFaint,
-          Colors.transparent,
-        ),
-      LdButtonKind.danger => (
-          !enabled
-              ? C.surface
-              : (_hover ? C.bad.withOpacity(0.16) : Colors.transparent),
-          enabled ? C.bad : C.textFaint,
-          enabled ? C.bad.withOpacity(0.5) : C.hairline,
-        ),
-      LdButtonKind.quiet => (
-          _hover && enabled ? C.surfaceHi : Colors.transparent,
-          !enabled ? C.textFaint : (_hover ? C.text : C.textMuted),
-          enabled && _hover ? C.hairline : C.hairline.withOpacity(0.6),
-        ),
-    };
+    // [C.disabledBorder]'s rule, ahead of the kind: a disabled button of any
+    // rank is an empty frame at the hairline under [C.textFaint]. A disabled
+    // primary that kept a filled slab was still the loudest thing on the row.
+    final (Color bg, Color fg, Color border) = !enabled
+        ? (Colors.transparent, C.textFaint, C.disabledBorder)
+        : switch (widget.kind) {
+            // The shared filled primary. One tint, one foreground, same as the
+            // installer's confirm and Connect's go.
+            LdButtonKind.primary => (
+                _down
+                    ? C.primaryFillDown
+                    : (_hover ? C.primaryFillHover : C.primaryFill),
+                C.primaryFg,
+                Colors.transparent,
+              ),
+            LdButtonKind.danger => (
+                _hover ? C.bad.withOpacity(0.16) : Colors.transparent,
+                C.bad,
+                C.bad.withOpacity(0.5),
+              ),
+            LdButtonKind.quiet => (
+                _hover ? C.surfaceHi : Colors.transparent,
+                _hover ? C.text : C.textMuted,
+                _hover ? C.hairline : C.hairline.withOpacity(0.6),
+              ),
+          };
 
     Widget button = MouseRegion(
       cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,

@@ -12,6 +12,10 @@ import 'ld_icons.dart';
 /// something needs deciding: a password, a file that already exists, a machine
 /// about to be restarted. So the rules here are stricter than anywhere else:
 ///
+///   - One frame, for all of them: a title row, a hairline, the body, and the
+///     answers in a footer. A message box is not a special shape and neither is
+///     a two-word confirmation — the machine being deleted goes in the body
+///     like every other thing a dialog is about.
 ///   - The question is the first thing on the surface and it is set at heading
 ///     weight. The consequence sits directly under it in full sentences, not
 ///     behind a tooltip or a "details" disclosure.
@@ -171,12 +175,14 @@ class LdDialog extends StatelessWidget {
     this.width = DialogSkin.width,
   });
 
-  /// Usually an [LdDialogTitle]. Null when the body is an [LdDialogMessage],
-  /// which carries its own heading.
+  /// An [LdDialogTitle]. Every dialog the product raises has one, including the
+  /// ones whose whole body is a sentence: one frame — title row, hairline,
+  /// body, footer — or the operator has to work out which kind of window this
+  /// is before reading it.
   final Widget? title;
 
-  /// Null when the title says the whole thing, which is what a bare
-  /// confirmation is.
+  /// What the title is about. A bare confirmation still puts the machine or the
+  /// file here rather than folding it into the heading.
   final Widget? content;
 
   /// [LdDialogButton]s, in reading order. The last one is the answer.
@@ -301,8 +307,12 @@ class LdDialogActions extends StatelessWidget {
       );
 }
 
-/// The heading of a dialog that is not a message: what is about to happen, and
-/// the mark that says what kind of thing it is.
+/// The heading of a dialog: what is about to happen, and the mark that says
+/// what kind of thing it is. Every dialog gets one, message boxes included.
+///
+/// The mark is 19 pixels rather than the 50 Material spent on it: an icon three
+/// lines tall is the loudest thing in the dialog and it is never the most
+/// important one.
 class LdDialogTitle extends StatelessWidget {
   const LdDialogTitle({
     super.key,
@@ -318,8 +328,9 @@ class LdDialogTitle extends StatelessWidget {
   /// A path from [LdIcons] or [DialogGlyphs].
   final String? glyph;
 
-  /// Only ever [C.accent] or [C.bad]. Red here means the dialog is about to
-  /// take something away.
+  /// [C.accent] unless the dialog is reporting something that already has a
+  /// colour: [C.bad] when it is about to take something away or is telling the
+  /// operator a thing failed, [C.ok] when it worked.
   final Color tone;
 
   /// Already translated.
@@ -353,33 +364,27 @@ class LdDialogTitle extends StatelessWidget {
   }
 }
 
-/// A dialog whose whole body is something the product has to say: a connection
-/// failed, the far end is busy, the machine wants elevating.
+/// The body of a dialog whose whole content is something the product has to
+/// say: a connection failed, the far end is busy, the machine wants elevating.
 ///
-/// The question is the heading and the consequence is directly beneath it, both
-/// selectable — half of these are error strings somebody is about to paste into
-/// a ticket. The mark on the left is 19 pixels rather than the 50 Material
-/// spent on it: an icon that is three lines tall is the loudest thing in the
-/// dialog, and it is never the most important one.
+/// The sentences only. The heading and its mark are the dialog's own
+/// [LdDialogTitle], drawn in the same header row above the same hairline as
+/// every other dialog in the product — these used to carry their own heading
+/// inside the body, which is why a message box was the one modal with no header
+/// and a "Delete" confirmation was the one with no body.
+///
+/// Selectable, because half of these are error strings somebody is about to
+/// paste into a ticket.
 class LdDialogMessage extends StatelessWidget {
   const LdDialogMessage({
     super.key,
-    required this.title,
     required this.text,
-    this.glyph,
-    this.tone = C.accent,
     this.detail,
     this.onLinkTap,
   });
 
   /// Already translated.
-  final String title;
-
-  /// Already translated.
   final String text;
-
-  final String? glyph;
-  final Color tone;
 
   /// A machine, a path, an id: set in the data face and boxed, because it is
   /// the thing being checked rather than the thing being read.
@@ -419,31 +424,15 @@ class LdDialogMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        if (glyph != null)
-          Padding(
-            padding: const EdgeInsets.only(right: 12, top: 2),
-            child: LdIcon(glyph!, size: 19, color: tone),
-          ),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (title.isNotEmpty) ...[
-                SelectableText(title, style: C.h1()),
-                const SizedBox(height: 8),
-              ],
-              if (text.isNotEmpty) _body(),
-              if (detail != null && detail!.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                LdDialogIdentity(detail!),
-              ],
-            ],
-          ),
-        ),
+        if (text.isNotEmpty) _body(),
+        if (detail != null && detail!.isNotEmpty) ...[
+          if (text.isNotEmpty) const SizedBox(height: 12),
+          LdDialogIdentity(detail!),
+        ],
       ],
     );
   }
@@ -762,6 +751,11 @@ class _LdFieldButtonState extends State<LdFieldButton> {
 }
 
 /// The box itself, so a tick drawn outside a row still matches one.
+///
+/// The console's [LdCheckbox] under this file's name. It used to be a second
+/// drawing of the same idea — 17 pixels at a 4 radius against the console's 16
+/// at a 5 — which is how a product ends up with two checkboxes again after
+/// consolidating three.
 class LdCheckMark extends StatelessWidget {
   const LdCheckMark(
       {super.key,
@@ -774,28 +768,8 @@ class LdCheckMark extends StatelessWidget {
   final bool hover;
 
   @override
-  Widget build(BuildContext context) => AnimatedContainer(
-        duration: C.fast,
-        curve: Curves.easeOut,
-        width: 17,
-        height: 17,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: value && enabled ? C.accent : Colors.transparent,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(
-            color: !enabled
-                ? C.hairline
-                : value
-                    ? C.accent
-                    : (hover ? C.textMuted : C.textFaint),
-            width: 1.4,
-          ),
-        ),
-        child: value && enabled
-            ? const LdIcon(DialogGlyphs.check, size: 12, color: C.bg)
-            : null,
-      );
+  Widget build(BuildContext context) =>
+      LdCheckbox(on: value, enabled: enabled, hover: hover);
 }
 
 /// One thing the operator is agreeing to alongside the answer: remember this
@@ -965,17 +939,23 @@ class _LdDialogButtonState extends State<LdDialogButton> {
                     : tint.withOpacity(lit ? 0.22 : 0.12),
             borderRadius: C.roundedSm,
             border: Border.all(
-              // The focus ring is the console's text colour, never its accent:
-              // an accent ring around Cancel would say the wrong thing about
-              // which button it is.
+              // [C.focusRing]: the one ring the console draws round whatever
+              // the keyboard is on, the same on this button as on the checkbox
+              // above it. Tone is carried by the fill and the glyph, so the
+              // ring is free to mean only "this is where the keyboard is".
               color: _focus && enabled
-                  ? C.text
+                  ? C.focusRing
                   : !enabled
-                      ? C.hairline
+                      ? C.disabledBorder
                       : neutral
                           ? C.hairline
                           : tint.withOpacity(_hover ? 0.9 : 0.65),
-              width: _focus && enabled ? 1.8 : (neutral ? 1 : 1.4),
+              // A disabled answer drops to the hairline weight as well as the
+              // hairline colour: a 1.4 frame on a dead OK made it the heaviest
+              // outline at the foot of the dialog.
+              width: _focus && enabled
+                  ? C.focusRingWidth
+                  : (enabled && !neutral ? 1.4 : 1),
             ),
           ),
           child: Row(
