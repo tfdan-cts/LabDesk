@@ -27,6 +27,9 @@ Rewrite 'libs/portable/Cargo.toml' '(?m)^version = "[^"]+"' "version = `"$bare`"
 Rewrite '.github/workflows/flutter-build.yml' '(?m)^  VERSION: "[^"]+"' "  VERSION: `"$Version`""
 Rewrite 'appimage/AppImageBuilder-x86_64.yml' '(?m)^(\s+version:)[^\r\n]*' "`$1 $bare"
 Rewrite 'appimage/AppImageBuilder-aarch64.yml' '(?m)^(\s+version:)[^\r\n]*' "`$1 $bare"
+foreach ($spec in 'res/rpm.spec', 'res/rpm-flutter.spec', 'res/rpm-suse.spec', 'res/rpm-flutter-suse.spec') {
+  Rewrite $spec '(?m)^Version:\s+[^\r\n]*' "Version:    $bare"
+}
 # The lockfiles record our own crates' versions too; cargo would rewrite them on the next build,
 # but a --locked build must not be the thing that discovers the mismatch.
 Rewrite 'Cargo.lock' '(?m)^(name = "rustdesk"\r?\nversion = )"[^"]+"' "`$1`"$bare`""

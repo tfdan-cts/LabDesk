@@ -11,7 +11,7 @@ LabDesk has a version of its own. It is not the version of the RustDesk core it 
   - `PATCH` for a fix that changes no interface and no stored data.
   - The build number (`+N`) increases by one on every version change and is never reused. It is
     what Windows installer upgrade detection compares.
-- **One number, everywhere it is read.** The version is written in five places and they must
+- **One number, everywhere it is read.** The version is written in several places and they must
   agree. `scripts/set-version.ps1 <version>` rewrites all of them; nothing edits them by hand.
 
   | File | Read by |
@@ -21,6 +21,8 @@ LabDesk has a version of its own. It is not the version of the RustDesk core it 
   | `flutter/pubspec.yaml` `version` | the Flutter bundle; the `+N` is the build number |
   | `.github/workflows/flutter-build.yml` `VERSION` | asset names, `LabDesk-<version>-<arch>-install.exe` |
   | `appimage/AppImageBuilder-*.yml` `version` | the AppImage metadata |
+  | `res/rpm*.spec` `Version:` | the `.rpm` package names and metadata |
+  | `Cargo.lock`, `libs/portable/Cargo.lock` | our own crates' entries, so a `--locked` build agrees |
 
 - **A tag is a release.** `v<version>` on the commit that is released, created by the owner when
   the release pull request lands on `master`. A tag is never moved.
@@ -44,5 +46,5 @@ pwsh scripts/set-version.ps1 1.2.1
 ```
 
 The script refuses a version that is not `MAJOR.MINOR.PATCH[-suffix]`, computes the next build
-number from `pubspec.yaml`, rewrites the five files, and prints them for the commit. Add the
+number from `pubspec.yaml`, rewrites every file in the table, and prints them for the commit. Add the
 `CHANGELOG.md` entry in the same commit; the commit subject is `chore(version): 1.2.1`.
