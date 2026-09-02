@@ -8,6 +8,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/labdesk_status_binding.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:get/get.dart';
 
@@ -490,6 +491,9 @@ Future<void> labdeskRefreshStatus() async {
     ids.add(p.id);
   }
   if (ids.isNotEmpty) {
+    // Mark the ask before it goes out, so the console can show it as open
+    // until the server answers or the binding writes it off.
+    labdeskStatus.beginQuery(ids);
     bind.queryOnlines(ids: ids.toList(growable: false));
   }
 }

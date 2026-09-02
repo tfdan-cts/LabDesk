@@ -1477,15 +1477,31 @@ void showElevationError(SessionID sessionId, String type, String title,
 }
 
 void showWaitAcceptDialog(SessionID sessionId, String type, String title,
-    String text, OverlayDialogManager dialogManager) {
+    String text, OverlayDialogManager dialogManager,
+    {String peerId = ''}) {
   dialogManager.dismissAll();
+  // The server sends this when it would not take a password at all: the
+  // machine has no permanent password, or approves every session by hand. The
+  // stock wording ("Prompt / please wait") over a black canvas read as a broken
+  // window. Say what is being waited for and why, and name the machine.
+  final alias = peerId.isEmpty
+      ? ''
+      : bind.mainGetPeerOptionSync(id: peerId, key: 'alias');
+  final name = alias.isNotEmpty ? alias : (peerId.isEmpty ? 'the machine' : peerId);
   dialogManager.show((setState, close, context) {
     onCancel() {
       closeConnection();
     }
 
     return ldDialog(
-      content: ldMessage(type, title, text),
+      content: ldMessage(
+        type,
+        'Waiting for approval at $name',
+        'Someone at $name has to accept this session before anything shows here.',
+        detail: '$name did not take a password: it has no permanent password '
+            'set, or it approves every session by hand. To connect unattended, '
+            'set a permanent password on that machine and save it here.',
+      ),
       actions: [
         ldButton('Cancel', glyph: LdIcons.close, onPressed: onCancel),
       ],

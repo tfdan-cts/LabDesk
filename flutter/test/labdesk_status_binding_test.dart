@@ -87,6 +87,43 @@ void main() {
       expect(binding.samples.last.total, 4);
     });
 
+    test('a poll is due at once, then only after the interval has passed', () {
+      const every = Duration(seconds: 4);
+      expect(binding.isDue(_t(0), every), isTrue);
+
+      binding.beginQuery(['101'], at: _t(0));
+      binding.onOnlineStateEvent(onlines: '101', offlines: '', at: _t(1));
+      expect(binding.isDue(_t(2), every), isFalse);
+      expect(binding.isDue(_t(4), every), isTrue);
+    });
+
+    test('a poll is not due while one is still in flight, until it expires', () {
+      const every = Duration(seconds: 4);
+      binding.onOnlineStateEvent(onlines: '101', offlines: '', at: _t(0));
+      binding.beginQuery(['101'], at: _t(10));
+
+      binding.expireStale(_t(15));
+      expect(binding.isQuerying, isTrue);
+      expect(binding.isDue(_t(15), every), isFalse);
+
+      binding.expireStale(_t(10 + LabDeskStatusBinding.queryTimeout.inSeconds));
+      expect(binding.isQuerying, isFalse);
+      expect(binding.isDue(_t(19), every), isTrue);
+      // Expiry is not a result: the machine keeps what it had.
+      expect(store.stateOf('101').status, LabDeskPeerStatus.online);
+    });
+
+    test('lastResponseAt is when the server last answered, not when we asked', () {
+      expect(binding.lastResponseAt, isNull);
+      binding.beginQuery(['101'], at: _t(0));
+      expect(binding.lastResponseAt, isNull);
+      binding.onOnlineStateEvent(onlines: '101', offlines: '', at: _t(1));
+      expect(binding.lastResponseAt, _t(1));
+      binding.beginQuery(['101'], at: _t(5));
+      binding.onQueryFailedOrTimedOut();
+      expect(binding.lastResponseAt, _t(1));
+    });
+
     test('forgetting a machine clears its history too', () {
       binding.onOnlineStateEvent(onlines: '101', offlines: '', at: _t(0));
       binding.forget('101');
