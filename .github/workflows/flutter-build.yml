@@ -2016,7 +2016,7 @@ jobs:
             export CARGO_INCREMENTAL=0
             export DEB_ARCH=amd64
             python3 ./build.py --flutter --drm --hwcodec --unix-file-copy-paste --skip-cargo
-            for name in rustdesk*??.deb; do
+            for name in labdesk*??.deb; do
               mv "$name" "${name%%.deb}-x86_64.deb"
             done
 
