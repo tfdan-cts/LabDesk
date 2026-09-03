@@ -1167,6 +1167,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
           // outstanding rather than quietly dropped.
           const Offstage(offstage: true, child: DesktopHomePage()),
           Column(children: [
+            _installBanner(),
             _updateBanner(),
             Expanded(child: ConsoleShell(
         machines: machines,
@@ -1233,6 +1234,38 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
           )),
           ]),
         ],
+      ),
+    );
+  }
+
+  /// Running without being installed means no always-on service, no unattended
+  /// access to this machine, and no in-place updates. The stock home page
+  /// carried this card; the console owns it now.
+  Widget _installBanner() {
+    final needsInstall = isWindows && !bind.isDisableInstallation() && !bind.mainIsInstalled();
+    final needsDaemon = isMacOS && bind.mainIsInstalled() && !bind.mainIsInstalledDaemon(prompt: false);
+    if (!needsInstall && !needsDaemon) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.error.withOpacity(0.10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        child: Row(children: [
+          Icon(Icons.shield_outlined, size: 18, color: theme.colorScheme.error),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              needsInstall
+                  ? translate('LabDesk is running without being installed. Install it to run as an always-on service, accept connections while nobody is signed in, and update itself.')
+                  : translate('The background service is not installed. Install it so this machine stays reachable.'),
+              style: theme.textTheme.bodyMedium,
+            ),
+          ),
+          TextButton(
+            onPressed: () => needsInstall ? bind.mainGotoInstall() : bind.mainIsInstalledDaemon(prompt: true),
+            child: Text(translate('Install')),
+          ),
+        ]),
       ),
     );
   }
