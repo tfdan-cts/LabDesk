@@ -1036,7 +1036,9 @@ def main():
             return
         system2('cargo build --locked --release --features ' + features)
         # system2('upx.exe target/release/labdesk.exe')
-        system2('mv target/release/labdesk.exe target/release/LabDesk.exe')
+        # The cargo output already carries the product's name, so the rename this used to do
+        # (rustdesk.exe -> LabDesk.exe) is gone: on Windows it would now differ only in case,
+        # which `mv` refuses as a move onto itself.
         pa = os.environ.get('P')
         if pa:
             # https://certera.com/kb/tutorial-guide-for-safenet-authentication-client-for-code-signing/
@@ -1047,7 +1049,7 @@ def main():
             print('Not signed')
         os.makedirs(res_dir, exist_ok=True)
         system2(
-            f'cp -rf target/release/LabDesk.exe {res_dir}')
+            f'cp -rf target/release/labdesk.exe {res_dir}')
         os.chdir('libs/portable')
         system2('pip3 install -r requirements.txt')
         system2(
