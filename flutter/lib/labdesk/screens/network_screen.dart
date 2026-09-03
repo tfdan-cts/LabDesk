@@ -63,15 +63,17 @@ class NetworkScreen extends StatelessWidget {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (!inbox.enrolled)
+          if (!inbox.enrolled) ...[
             _Card(
               title: 'Not on labnet',
               subtitle: 'Turn on encrypted direct connections under This '
                   'machine first. Labnets are made of machines that have.',
               child: const SizedBox.shrink(),
             ),
+            const SizedBox(height: 16),
+          ],
           if (error.isNotEmpty) ...[
             Text(error, style: C.small(color: C.bad)),
             const SizedBox(height: 12),
@@ -209,8 +211,11 @@ class _LabnetCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (final m in labnet.members)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+            Container(
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: C.hairline)),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 10),
               child: Row(
                 children: [
                   Container(

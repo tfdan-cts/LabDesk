@@ -43,8 +43,8 @@ class LabnetCard extends StatelessWidget {
         ),
       LabnetPhase.error => (
           C.bad,
+          'Could not turn on',
           state.detail,
-          'The direct path could not be set up.',
         ),
     };
     final action = switch (state.phase) {
