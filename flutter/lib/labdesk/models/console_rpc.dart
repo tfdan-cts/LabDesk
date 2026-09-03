@@ -34,6 +34,7 @@ MachineHealth buildMachineHealth({
   required bool connected,
   Map<String, dynamic>? sessionStats,
   Map<String, dynamic>? probe,
+  MetricHistory? history,
 }) {
   Metric known(String label, String? value) => value == null || value.isEmpty
       ? Metric.unavailable(label)
@@ -95,5 +96,6 @@ MachineHealth buildMachineHealth({
     identity: identity,
     session: session,
     remote: remote,
+    history: history,
   );
 }

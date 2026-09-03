@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../common/labdesk_peer_status.dart';
+import '../charts/metric_sparkline.dart';
 import '../models/machine_metrics.dart';
 import '../models/machine_row.dart';
 import '../theme/console_theme.dart';
@@ -133,6 +134,12 @@ class HealthCard extends StatelessWidget {
     };
     final remote = {for (final m in health.remote) m.label: m};
     final session = {for (final m in health.session) m.label: m};
+    final history = health.history;
+    // Sparklines appear for every tile at once or not at all, so the four
+    // never sit at different heights while the first samples arrive.
+    final showHistory = history != null && history.samples.length >= 2;
+    List<MetricPoint>? trail(MetricKind k) =>
+        showHistory ? history.series(k) : null;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
@@ -180,13 +187,13 @@ class HealthCard extends StatelessWidget {
           const SizedBox(height: 14),
           Row(
             children: [
-              _tile(remote['CPU'], 'CPU'),
+              _tile(remote['CPU'], 'CPU', trail(MetricKind.cpu)),
               const SizedBox(width: 10),
-              _tile(remote['Memory'], 'Memory'),
+              _tile(remote['Memory'], 'Memory', trail(MetricKind.memory)),
               const SizedBox(width: 10),
-              _tile(remote['Disk'], 'Disk'),
+              _tile(remote['Disk'], 'Disk', trail(MetricKind.disk)),
               const SizedBox(width: 10),
-              _tile(remote['Uptime'], 'Uptime'),
+              _tile(remote['Uptime'], 'Uptime', showHistory ? const [] : null),
             ],
           ),
           const SizedBox(height: 12),
@@ -221,7 +228,9 @@ class HealthCard extends StatelessWidget {
     return 'Not monitored. Figures appear once monitoring is on.';
   }
 
-  Widget _tile(Metric? m, String label) {
+  /// [trail] is null when the card shows no history row, and empty for a
+  /// tile that has a row but nothing to draw in it (uptime).
+  Widget _tile(Metric? m, String label, List<MetricPoint>? trail) {
     final available = m != null && m.isAvailable;
     return Expanded(
       child: Column(
@@ -265,6 +274,13 @@ class HealthCard extends StatelessWidget {
                   )
                 : null,
           ),
+          if (trail != null) ...[
+            const SizedBox(height: 22),
+            SizedBox(
+              height: 26,
+              child: MetricSparkline(points: trail, label: label),
+            ),
+          ],
         ],
       ),
     );

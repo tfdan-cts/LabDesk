@@ -59,6 +59,7 @@ class MachineHealth {
     this.identity = const [],
     this.session = const [],
     this.remote = const [],
+    this.history,
   });
 
   final String machineId;
@@ -70,6 +71,10 @@ class MachineHealth {
   final List<Metric> identity;
   final List<Metric> session;
   final List<Metric> remote;
+
+  /// What the console has read of this machine over time this session, when
+  /// monitoring is on. Null when there is no history to draw.
+  final MetricHistory? history;
 
   static const empty = MachineHealth(machineId: '', connected: false);
 
@@ -100,4 +105,77 @@ String formatUptime(int seconds) {
   if (d > 0) return '${d}d ${h}h';
   if (h > 0) return '${h}h ${m}m';
   return '${m}m';
+}
+
+/// The three proportions a probe reads that are worth remembering over time.
+/// Uptime is not one: it only ever climbs, and its history says nothing.
+enum MetricKind { cpu, memory, disk }
+
+class MetricPoint {
+  const MetricPoint(this.at, this.value);
+  final DateTime at;
+
+  /// 0..1, the share of the whole at that moment.
+  final double value;
+}
+
+/// One probe's proportions, stamped with when it came back. Absent readings
+/// stay absent; a probe that failed produces no sample at all.
+class MetricSample {
+  const MetricSample({required this.at, this.cpu, this.memory, this.disk});
+
+  final DateTime at;
+  final double? cpu;
+  final double? memory;
+  final double? disk;
+
+  static MetricSample? fromProbe(Map<String, dynamic>? probe, {required DateTime at}) {
+    final metrics = probe?['metrics'];
+    if (metrics is! List) return null;
+    double? ratioOf(String label) {
+      for (final m in metrics) {
+        if (m is Map && m['label'] == label && m['ratio'] is num) {
+          return (m['ratio'] as num).toDouble();
+        }
+      }
+      return null;
+    }
+
+    final s = MetricSample(
+        at: at, cpu: ratioOf('CPU'), memory: ratioOf('Memory'), disk: ratioOf('Disk'));
+    return s.cpu == null && s.memory == null && s.disk == null ? null : s;
+  }
+
+  double? of(MetricKind k) => switch (k) {
+        MetricKind.cpu => cpu,
+        MetricKind.memory => memory,
+        MetricKind.disk => disk,
+      };
+}
+
+/// A bounded run of samples for one machine, kept in memory for the session.
+///
+/// The console has no server retaining anything, so this is honestly all the
+/// history there is: what this console saw while monitoring was on. The cap
+/// at a 30 s cadence is two hours.
+class MetricHistory {
+  MetricHistory({this.cap = 240});
+
+  final int cap;
+  final _samples = <MetricSample>[];
+
+  List<MetricSample> get samples => List.unmodifiable(_samples);
+
+  void add(MetricSample s) {
+    _samples.add(s);
+    if (_samples.length > cap) _samples.removeRange(0, _samples.length - cap);
+  }
+
+  /// One figure over time, skipping the probes that did not read it.
+  List<MetricPoint> series(MetricKind k) => [
+        for (final s in _samples)
+          if (s.of(k) != null) MetricPoint(s.at, s.of(k)!),
+      ];
+
+  static final empty = MetricHistory(cap: 0);
 }

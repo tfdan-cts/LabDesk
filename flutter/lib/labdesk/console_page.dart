@@ -196,6 +196,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   final _sessionStats = <String, Map<String, dynamic>>{};
   final _probes = <String, Map<String, dynamic>>{};
   final _probedAt = <String, DateTime>{};
+  final _history = <String, MetricHistory>{};
   final _probing = <String>{};
 
   /// Machines the operator asked to be monitored. Persisted, so the board
@@ -340,8 +341,15 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
               }
             : await LabDeskTerminalRpc.probeOn(ffi, id, platform);
       }
-      if (r is Map) _probes[id] = Map<String, dynamic>.from(r);
-      _probedAt[id] = DateTime.now();
+      final now = DateTime.now();
+      if (r is Map) {
+        _probes[id] = Map<String, dynamic>.from(r);
+        final sample = MetricSample.fromProbe(_probes[id], at: now);
+        if (sample != null) {
+          _history.putIfAbsent(id, MetricHistory.new).add(sample);
+        }
+      }
+      _probedAt[id] = now;
     } finally {
       _probing.remove(id);
       if (mounted) setState(() {});
@@ -554,6 +562,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
       LabDeskMachineLink.close(id);
       _probes.remove(id);
       _probedAt.remove(id);
+      _history.remove(id);
     } else {
       _monitored.add(id);
       _probe(id);
@@ -579,6 +588,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
           LabDeskMachineLink.isOpen(id),
       sessionStats: _sessionStats[id],
       probe: _probes[id],
+      history: _history[id],
     );
   }
 
