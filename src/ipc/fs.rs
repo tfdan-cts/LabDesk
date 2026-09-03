@@ -220,7 +220,7 @@ fn remove_ipc_socket_via_secure_parent_fd(postfix: &str) -> ResultType<()> {
 // - Open parent dir with O_NOFOLLOW/O_DIRECTORY and operate on that fd.
 // - Validate inode type/owner/mode via fstat.
 // - For protected service postfix, optionally adopt owner (root only), then scrub stale
-//   rustdesk IPC artifacts when directory trust boundary changed.
+//   labdesk IPC artifacts when directory trust boundary changed.
 //
 // Main steps:
 // 1) Resolve parent path and open/create directory securely.
