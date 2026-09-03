@@ -2861,12 +2861,12 @@ pub fn main_get_common(key: String) -> String {
                 crate::common::is_custom_client(),
             ) {
                 (Ok(true), false) => match crate::platform::windows::release_arch_suffix() {
-                    Some(arch) => format!("rustdesk-{_version}-{arch}.msi"),
+                    Some(arch) => format!("labdesk-{_version}-{arch}.msi"),
                     None => "error:unsupported".to_owned(),
                 },
                 (Ok(true), true) | (Ok(false), _) => {
                     match crate::platform::windows::release_arch_suffix() {
-                        Some(arch) => format!("rustdesk-{_version}-{arch}.exe"),
+                        Some(arch) => format!("labdesk-{_version}-{arch}.exe"),
                         None => "error:unsupported".to_owned(),
                     }
                 }
@@ -2878,9 +2878,9 @@ pub fn main_get_common(key: String) -> String {
             #[cfg(target_os = "macos")]
             {
                 return if cfg!(target_arch = "x86_64") {
-                    format!("rustdesk-{_version}-x86_64.dmg")
+                    format!("labdesk-{_version}-x86_64.dmg")
                 } else if cfg!(target_arch = "aarch64") {
-                    format!("rustdesk-{_version}-aarch64.dmg")
+                    format!("labdesk-{_version}-aarch64.dmg")
                 } else {
                     "error:unsupported".to_owned()
                 };
@@ -2892,8 +2892,8 @@ pub fn main_get_common(key: String) -> String {
                 // release page instead of a package it cannot install.
                 return match crate::platform::linux::installed_package_kind() {
                     Some(kind) => match std::env::consts::ARCH {
-                        "x86_64" => format!("rustdesk-{_version}-x86_64.{kind}"),
-                        "aarch64" => format!("rustdesk-{_version}-aarch64.{kind}"),
+                        "x86_64" => format!("labdesk-{_version}-x86_64.{kind}"),
+                        "aarch64" => format!("labdesk-{_version}-aarch64.{kind}"),
                         _ => "error:unsupported".to_owned(),
                     },
                     None => "error:unsupported".to_owned(),

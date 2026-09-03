@@ -166,7 +166,7 @@ Run that before uninstalling, while the program is still present.
 
 Packaged builds for **Windows, macOS, Linux (deb/rpm/AppImage/flatpak), and Android** are on the [Releases page](https://github.com/tfdan-cts/LabDesk/releases).
 
-Binaries are unsigned; on Windows, SmartScreen will warn on first run. Binary filenames keep the upstream `rustdesk-<version>` naming produced by the build pipeline.
+Binaries are unsigned; on Windows, SmartScreen will warn on first run. Binary filenames are `labdesk-<version>-<arch>.<kind>` on every platform.
 
 LabDesk uses its own configuration directory (`LabDesk` instead of `RustDesk`) and generates its own machine ID, so it can be installed alongside stock RustDesk without conflicts.
 

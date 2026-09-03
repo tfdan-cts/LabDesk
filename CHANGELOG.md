@@ -17,6 +17,9 @@ Rules: `docs/VERSIONING.md`.
   lab-desk.net. The Android store listing inherited from upstream is removed.
 - Uninstalling the Debian package removes LabDesk's own configuration directory, not the
   upstream project's.
+- Release files are named `labdesk-<version>-<arch>.<kind>` on every platform, and the
+  updater asks for them by that name. lab-desk.net serves older releases under the same
+  naming and still answers a 1.2.1 asking under the old one.
 
 ## 1.2.1 — 2026-09-03
 

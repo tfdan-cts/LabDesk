@@ -3840,8 +3840,9 @@ pub fn try_remove_temp_update_files() {
         if let Ok(entry) = entry {
             let path = entry.path();
             if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                // Match files like rustdesk-*.msi or rustdesk-*.exe
-                if file_name.starts_with("rustdesk-")
+                // Match staged installers: labdesk-*.msi or labdesk-*.exe, and the
+                // rustdesk-* names releases up to 1.2.1 were downloaded under.
+                if (file_name.starts_with("labdesk-") || file_name.starts_with("rustdesk-"))
                     && (file_name.ends_with(".msi") || file_name.ends_with(".exe"))
                 {
                     // Skip files modified within the last hour to avoid deleting files being downloaded

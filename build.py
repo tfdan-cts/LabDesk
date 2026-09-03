@@ -754,10 +754,10 @@ def build_flutter_deb(version, features):
 
     system2('/bin/rm -rf tmpdeb/')
     system2('/bin/rm -rf ../res/DEBIAN/control')
-    os.rename('rustdesk.deb', '../rustdesk-%s.deb' % version)
+    os.rename('rustdesk.deb', '../labdesk-%s.deb' % version)
     if ships_so:
         # Named apart from the stock package so installing the consent-free variant is a deliberate act.
-        os.rename('../rustdesk-%s.deb' % version, f'../{DRM_PACKAGE_NAME}-{version}.deb')
+        os.rename('../labdesk-%s.deb' % version, f'../{DRM_PACKAGE_NAME}-{version}.deb')
     os.chdir("..")
 
 
@@ -893,9 +893,9 @@ def build_deb_from_folder(version, binary_folder, want_drm=False):
 
     system2('/bin/rm -rf tmpdeb/')
     system2('/bin/rm -rf ../res/DEBIAN/control')
-    os.rename('rustdesk.deb', '../rustdesk-%s.deb' % version)
+    os.rename('rustdesk.deb', '../labdesk-%s.deb' % version)
     if want_drm:
-        os.rename('../rustdesk-%s.deb' % version, f'../{DRM_PACKAGE_NAME}-{version}.deb')
+        os.rename('../labdesk-%s.deb' % version, f'../{DRM_PACKAGE_NAME}-{version}.deb')
     os.chdir("..")
 
 
@@ -918,7 +918,7 @@ def build_flutter_dmg(version, features):
     '''
     system2(
         "create-dmg --volname \"RustDesk Installer\" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 --icon RustDesk.app 200 190 --hide-extension RustDesk.app rustdesk.dmg ./build/macos/Build/Products/Release/RustDesk.app")
-    os.rename("rustdesk.dmg", f"../rustdesk-{version}.dmg")
+    os.rename("rustdesk.dmg", f"../labdesk-{version}.dmg")
     '''
     os.chdir("..")
 
@@ -960,9 +960,9 @@ def build_flutter_windows(version, features, skip_portable_pack):
                   './rustdesk_portable.exe')
     print(
         f'output location: {os.path.abspath(os.curdir)}/rustdesk_portable.exe')
-    os.rename('./rustdesk_portable.exe', f'./rustdesk-{version}-install.exe')
+    os.rename('./rustdesk_portable.exe', f'./labdesk-{version}-install.exe')
     print(
-        f'output location: {os.path.abspath(os.curdir)}/rustdesk-{version}-install.exe')
+        f'output location: {os.path.abspath(os.curdir)}/labdesk-{version}-install.exe')
 
 
 def main():
@@ -1028,8 +1028,8 @@ def main():
         os.chdir('libs/portable')
         system2('pip3 install -r requirements.txt')
         system2(
-            f'python3 ./generate.py -f ../../{res_dir} -o . -e ../../{res_dir}/rustdesk-{version}-win7-install.exe')
-        system2(f'mv ../../{res_dir}/rustdesk-{version}-win7-install.exe ../..')
+            f'python3 ./generate.py -f ../../{res_dir} -o . -e ../../{res_dir}/labdesk-{version}-win7-install.exe')
+        system2(f'mv ../../{res_dir}/labdesk-{version}-win7-install.exe ../..')
     elif os.path.isfile('/usr/bin/pacman'):
         # pacman -S -needed base-devel
         system2("sed -i 's/pkgver=.*/pkgver=%s/g' res/PKGBUILD" % version)
@@ -1041,7 +1041,7 @@ def main():
             system2('strip target/release/rustdesk')
             system2('ln -s res/pacman_install && ln -s res/PKGBUILD')
             system2('HBB=`pwd` makepkg -f')
-        system2('mv rustdesk-%s-0-x86_64.pkg.tar.zst rustdesk-%s-manjaro-arch.pkg.tar.zst' % (
+        system2('mv rustdesk-%s-0-x86_64.pkg.tar.zst labdesk-%s-manjaro-arch.pkg.tar.zst' % (
             version, version))
         # pacman -U ./rustdesk.pkg.tar.zst
     elif os.path.isfile('/usr/bin/yum'):
@@ -1051,7 +1051,7 @@ def main():
             "sed -i 's/Version:    .*/Version:    %s/g' res/rpm.spec" % version)
         system2('HBB=`pwd` rpmbuild -ba res/rpm.spec')
         system2(
-            'mv $HOME/rpmbuild/RPMS/x86_64/rustdesk-%s-0.x86_64.rpm ./rustdesk-%s-fedora28-centos8.rpm' % (
+            'mv $HOME/rpmbuild/RPMS/x86_64/rustdesk-%s-0.x86_64.rpm ./labdesk-%s-fedora28-centos8.rpm' % (
                 version, version))
         # yum localinstall rustdesk.rpm
     elif os.path.isfile('/usr/bin/zypper'):
@@ -1061,7 +1061,7 @@ def main():
             "sed -i 's/Version:    .*/Version:    %s/g' res/rpm-suse.spec" % version)
         system2('HBB=`pwd` rpmbuild -ba res/rpm-suse.spec')
         system2(
-            'mv $HOME/rpmbuild/RPMS/x86_64/rustdesk-%s-0.x86_64.rpm ./rustdesk-%s-suse.rpm' % (
+            'mv $HOME/rpmbuild/RPMS/x86_64/rustdesk-%s-0.x86_64.rpm ./labdesk-%s-suse.rpm' % (
                 version, version))
         # yum localinstall rustdesk.rpm
     else:
@@ -1097,7 +1097,7 @@ def main():
                 system2(
                     'create-dmg "RustDesk %s.dmg" "target/release/bundle/osx/RustDesk.app"' % version)
                 os.rename('RustDesk %s.dmg' %
-                          version, 'rustdesk-%s.dmg' % version)
+                          version, 'labdesk-%s.dmg' % version)
                 if pa:
                     system2('''
     # https://pyoxidizer.readthedocs.io/en/apple-codesign-0.14.0/apple_codesign.html
@@ -1145,7 +1145,7 @@ def main():
                 system2('cp libsciter-gtk.so tmpdeb/usr/share/rustdesk/')
                 md5_file_folder("tmpdeb/")
                 system2('dpkg-deb -b tmpdeb rustdesk.deb; /bin/rm -rf tmpdeb/')
-                os.rename('rustdesk.deb', 'rustdesk-%s.deb' % version)
+                os.rename('rustdesk.deb', 'labdesk-%s.deb' % version)
 
 
 def md5_file(fn):
