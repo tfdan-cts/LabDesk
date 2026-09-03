@@ -92,6 +92,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             labdesk.sbom.json
 
@@ -425,6 +426,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             ./SignOutput/labdesk-*.msi
             ./SignOutput/labdesk-*.exe
@@ -579,6 +581,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             ./SignOutput/labdesk-*.exe
 
@@ -921,6 +924,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             labdesk*-${{ matrix.job.arch }}.dmg
 
@@ -965,6 +969,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: labdesk-${{ env.VERSION }}-unsigned.tar.gz
 
   build-rustdesk-android:
@@ -1249,6 +1254,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             ${{steps.sign-rustdesk.outputs.signedReleaseFile}}
 
@@ -1258,6 +1264,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             signed-apk/labdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
 
@@ -1435,6 +1442,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             ${{steps.sign-rustdesk.outputs.signedReleaseFile}}
 
@@ -1444,6 +1452,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             signed-apk/labdesk-${{ env.VERSION }}-universal${{ env.suffix }}.apk
 
@@ -1745,6 +1754,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             labdesk-*.deb
             labdesk-*.rpm
@@ -1781,6 +1791,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             res/labdesk-${{ env.VERSION }}*.zst
 
@@ -2042,6 +2053,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             ${{ env.DRM_DEB }}
 
@@ -2271,6 +2283,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             labdesk-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.deb
 
@@ -2329,6 +2342,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             ./appimage/labdesk-${{ env.VERSION }}-*.AppImage
 
@@ -2414,6 +2428,7 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             flatpak/labdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.flatpak
 
@@ -2498,5 +2513,6 @@ jobs:
         with:
           prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           files: |
             flutter/build/labdesk-${{ env.VERSION }}-${{ env.RELEASE_NAME }}.tar.gz
