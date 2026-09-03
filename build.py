@@ -566,7 +566,8 @@ def _assert_so_has_egl(so_path):
             'libgles2-mesa-dev; Arch: mesa libglvnd).')
 
 
-DRM_PACKAGE_NAME = 'rustdesk-unattended-wayland'
+DRM_PACKAGE_NAME = 'rustdesk-unattended-wayland'  # dpkg identity; renaming it is a migration for installed copies
+DRM_FILE_NAME = 'labdesk-unattended-wayland'  # the release file carries the product's name
 
 
 def assert_so_satisfies_the_runtime_abi_gate(so_path):
@@ -757,7 +758,7 @@ def build_flutter_deb(version, features):
     os.rename('rustdesk.deb', '../labdesk-%s.deb' % version)
     if ships_so:
         # Named apart from the stock package so installing the consent-free variant is a deliberate act.
-        os.rename('../labdesk-%s.deb' % version, f'../{DRM_PACKAGE_NAME}-{version}.deb')
+        os.rename('../labdesk-%s.deb' % version, f'../{DRM_FILE_NAME}-{version}.deb')
     os.chdir("..")
 
 
@@ -895,7 +896,7 @@ def build_deb_from_folder(version, binary_folder, want_drm=False):
     system2('/bin/rm -rf ../res/DEBIAN/control')
     os.rename('rustdesk.deb', '../labdesk-%s.deb' % version)
     if want_drm:
-        os.rename('../labdesk-%s.deb' % version, f'../{DRM_PACKAGE_NAME}-{version}.deb')
+        os.rename('../labdesk-%s.deb' % version, f'../{DRM_FILE_NAME}-{version}.deb')
     os.chdir("..")
 
 
