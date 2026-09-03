@@ -3,6 +3,21 @@
 LabDesk's own versions. The RustDesk core underneath is stated in the README, not versioned here.
 Rules: `docs/VERSIONING.md`.
 
+## 1.2.2 — 2026-09-03
+
+- Health cards remember every reading while monitoring is on and draw CPU, memory and disk
+  over the last two hours under each figure, with the time and value under the pointer.
+- Machine menus carry a glyph per line; the sidebar takes focus and Enter, reports itself to
+  screen readers, and Ctrl+1 to Ctrl+9 open the sections.
+- A copy that is not installed is told, in the console, to install: the always-on service,
+  unattended access and in-place updates exist only installed.
+- Wording is the product's own: sessions require a password or your approval, allowed IPs and
+  IDs, privacy screen, lock remote screen, send Ctrl+Alt+Del, port forwarding, wake on LAN.
+  Linux menu and service names, Windows support links and package metadata name LabDesk and
+  lab-desk.net. The Android store listing inherited from upstream is removed.
+- Uninstalling the Debian package removes LabDesk's own configuration directory, not the
+  upstream project's.
+
 ## 1.2.1 — 2026-09-03
 
 - Updates come from lab-desk.net. LabDesk checks for a new version on start and once a day,
