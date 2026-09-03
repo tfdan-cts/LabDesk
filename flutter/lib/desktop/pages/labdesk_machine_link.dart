@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_hbb/labdesk/services/link_verdict.dart';
 import 'package:flutter_hbb/models/model.dart';
 
 /// The console's own connection to a machine, with no window behind it.
@@ -20,6 +21,15 @@ class LabDeskMachineLink {
 
   static final Map<String, FFI> _links = {};
   static final Map<String, Future<FFI?>> _opening = {};
+
+  /// Why the last attempt to reach a peer failed, in the far side's words
+  /// ("ID does not exist", "the machine refused the saved password"). Cleared
+  /// when a link opens.
+  static final Map<String, String> lastFailure = {};
+
+  /// The sentence the console prints when [open] returned null.
+  static String reason(String peerId) =>
+      'Could not connect: ${lastFailure[peerId] ?? 'no answer in ${readyTimeout.inSeconds} s'}.';
 
   /// How long a link may take to authenticate before it is written off. A
   /// peer that wants a password nobody saved, or one that needs a click on its
@@ -47,8 +57,17 @@ class LabDeskMachineLink {
         _links[peerId]?.close();
         final ffi = FFI(null);
         _links[peerId] = ffi;
-        ffi.start(peerId, isTerminal: true);
+        lastFailure.remove(peerId);
         final ready = Completer<bool>();
+        // No window, nobody watching: a dialog the client would raise is
+        // either the reason this link failed, or progress to wait through.
+        ffi.headlessMsgBox = (type, title, text) {
+          final why = linkFailure(type, title, text);
+          if (why == null) return;
+          lastFailure[peerId] = why;
+          if (!ready.isCompleted) ready.complete(false);
+        };
+        ffi.start(peerId, isTerminal: true);
         final sub = ffi.ffiModel.pi.isSet.listen((set) {
           if (set && !ready.isCompleted) ready.complete(true);
         });
@@ -59,7 +78,7 @@ class LabDeskMachineLink {
             .timeout(readyTimeout, onTimeout: () => false);
         await sub.cancel();
         if (!ok || ffi.closed) {
-          debugPrint('labdesk: link to $peerId did not become ready');
+          debugPrint('labdesk: link to $peerId: ${reason(peerId)}');
           ffi.close();
           _links.remove(peerId);
           return null;

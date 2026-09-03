@@ -892,6 +892,7 @@ class FfiModel with ChangeNotifier {
   handleMultipleWindowsSession(
       Map<String, dynamic> evt, SessionID sessionId, String peerId) {
     if (parent.target == null) return;
+    if (parent.target!.headlessMsgBox != null) return;
     final dialogManager = parent.target!.dialogManager;
     final sessions = evt['windows_sessions'];
     final title = translate('Multiple Windows sessions found');
@@ -910,6 +911,15 @@ class FfiModel with ChangeNotifier {
     final title = evt['title'];
     final text = evt['text'];
     final link = evt['link'];
+
+    // A headless session has no window and nobody to answer a dialog. Hand the
+    // box to its owner and raise nothing: these dialogs close the current tab,
+    // and in the main window the current tab is the application.
+    final headless = parent.target!.headlessMsgBox;
+    if (headless != null) {
+      headless('${type ?? ''}', '${title ?? ''}', '${text ?? ''}');
+      return;
+    }
 
     // Disable relative mouse mode on any error-type message to ensure cursor is released.
     // This includes connection errors, session-ending messages, elevation errors, etc.
@@ -1026,6 +1036,7 @@ class FfiModel with ChangeNotifier {
   }
 
   handleToast(Map<String, dynamic> evt, SessionID sessionId, String peerId) {
+    if (parent.target?.headlessMsgBox != null) return;
     final type = evt['type'] ?? 'info';
     final text = evt['text'] ?? '';
     final durMsc = evt['dur_msec'] ?? 2000;
@@ -3732,6 +3743,11 @@ class FFI {
   // and no view, so they take their events raw instead of being routed to one.
   final Map<int, void Function(Map<String, dynamic>)> _rawTerminalListeners =
       {};
+
+  /// Set on a session that has no window of its own (the console's machine
+  /// links). While set, message boxes and toasts go here as (type, title, text)
+  /// instead of becoming dialogs in whichever window happens to host the FFI.
+  void Function(String type, String title, String text)? headlessMsgBox;
 
   FFI(SessionID? sId) {
     sessionId = sId ?? (isDesktop ? Uuid().v4obj() : _constSessionId);

@@ -719,6 +719,12 @@ closeConnection({String? id}) {
       stateGlobal.isInMainPage = true;
     } else {
       final controller = Get.find<DesktopTabController>();
+      if (controller.tabType == DesktopTabType.main) {
+        // The main window's tabs are not sessions. Closing the selected one
+        // closes the application, which no session error may do.
+        debugPrint('[closeConnection] ignored in the main window (id=$id)');
+        return;
+      }
       if (controller.tabType == DesktopTabType.terminal &&
           controller.onCloseWindow != null) {
         // Terminal windows are scoped to one peer. The optional id passed to

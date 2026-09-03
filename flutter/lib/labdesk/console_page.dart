@@ -332,8 +332,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         r = ffi == null
             ? {
                 'state': 'failed',
-                'reason': 'Could not connect: the machine did not accept the '
-                    'saved password, or has none saved.',
+                'reason': LabDeskMachineLink.reason(id),
                 'metrics': <Map<String, dynamic>>[],
               }
             : await LabDeskTerminalRpc.probeOn(ffi, id, platform);
@@ -378,8 +377,8 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         }
         final ffi = await LabDeskMachineLink.open(id);
         if (ffi == null) {
-          _automation.recordOutcome(f.id, false,
-              'could not connect: no saved password, or it was refused');
+          _automation.recordOutcome(
+              f.id, false, LabDeskMachineLink.reason(id));
           break;
         }
         final out = await LabDeskTerminalRpc.runOn(ffi, id, command);
@@ -442,11 +441,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     }
     final ffi = await LabDeskMachineLink.open(id);
     if (ffi == null) {
-      return {
-        'lines': <String>[],
-        'reason': 'Could not connect: the machine did not accept the saved '
-            'password, or has none saved.',
-      };
+      return {'lines': <String>[], 'reason': LabDeskMachineLink.reason(id)};
     }
     return LabDeskTerminalRpc.runOn(ffi, id, command);
   }
@@ -600,9 +595,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
       final ffi = await LabDeskMachineLink.open(id);
       if (ffi == null) {
         if (!mounted) return;
-        setState(() => lines.add(const TerminalLine(
-            'Could not connect: the machine did not accept the saved '
-            'password, or has none saved.',
+        setState(() => lines.add(TerminalLine(LabDeskMachineLink.reason(id),
             kind: TerminalLineKind.notice)));
         return;
       }
