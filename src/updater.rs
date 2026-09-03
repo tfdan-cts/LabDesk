@@ -352,22 +352,15 @@ fn update_new_version(update_msi: bool, version: &str, file_path: &PathBuf) {
     }
 }
 
-/// The hosts an update may be fetched from, and the path shape under each.
-/// Upstream: `https://github.com/rustdesk/rustdesk/releases/download/<tag>/<file>`.
-/// LabDesk: `https://lab-desk.net/releases/download/<version>/<file>`, which the
-/// site streams from the release its administrator made public.
+/// The one host an update may be fetched from, and the path shape under it:
+/// `https://lab-desk.net/releases/download/<version>/<file>`, which the site
+/// streams from the release its administrator made public. No other origin is
+/// ever accepted, root or not.
 pub fn get_update_download_file_from_url(url: &str) -> Option<PathBuf> {
     let parsed = url::Url::parse(url).ok()?;
-    let labdesk_host = crate::common::LABDESK_SITE.trim_start_matches("https://");
-    let (prefix, host, repo_segments) = if url.starts_with("https://github.com/") {
-        ("https://github.com/", "github.com", 2)
-    } else if url.starts_with(&format!("https://{}/", labdesk_host)) {
-        ("", labdesk_host, 0)
-    } else {
-        return None;
-    };
+    let host = crate::common::LABDESK_SITE.trim_start_matches("https://");
     // Check the raw prefix before Url normalizes default ports.
-    if (!prefix.is_empty() && !url.starts_with(prefix))
+    if !url.starts_with(&format!("https://{}/", host))
         || parsed.scheme() != "https"
         || parsed.host_str() != Some(host)
         || !parsed.username().is_empty()
@@ -380,13 +373,6 @@ pub fn get_update_download_file_from_url(url: &str) -> Option<PathBuf> {
     }
 
     let mut segments = parsed.path_segments()?;
-    if repo_segments == 2 {
-        let owner = segments.next()?;
-        let repo = segments.next()?;
-        if owner != "rustdesk" || repo != "rustdesk" {
-            return None;
-        }
-    }
     let releases = segments.next()?;
     let download = segments.next()?;
     let tag = segments.next()?;
@@ -674,36 +660,33 @@ mod tests {
     use super::get_download_file_from_url;
 
     #[test]
-    fn update_download_file_accepts_expected_github_asset_urls() {
-        let file = get_download_file_from_url(
+    fn update_download_file_rejects_every_other_origin() {
+        // Upstream's GitHub releases were once an allowed source. They are not
+        // this product's, and a root-level update must never fetch from them.
+        assert!(get_download_file_from_url(
             "https://github.com/rustdesk/rustdesk/releases/download/1.4.0/rustdesk-1.4.0-x86_64.dmg",
         )
-        .expect("valid GitHub release asset URL");
-
-        assert_eq!(
-            file.file_name().and_then(|name| name.to_str()),
-            Some("rustdesk-1.4.0-x86_64.dmg")
-        );
+        .is_none());
     }
 
     #[test]
     fn update_download_file_accepts_labdesk_site_asset_urls() {
         let file = get_download_file_from_url(
-            "https://lab-desk.net/releases/download/1.2.0/rustdesk-1.2.0-x86_64.exe",
+            "https://lab-desk.net/releases/download/1.3.0/labdesk-1.3.0-x86_64.exe",
         )
         .expect("valid lab-desk.net release asset URL");
         assert_eq!(
             file.file_name().and_then(|name| name.to_str()),
-            Some("rustdesk-1.2.0-x86_64.exe")
+            Some("labdesk-1.3.0-x86_64.exe")
         );
         for url in [
-            "http://lab-desk.net/releases/download/1.2.0/rustdesk-1.2.0-x86_64.exe",
-            "https://lab-desk.net/rustdesk-1.2.0-x86_64.exe",
-            "https://lab-desk.net/releases/download/1.2.0/",
-            "https://lab-desk.net/releases/download/1.2.0/nested/rustdesk.exe",
-            "https://lab-desk.net/releases/download/1.2.0/rustdesk.exe?x=1",
-            "https://lab-desk.net.evil.com/releases/download/1.2.0/rustdesk.exe",
-            "https://evil.com/lab-desk.net/releases/download/1.2.0/rustdesk.exe",
+            "http://lab-desk.net/releases/download/1.3.0/labdesk-1.3.0-x86_64.exe",
+            "https://lab-desk.net/labdesk-1.3.0-x86_64.exe",
+            "https://lab-desk.net/releases/download/1.3.0/",
+            "https://lab-desk.net/releases/download/1.3.0/nested/labdesk.exe",
+            "https://lab-desk.net/releases/download/1.3.0/labdesk.exe?x=1",
+            "https://lab-desk.net.evil.com/releases/download/1.3.0/labdesk.exe",
+            "https://evil.com/lab-desk.net/releases/download/1.3.0/labdesk.exe",
         ] {
             assert!(get_download_file_from_url(url).is_none(), "{url}");
         }

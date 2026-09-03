@@ -500,16 +500,10 @@ def init_global_vars(dist_dir, app_name, args):
 
 
 def update_license_file(app_name):
-    if app_name == UPSTREAM_STOCK_APP_NAME:
-        return
-    license_file = Path(sys.argv[0]).parent.joinpath("Package/License.rtf")
-    with open(license_file, "r", encoding="utf-8") as f:
-        license_content = f.read()
-    license_content = license_content.replace("website rustdesk.com and other ", "")
-    license_content = license_content.replace("RustDesk", app_name)
-    license_content = re.sub(r"Purslane(?: Tech Pte\.)? Ltd", app_name, license_content, flags=re.IGNORECASE)
-    with open(license_file, "w", encoding="utf-8") as f:
-        f.write(license_content)
+    # Package/License.rtf is LabDesk's own licence text. It names the upstream
+    # project once, in its third-party notice, which the licence requires and
+    # which must not be rewritten into the product's name.
+    return
 
 
 def replace_component_guids_in_wxs():

@@ -1,5 +1,5 @@
 Name:       labdesk
-Version:    1.2.2
+Version:    1.3.0
 Release:    0
 Summary:    LabDesk remote administration client
 License:    GPL-3.0

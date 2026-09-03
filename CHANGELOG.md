@@ -3,6 +3,31 @@
 LabDesk's own versions. The RustDesk core underneath is stated in the README, not versioned here.
 Rules: `docs/VERSIONING.md`.
 
+## 1.3.0 — 2026-09-03
+
+LabDesk is LabDesk all the way down. Everything the operating system, the package manager or a
+file browser can see now carries the product's own name.
+
+- The core library is `liblabdesk`, the Windows helper is `RuntimeBroker_labdesk.exe`, the exe's
+  own metadata says `labdesk.exe`, and the macOS bundle is `LabDesk.app`.
+- Linux: the package is `labdesk` (deb, rpm, Arch), the service unit `labdesk.service`, the
+  files live under `/usr/share/labdesk` and `/usr/lib/labdesk`, the desktop entries and the
+  flatpak id (`net.labdesk.LabDesk`) follow. The new package replaces an installed copy under
+  the old name in one `apt install` / `dnf install`; a reinstall is needed once.
+- Windows installer and MSI: service display name, shortcuts and uninstall entries name
+  LabDesk; the upgrade code is unchanged, so an existing install upgrades in place. The
+  installer's licence text is LabDesk's own.
+- The `labdesk://` link scheme is now registered on every platform (it was registered as the
+  old scheme, so links never reached the app). The PAM service and systemd unit names now match
+  what the application asks for at runtime.
+- The updater fetches from lab-desk.net only; upstream's GitHub releases are no longer an
+  accepted download origin.
+
+Kept, by requirement or necessity: the AGPL attribution to the upstream project in the About
+card, the licence files and the installer licence's third-party notice; the macOS bundle
+identifier (changing it would void every screen-recording and accessibility grant); the signed
+third-party printer and display driver names; wire-protocol keys other builds read.
+
 ## 1.2.2 — 2026-09-03
 
 - Health cards remember every reading while monitoring is on and draw CPU, memory and disk

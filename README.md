@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="res/logo-header.svg" alt="LabDesk"><br>
+  <img src="res/logo.svg" alt="LabDesk" width="96"><br>
 </p>
 
 # LabDesk
 
-LabDesk is a fork of [RustDesk](https://github.com/rustdesk/rustdesk) for people who connect to more than one self-hosted ID/relay server and manage fleets of machines across separate networks.
+LabDesk is a remote administration client for people who connect to more than one self-hosted ID/relay server and manage fleets of machines across separate networks.
 
-Stock RustDesk stores a single ID/Relay/API/key configuration; pointing the client at a different server means retyping everything. LabDesk fixes that, and adds fleet-organization features on top.
+A client that holds a single ID/relay/API/key configuration has to be retyped to reach a different server. LabDesk keeps named server profiles, and adds fleet organisation, a console and a product site with in-place updates on top.
 
 ## What LabDesk adds
 
@@ -37,7 +37,7 @@ Underneath that:
   immediate re-check after switching profiles or networks.
 - **Purple theme and branding** throughout, including the installer.
 
-Connection protocol, encryption, file transfer, and server compatibility are all inherited from upstream RustDesk. LabDesk works with the standard open-source `rustdesk-server` (hbbs/hbbr) and RustDesk Server Pro.
+Connection protocol, encryption, file transfer and server compatibility come from the inherited core (see Ancestry and licence). LabDesk works with the standard open-source ID/relay server pair (hbbs/hbbr) and its Pro edition.
 
 ## Installing
 
@@ -82,10 +82,10 @@ curl -fsSL https://raw.githubusercontent.com/tfdan-cts/LabDesk/master/install.sh
 
 The script detects the architecture and the package manager, then installs the
 matching `.deb`, `.rpm`, or `.pkg.tar.zst` from the newest full release. Unlike
-the Windows script it does not consider pre-releases, because the Linux packages
-keep the upstream layout and every full release carries them. It supports
-apt, dnf, yum, zypper, and pacman on x86_64 and aarch64, and it installs the
-`rustdesk` systemd service along with the desktop entries. Re-running it
+the Windows script it does not consider pre-releases, because every full
+release carries the Linux packages. It supports apt, dnf, yum, zypper, and
+pacman on x86_64 and aarch64, and it installs the `labdesk` systemd service
+along with the desktop entries. Re-running it
 upgrades in place.
 
 Server settings are passed as environment variables:
@@ -101,7 +101,7 @@ for the shell that `sudo` runs, which is why they go after `sudo` and not before
 
 On a Wayland session the script warns that screen capture and unattended access
 need X11, and prints the change required to switch. LabDesk also publishes a
-separate `rustdesk-unattended-wayland` package that captures through DRM/KMS
+separate `labdesk-unattended-wayland` package that captures through DRM/KMS
 without switching to X11. It is a distinct package because it bypasses the
 desktop's consent prompt, so install it deliberately rather than as routine.
 
@@ -136,14 +136,15 @@ prompt:
 On Linux, remove the package with the same tool that installed it:
 
 ```sh
-sudo apt remove rustdesk       # Debian, Ubuntu
-sudo dnf remove rustdesk       # Fedora, RHEL
-sudo zypper remove rustdesk    # openSUSE
-sudo pacman -R rustdesk        # Arch
+sudo apt remove labdesk       # Debian, Ubuntu
+sudo dnf remove labdesk       # Fedora, RHEL
+sudo zypper remove labdesk    # openSUSE
+sudo pacman -R labdesk        # Arch
 ```
 
-The package is named `rustdesk` on every distribution, because the build
-pipeline keeps the upstream package name.
+The package is named `labdesk` on every distribution. Versions before 1.3.0
+carried the inherited package name; installing 1.3.0 or later replaces such a
+copy in the same transaction.
 
 Neither removes your settings. Machine groups, icons and server profiles live in
 the configuration directory (`%APPDATA%\LabDesk` on Windows, `~/.config/labdesk`
@@ -168,32 +169,21 @@ Packaged builds for **Windows, macOS, Linux (deb/rpm/AppImage/flatpak), and Andr
 
 Binaries are unsigned; on Windows, SmartScreen will warn on first run. Binary filenames are `labdesk-<version>-<arch>.<kind>` on every platform.
 
-LabDesk uses its own configuration directory (`LabDesk` instead of `RustDesk`) and generates its own machine ID, so it can be installed alongside stock RustDesk without conflicts.
+LabDesk uses its own configuration directory (`LabDesk`) and generates its own machine ID, so on Windows and macOS it sits beside other remote-desktop clients without touching their settings.
 
 ## Building
 
-Build steps are identical to upstream RustDesk; see the [upstream build documentation](https://github.com/rustdesk/rustdesk#raw-steps-to-build). This repo's CI (`.github/workflows/labdesk-dispatch.yml`) runs the full upstream `flutter-build.yml` pipeline and publishes artifacts to a release tag.
+With the Rust toolchain, vcpkg and the pinned Flutter in place, `python3 build.py --flutter` produces the platform package. This repo's CI (`.github/workflows/labdesk-dispatch.yml`) runs the full `flutter-build.yml` pipeline and publishes artifacts to a release tag; it is the reference build.
 
-## Upstream and license
+## Ancestry and licence
 
-LabDesk is based on RustDesk and stays close to upstream `master` for easy rebasing. All credit for the core remote desktop functionality goes to the [RustDesk project](https://github.com/rustdesk/rustdesk). Like upstream, this repository is licensed under [AGPL-3.0](LICENCE).
-
-### Modifications
-
-This is a modified version of RustDesk, not the original. AGPL-3.0 section 5(a)
-asks a modified work to say so and to carry the date, so:
-
-- **Base:** rustdesk/rustdesk at commit `1d09760ef`, release line 1.4.9.
-- **Modified from 2026-08-11 onward** by the LabDesk maintainers.
-
-What was changed: named server profiles replacing the single ID/Relay/API/key
-configuration, local machine groups and per-machine icons, per-peer reachability
-with a distinct unknown state, a fleet console, application renaming and theming,
-and one-line installers for Windows and Linux. The commit history in this
-repository is the full record.
-
-Please report LabDesk problems here rather than to upstream RustDesk. Bugs in a
-modified build are not theirs to answer for.
+This repository is licensed under [AGPL-3.0](LICENCE). LabDesk's remote-desktop
+core derives from the [RustDesk project](https://github.com/rustdesk/rustdesk)
+(commit `1d09760ef`, release line 1.4.9), modified from 2026-08-11 onward by the
+LabDesk maintainers; AGPL-3.0 section 5(a) requires a modified work to say so,
+and credit for that core belongs to its authors. Everything above the core, and
+the product as shipped, is LabDesk's own, and the commit history here is the
+full record. Report LabDesk problems in this repository, nowhere else.
 
 > [!Caution]
 > **Misuse Disclaimer:** The developers do not condone or support any unethical or illegal use of this software. Misuse, such as unauthorized access, control, or invasion of privacy, is strictly against our guidelines.
