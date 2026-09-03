@@ -40,8 +40,9 @@ Future<void> _loadFonts() async {
   await load('Manrope', ['assets/fonts/Manrope-Variable.ttf']);
   // Material's icon font ships with the SDK, not the app; without it every
   // icon renders as an empty box and a shot cannot be judged.
+  final flutterRoot = Platform.environment['FLUTTER_ROOT'] ?? '';
   final icons = File(
-      r'C:\Users\DVonR\TrapLab\flutter\flutter\bin\cache\artifacts\material_fonts\materialicons-regular.otf');
+      '$flutterRoot/bin/cache/artifacts/material_fonts/materialicons-regular.otf');
   if (icons.existsSync()) await load('MaterialIcons', [icons.path]);
   await load('JetBrainsMono', ['assets/fonts/JetBrainsMono-Medium.ttf']);
 }
@@ -72,11 +73,11 @@ Widget _frame(Widget child) => RepaintBoundary(
 List<MachineRow> _machines(DateTime now) => [
       MachineRow(
         id: '1935956186',
-        alias: 'trapLab-Foundry',
-        hostname: 'traplab-foundry',
-        username: 'minigun',
+        alias: 'Build server',
+        hostname: 'build-server',
+        username: 'ops',
         platform: 'Windows',
-        group: 'trapLab',
+        group: 'lab',
         status: LabDeskPeerStatus.online,
         lastSeenOnline: now.subtract(const Duration(seconds: 8)),
         lastChecked: now.subtract(const Duration(seconds: 8)),
@@ -84,11 +85,11 @@ List<MachineRow> _machines(DateTime now) => [
       ),
       MachineRow(
         id: '1180573903',
-        alias: 'Homebox',
-        hostname: 'homebox-devserver',
-        username: 'homebox',
+        alias: 'Workshop PC',
+        hostname: 'workshop-pc',
+        username: 'ops',
         platform: 'Linux',
-        group: 'trapLab',
+        group: 'lab',
         status: LabDeskPeerStatus.online,
         lastSeenOnline: now.subtract(const Duration(seconds: 8)),
         lastChecked: now.subtract(const Duration(seconds: 8)),
@@ -96,11 +97,11 @@ List<MachineRow> _machines(DateTime now) => [
       ),
       MachineRow(
         id: '1117890352',
-        alias: 'trapLab-Forge_Laptop',
-        hostname: 'traplab_forge',
-        username: 'trapLab Forge_Laptop',
+        alias: 'Spare laptop',
+        hostname: 'spare-laptop',
+        username: 'Spare Laptop',
         platform: 'Windows',
-        group: 'trapLab',
+        group: 'lab',
         status: LabDeskPeerStatus.offline,
         lastSeenOnline: now.subtract(const Duration(hours: 19)),
         lastChecked: now.subtract(const Duration(seconds: 8)),
@@ -158,7 +159,7 @@ void main() {
         machines: machines,
         samples: const [],
         initialSection: section,
-        profileName: 'trapLab Tailnet',
+        profileName: 'Lab network',
         lastRefreshed: now.subtract(const Duration(seconds: 20)),
         now: now,
         onRefresh: () {},
@@ -177,7 +178,7 @@ void main() {
       machines: machines,
       samples: _samples(now),
       initialSection: ConsoleSection.fleet,
-      profileName: 'trapLab Tailnet',
+      profileName: 'Lab network',
       lastRefreshed: now.subtract(const Duration(seconds: 20)),
       now: now,
       onRefresh: () {},
@@ -212,9 +213,9 @@ void main() {
         machineId: machine.id,
         connected: false,
         identity: const [
-          Metric(label: 'Hostname', value: 'traplab-foundry', source: MetricSource.known),
+          Metric(label: 'Hostname', value: 'build-server', source: MetricSource.known),
           Metric(label: 'Platform', value: 'Windows', source: MetricSource.known),
-          Metric(label: 'User', value: 'minigun', source: MetricSource.known),
+          Metric(label: 'User', value: 'ops', source: MetricSource.known),
           Metric.unavailable('Uptime'),
         ],
         session: const [Metric.unavailable('Round trip'), Metric.unavailable('Throughput')],

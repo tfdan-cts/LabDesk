@@ -480,12 +480,12 @@ class _CmHeaderState extends State<_CmHeader>
       case ClientType.portForward:
         return (
           glyph: LdIcons.portForward,
-          label: "Port Forward: ${client.portForward}"
+          label: "${translate('Port forwarding')}: ${client.portForward}"
         );
       case ClientType.remote:
         return (
           glyph: LdIcons.display,
-          label: translate("Control Remote Desktop")
+          label: translate("Remote control")
         );
     }
   }
@@ -671,7 +671,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                             client.recording = enabled;
                           });
                         },
-                        translate('Enable recording session'),
+                        translate('Allow session recording'),
                         canModify: canModifyPermission,
                       ),
                     ]
@@ -688,7 +688,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                             client.keyboard = enabled;
                           });
                         },
-                        translate('Enable keyboard/mouse'),
+                        translate('Allow keyboard and mouse'),
                         canModify: canModifyPermission,
                       ),
                       buildPermissionIcon(
@@ -763,7 +763,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                             client.recording = enabled;
                           });
                         },
-                        translate('Enable recording session'),
+                        translate('Allow session recording'),
                         canModify: canModifyPermission,
                       ),
                       // only windows support block input
@@ -796,7 +796,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
                               client.privacyMode = enabled;
                             });
                           },
-                          translate('Enable privacy mode'),
+                          translate('Allow privacy screen'),
                           canModify: canModifyPermission,
                         )
                     ],

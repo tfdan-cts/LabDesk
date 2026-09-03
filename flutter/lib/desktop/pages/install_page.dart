@@ -13,7 +13,7 @@ import 'package:path/path.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:window_manager/window_manager.dart';
 
-const _agreementUrl = 'https://rustdesk.com/privacy.html';
+const _agreementUrl = 'https://lab-desk.net/privacy';
 
 class InstallPage extends StatefulWidget {
   const InstallPage({Key? key}) : super(key: key);

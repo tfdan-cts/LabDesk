@@ -14,7 +14,7 @@ import 'package:flutter_hbb/labdesk/theme/console_theme.dart';
 const _machines = [
   MachineRow(
       id: '1',
-      hostname: 'homebox',
+      hostname: 'workshop',
       platform: 'Linux',
       status: LabDeskPeerStatus.online),
   MachineRow(
@@ -92,7 +92,7 @@ void main() {
     ));
 
     expect(
-        find.text('When homebox goes offline for 5 minutes → '
+        find.text('When workshop goes offline for 5 minutes → '
             'notify: "nas is down"'),
         findsOneWidget);
     expect(
@@ -149,7 +149,7 @@ void main() {
 
     expect(find.text('running'), findsOneWidget);
     expect(find.text('failed'), findsNothing);
-    expect(find.textContaining('homebox'), findsWidgets);
+    expect(find.textContaining('workshop'), findsWidgets);
   });
 
   testWidgets('the toggle reports the rule and the new state', (tester) async {
@@ -318,6 +318,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('No machine is monitored'), findsOneWidget);
-    expect(find.text('homebox'), findsWidgets);
+    expect(find.text('workshop'), findsWidgets);
   });
 }

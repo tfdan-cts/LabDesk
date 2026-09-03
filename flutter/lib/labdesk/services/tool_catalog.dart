@@ -36,7 +36,7 @@ class ToolCatalog {
   /// The separator Windows commands print instead. ConPTY renders output
   /// through the console, so a tab written by PowerShell arrives as spaces and
   /// a tab-delimited row never matches; a printable character survives.
-  /// Verified on trapLab-Foundry, 2026-09-02: tab rows parsed as nothing.
+  /// Verified on a Windows 11 test host, 2026-09-02: tab rows parsed as nothing.
   static const windowsFieldSeparator = '|';
 
   /// The platform key for a platform string as the client reports it, or null

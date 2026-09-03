@@ -14,7 +14,7 @@ void main() {
 
   final outgoing = SessionChat(
     id: '1180573903',
-    peerLabel: 'homebox-devserver',
+    peerLabel: 'workshop-pc',
     direction: SessionDirection.outgoing,
     lines: [
       ChatLine(from: ChatFrom.mine, text: 'rebooting now', at: at),
@@ -46,7 +46,7 @@ void main() {
     await tester.pumpWidget(
         _wrap(SessionsScreen(sessions: [outgoing, incoming])));
 
-    expect(find.text('homebox-devserver'), findsWidgets);
+    expect(find.text('workshop-pc'), findsWidgets);
     expect(find.text('front-desk'), findsOneWidget);
     expect(find.text('Outgoing'), findsOneWidget);
     expect(find.text('Incoming'), findsOneWidget);

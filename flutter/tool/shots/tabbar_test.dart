@@ -125,7 +125,7 @@ Widget _bar(Key closeKey) {
         // parked on the affordance itself in the shot, which is the only state
         // in which anything in this strip is allowed to go red.
         _tab(
-          name: 'Homebox',
+          name: 'Workshop PC',
           platform: LdIcons.linux,
           type: LdIcons.fileTransfer,
           selected: false,

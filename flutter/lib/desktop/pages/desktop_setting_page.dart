@@ -613,7 +613,7 @@ class _GeneralState extends State<_General> {
       if (showAutoUpdate)
         _OptionCheckBox(
           context,
-          'Auto update',
+          'Update automatically',
           kOptionAllowAutoUpdate,
           isServer: true,
         ),
@@ -651,7 +651,7 @@ class _GeneralState extends State<_General> {
 
     if (!isWeb && bind.mainShowOption(key: kOptionAllowLinuxHeadless)) {
       children.add(_OptionCheckBox(
-          context, 'Allow linux headless', kOptionAllowLinuxHeadless));
+          context, 'Allow headless Linux sessions', kOptionAllowLinuxHeadless));
     }
     if (!bind.isDisableAccount()) {
       children.add(_OptionCheckBox(
@@ -1098,7 +1098,7 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _OptionCheckBox(
-                context, 'Enable keyboard/mouse', kOptionEnableKeyboard,
+                context, 'Allow keyboard and mouse', kOptionEnableKeyboard,
                 enabled: enabled, fakeValue: fakeValue),
             if (isWindows)
               _OptionCheckBox(
@@ -1116,13 +1116,13 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
             _OptionCheckBox(context, 'Enable terminal', kOptionEnableTerminal,
                 enabled: enabled, fakeValue: fakeValue),
             _OptionCheckBox(
-                context, 'Enable TCP tunneling', kOptionEnableTunnel,
+                context, 'Allow port forwarding', kOptionEnableTunnel,
                 enabled: enabled, fakeValue: fakeValue),
             _OptionCheckBox(
                 context, 'Enable remote restart', kOptionEnableRemoteRestart,
                 enabled: enabled, fakeValue: fakeValue),
             _OptionCheckBox(
-                context, 'Enable recording session', kOptionEnableRecordSession,
+                context, 'Allow session recording', kOptionEnableRecordSession,
                 enabled: enabled, fakeValue: fakeValue),
             if (isWindows)
               _OptionCheckBox(context, 'Enable blocking user input',
@@ -1130,9 +1130,9 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
                   enabled: enabled, fakeValue: fakeValue),
             if (bind.mainSupportedPrivacyModeImpls() != '[]')
               _OptionCheckBox(
-                  context, 'Enable privacy mode', kOptionEnablePrivacyMode,
+                  context, 'Allow privacy screen', kOptionEnablePrivacyMode,
                   enabled: enabled, fakeValue: fakeValue),
-            _OptionCheckBox(context, 'Enable remote configuration modification',
+            _OptionCheckBox(context, 'Allow the remote side to change settings',
                 kOptionAllowRemoteConfigModification,
                 enabled: enabled, fakeValue: fakeValue),
           ],
@@ -1236,9 +1236,9 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
             defaultOptionApproveMode
           ];
           final modeValues = [
-            translate('Accept sessions via password'),
-            translate('Accept sessions via click'),
-            translate('Accept sessions via both'),
+            translate('Require a password'),
+            translate('Ask me to approve each session'),
+            translate('Require a password, or my approval'),
           ];
           var modeInitialKey = model.approveMode;
           if (!modeKeys.contains(modeInitialKey)) {
@@ -1287,7 +1287,8 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
     bool enabled = !locked;
     return _Card(title: 'Security', children: [
       shareRdp(context, enabled),
-      _OptionCheckBox(context, 'Deny LAN discovery', 'enable-lan-discovery',
+      _OptionCheckBox(
+          context, 'Hide from local network discovery', 'enable-lan-discovery',
           reverse: true, enabled: enabled),
       ...directIp(context),
       whitelist(),
@@ -1401,7 +1402,7 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
       return Tooltip(
         message: translate('whitelist_tip'),
         child: Obx(() => SettingsRow(
-              label: translate('Use IP Whitelisting'),
+              label: translate('Allowed IPs'),
               enabled: enabled,
               // The list is holding machines out right now, which is worth a
               // mark beside the label. Drawn in the console's one warning
@@ -1436,7 +1437,7 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
     return Tooltip(
       message: translate('id_whitelist_tip'),
       child: Obx(() => SettingsRow(
-            label: translate('Use ID whitelisting'),
+            label: translate('Allowed IDs'),
             enabled: enabled,
             leading: hasIdWhitelist.value
                 ? const LdIcon(LdIcons.alert, size: 15, color: C.bad)
@@ -1466,7 +1467,7 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
           return Tooltip(
             message: enableHideCm ? "" : translate('hide_cm_tip'),
             child: SettingsRow(
-              label: translate('Hide connection management window'),
+              label: translate('Hide the incoming session window'),
               enabled: enabled && enableHideCm,
               onTap: enableHideCm ? () => onHideCmChanged(!model.hideCm) : null,
               control: LdSwitch(
@@ -1666,12 +1667,12 @@ class _NetworkState extends State<_Network> with AutomaticKeepAliveClientMixin {
       children: [
         if (!hideServer)
           row(
-            title: 'ID/Relay Server',
+            title: 'Servers',
             onTap: () => showServerSettings(gFFI.dialogManager, setState),
           ),
         if (!hideProxy)
           row(
-            title: 'Socks5/Http(s) Proxy',
+            title: 'Proxy',
             onTap: changeSocks5Proxy,
           ),
         if (!hideWebSocket)
@@ -1695,7 +1696,7 @@ class _NetworkState extends State<_Network> with AutomaticKeepAliveClientMixin {
                         kOptionAllowInsecureTLSFallback),
                     if (!outgoingOnly)
                       row(
-                        title: 'Disable UDP',
+                        title: 'Use TCP only',
                         tooltipMessage:
                             '${translate('disable-udp-tip')}\n\n${translate('server-oss-not-support-tip')}',
                         onTap: locked || isOptionFixed(kOptionDisableUdp)
@@ -1797,7 +1798,7 @@ class _DisplayState extends State<_Display> {
       _Radio(context,
           value: kRemoteScrollStyleAuto,
           groupValue: groupValue,
-          label: 'ScrollAuto',
+          label: 'Automatic',
           onChanged: isOptFixed ? null : onChanged),
       _Radio(context,
           value: kRemoteScrollStyleBar,
@@ -1808,7 +1809,7 @@ class _DisplayState extends State<_Display> {
         _Radio(context,
             value: kRemoteScrollStyleEdge,
             groupValue: groupValue,
-            label: 'ScrollEdge',
+            label: 'Scroll at edge',
             onChanged: isOptFixed ? null : onChanged),
         Offstage(
             offstage: groupValue != kRemoteScrollStyleEdge,
@@ -1847,7 +1848,7 @@ class _DisplayState extends State<_Display> {
       _Radio(context,
           value: kRemoteImageQualityLow,
           groupValue: groupValue,
-          label: 'Optimize reaction time',
+          label: 'Lowest latency',
           onChanged: isOptFixed ? null : onChanged),
       _Radio(context,
           value: kRemoteImageQualityCustom,
@@ -1962,7 +1963,7 @@ class _DisplayState extends State<_Display> {
       groupValue = bind.mainDefaultPrivacyModeImpl();
     }
     return _Card(
-      title: 'Privacy mode',
+      title: 'Privacy screen',
       children: privacyModeImpls.map((impl) {
         final d = impl as List<dynamic>;
         return _Radio(context,
@@ -2344,7 +2345,7 @@ class _AboutState extends State<_About> {
       final myId = data['myId'].toString();
       final scrollController = ScrollController();
       return SettingsPage(controller: scrollController, children: [
-        _Card(title: translate('About RustDesk'), children: [
+        _Card(title: translate('About'), children: [
           // The build, read back. Every one of these is an identifier or a
           // measured value, so every one of them is set in the data face and
           // stays selectable — a fingerprint that cannot be copied is a
@@ -2357,11 +2358,11 @@ class _AboutState extends State<_About> {
           const SizedBox(height: 6),
           SettingsLink(
             label: translate('Privacy Statement'),
-            onTap: () => launchUrlString('https://rustdesk.com/privacy.html'),
+            onTap: () => launchUrlString('https://lab-desk.net/privacy'),
           ),
           SettingsLink(
             label: translate('Website'),
-            onTap: () => launchUrlString('https://rustdesk.com'),
+            onTap: () => launchUrlString('https://lab-desk.net'),
           ),
           Container(
             margin: const EdgeInsets.fromLTRB(8, 14, 8, 0),

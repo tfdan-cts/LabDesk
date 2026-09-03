@@ -1,17 +1,17 @@
 Name:       rustdesk
 Version:    1.2.1
 Release:    0
-Summary:    RPM package
+Summary:    LabDesk remote administration client
 License:    GPL-3.0
-URL:        https://rustdesk.com
-Vendor:     rustdesk <info@rustdesk.com>
+URL:        https://lab-desk.net
+Vendor:     LabDesk
 Requires:   gtk3 libxcb libXfixes alsa-lib libva2 pam gstreamer1-plugins-base
 Recommends: libayatana-appindicator-gtk3 libxdo
 
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/Scriptlets/
 
 %description
-The best open-source remote desktop client software, written in Rust.
+Remote administration client for the machines you look after. Based on RustDesk.
 
 %prep
 # we have no source, so nothing here

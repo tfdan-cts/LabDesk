@@ -7,10 +7,10 @@ import 'package:flutter_hbb/labdesk/models/machine_row.dart';
 void main() {
   const row = MachineRow(
     id: '1180573903',
-    hostname: 'homebox-devserver',
-    username: 'homebox',
+    hostname: 'workshop-pc',
+    username: 'ops',
     platform: 'Linux',
-    group: 'trapLab',
+    group: 'lab',
     status: LabDeskPeerStatus.online,
   );
 
@@ -20,8 +20,8 @@ void main() {
   group('buildMachineHealth', () {
     test('identity comes from what the client already holds', () {
       final h = buildMachineHealth(machine: row, connected: false);
-      expect(byLabel(h.identity, 'Hostname').value, 'homebox-devserver');
-      expect(byLabel(h.identity, 'Group').value, 'trapLab');
+      expect(byLabel(h.identity, 'Hostname').value, 'workshop-pc');
+      expect(byLabel(h.identity, 'Group').value, 'lab');
       expect(byLabel(h.identity, 'User').source, MetricSource.known);
     });
 

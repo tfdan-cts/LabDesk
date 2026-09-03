@@ -317,7 +317,7 @@ void changeWhiteList({Function()? callback}) async {
   gFFI.dialogManager.show((setState, close, context) {
     return ldDialog(
       title: LdDialogTitle(
-          title: translate("IP Whitelisting"), glyph: LdIcons.shield),
+          title: translate("Allowed IPs"), glyph: LdIcons.shield),
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -416,7 +416,7 @@ void changeIdWhiteList({Function()? callback}) async {
   gFFI.dialogManager.show((setState, close, context) {
     return ldDialog(
       title: LdDialogTitle(
-          title: translate("ID whitelisting"), glyph: LdIcons.shield),
+          title: translate("Allowed IDs"), glyph: LdIcons.shield),
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,

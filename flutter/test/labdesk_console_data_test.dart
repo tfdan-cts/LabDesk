@@ -109,11 +109,11 @@ void main() {
         peers: [_peer('101'), _peer('102')],
         store: LabDeskPeerStatusStore(),
         historyOf: (_) => const [],
-        groupOf: (id) => id == '101' ? 'trapLab' : null,
+        groupOf: (id) => id == '101' ? 'lab' : null,
       );
 
       final byId = {for (final r in rows) r.id: r};
-      expect(byId['101']!.group, 'trapLab');
+      expect(byId['101']!.group, 'lab');
       expect(byId['102']!.group, isNull);
     });
 

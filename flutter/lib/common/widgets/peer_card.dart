@@ -623,7 +623,7 @@ abstract class BasePeerCard extends StatelessWidget {
   MenuEntryBase<String> _tcpTunnelingAction(BuildContext context) {
     return _connectCommonAction(
       context,
-      translate('TCP tunneling'),
+      translate('Port forwarding'),
       isTcpTunneling: true,
     );
   }
@@ -670,7 +670,7 @@ abstract class BasePeerCard extends StatelessWidget {
   MenuEntryBase<String> _wolAction(String id) {
     return MenuEntryButton<String>(
       childBuilder: (TextStyle? style) => Text(
-        translate('WOL'),
+        translate('Wake on LAN'),
         style: style,
       ),
       proc: () {
@@ -691,7 +691,7 @@ abstract class BasePeerCard extends StatelessWidget {
       ),
       proc: () {
         bind.mainCreateShortcut(id: id);
-        showToast(translate('Successful'));
+        showToast(translate('Done'));
       },
       padding: menuPadding,
       dismissOnClicked: true,
@@ -707,7 +707,7 @@ abstract class BasePeerCard extends StatelessWidget {
       setter: (bool v) async {
         await bind.mainSetPeerOption(
             id: id, key: key, value: bool2option(key, v));
-        showToast(translate('Successful'));
+        showToast(translate('Done'));
       },
       padding: menuPadding,
       dismissOnClicked: true,
@@ -745,7 +745,7 @@ abstract class BasePeerCard extends StatelessWidget {
             id: id,
             key: kOptionForceAlwaysRelay,
             value: bool2option(kOptionForceAlwaysRelay, v));
-        showToast(translate('Successful'));
+        showToast(translate('Done'));
       },
       padding: menuPadding,
       dismissOnClicked: true,
@@ -796,7 +796,7 @@ abstract class BasePeerCard extends StatelessWidget {
                   await bind.mainSetPeerAlias(id: id, alias: newName);
                 } else {
                   await bind.mainSetPeerAlias(id: id, alias: newName);
-                  showToast(translate('Successful'));
+                  showToast(translate('Done'));
                   _update();
                 }
               }
@@ -851,7 +851,7 @@ abstract class BasePeerCard extends StatelessWidget {
               break;
           }
           if (tab != PeerTabIndex.ab) {
-            showToast(translate('Successful'));
+            showToast(translate('Done'));
           }
         }
 
@@ -867,14 +867,14 @@ abstract class BasePeerCard extends StatelessWidget {
   MenuEntryBase<String> _unrememberPasswordAction(String id) {
     return MenuEntryButton<String>(
       childBuilder: (TextStyle? style) => Text(
-        translate('Forget Password'),
+        translate('Forget saved password'),
         style: style,
       ),
       proc: () async {
         bool succ = await gFFI.abModel.changePersonalHashPassword(id, '');
         await bind.mainForgetPassword(id: id);
         if (succ) {
-          showToast(translate('Successful'));
+          showToast(translate('Done'));
         } else {
           if (tab.index == PeerTabIndex.ab.index) {
             BotToast.showText(
@@ -913,7 +913,7 @@ abstract class BasePeerCard extends StatelessWidget {
             favs.add(id);
             await bind.mainStoreFav(favs: favs);
           }
-          showToast(translate('Successful'));
+          showToast(translate('Done'));
         }();
       },
       padding: menuPadding,
@@ -948,7 +948,7 @@ abstract class BasePeerCard extends StatelessWidget {
             await bind.mainStoreFav(favs: favs);
             await reloadFunc();
           }
-          showToast(translate('Successful'));
+          showToast(translate('Done'));
         }();
       },
       padding: menuPadding,
@@ -1300,13 +1300,13 @@ class AddressBookPeerCard extends BasePeerCard {
     final text = names.join(', ');
     return MenuEntryButton<String>(
       childBuilder: (TextStyle? style) => Text(
-        translate('Exist in'),
+        translate('Also in'),
         style: style,
       ),
       proc: () {
         gFFI.dialogManager.show((setState, close, context) {
           return CustomAlertDialog(
-            title: Text(translate('Exist in')),
+            title: Text(translate('Also in')),
             content: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [Text(text)]),
@@ -1407,7 +1407,7 @@ void _rdpDialog(String id) async {
           id: id, key: 'rdp_username', value: username);
       await bind.mainSetPeerOption(
           id: id, key: 'rdp_password', value: password);
-      showToast(translate('Successful'));
+      showToast(translate('Done'));
       close();
     }
 

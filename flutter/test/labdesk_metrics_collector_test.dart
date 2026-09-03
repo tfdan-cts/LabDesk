@@ -111,7 +111,7 @@ LABDESK_UPTIME=3
     });
 
     test('a field glued to the shell\'s bracketed-paste escape is still read', () {
-      // Captured from homebox over the PTY on 2026-09-02: bash emits ESC[?2004l
+      // Captured from a Linux test host over the PTY on 2026-09-02: bash emits ESC[?2004l
       // and a bare CR immediately before the first line of output, so the CPU
       // line did not start with its tag and was dropped.
       const raw = '\x1B[?2004l\rLABDESK_CPU=6.2\r\nLABDESK_MEM_USED=1609699328\r\n'
@@ -124,7 +124,7 @@ LABDESK_UPTIME=3
     test('the Windows probe is bare PowerShell with the marker appended', () {
       final p = MetricsCollector.probeFor('Windows')!;
       // The channel is already PowerShell; a nested powershell -Command with
-      // escaped quotes left the shell at a continuation prompt on Foundry.
+      // escaped quotes left the shell at a continuation prompt on a Windows 11 test host.
       expect(p.command, isNot(startsWith('powershell')));
       expect(p.command, isNot(contains(r'\"')));
       final framed = MetricsCollector.framed(p);

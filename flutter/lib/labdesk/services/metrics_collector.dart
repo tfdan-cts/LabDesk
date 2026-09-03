@@ -32,7 +32,7 @@ class MetricsCollector {
   /// terminal channel on Windows already IS PowerShell: wrapping them in a
   /// nested `powershell -Command "..."` with backslash-escaped quotes left an
   /// unterminated string, and the shell sat at a continuation prompt until the
-  /// probe timed out. Seen on trapLab-Foundry, 2026-09-02.
+  /// probe timed out. Seen on a Windows 11 test host, 2026-09-02.
   static const _windows =
       r'''$os=Get-CimInstance Win32_OperatingSystem; $cpu=(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; $d=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; Write-Output ('LABDESK_CPU=' + $cpu); Write-Output ('LABDESK_MEM_USED=' + (($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) * 1024)); Write-Output ('LABDESK_MEM_TOTAL=' + ($os.TotalVisibleMemorySize * 1024)); Write-Output ('LABDESK_DISK_USED=' + ($d.Size - $d.FreeSpace)); Write-Output ('LABDESK_DISK_TOTAL=' + $d.Size); Write-Output ('LABDESK_UPTIME=' + [int]((Get-Date) - $os.LastBootUpTime).TotalSeconds)''';
 

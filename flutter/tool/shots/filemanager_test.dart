@@ -55,7 +55,7 @@ const _local = <_Entry>[
   _Entry('captures', FmEntryKind.folder, '2026-08-28 22:03:55', ''),
   _Entry('firmware', FmEntryKind.folder, '2026-07-02 14:26:08', ''),
   _Entry('bench-log-0829.csv', FmEntryKind.file, '2026-08-29 18:55:41', '412 KB'),
-  _Entry('foundry-image.tar.zst', FmEntryKind.file, '2026-08-26 03:12:09', '2.7 GB'),
+  _Entry('build-image.tar.zst', FmEntryKind.file, '2026-08-26 03:12:09', '2.7 GB'),
   _Entry('probe-readings.parquet', FmEntryKind.file, '2026-08-30 09:14:37', '88.4 MB'),
   _Entry('rack-diagram.pdf', FmEntryKind.file, '2026-05-11 11:02:20', '1.9 MB'),
   _Entry('serial-dump.txt', FmEntryKind.file, '2026-08-30 09:47:02', '61 KB'),
@@ -289,7 +289,7 @@ Widget _queue() {
       Expanded(
         child: ListView(children: [
           FmJobTile(
-            name: name('foundry-image.tar.zst'),
+            name: name('build-image.tar.zst'),
             state: FmJobState.running,
             stateLabel: 'Transfer file',
             detail: '1/1 files, 1.13 GB / 2.70 GB',
@@ -421,10 +421,10 @@ void main() {
                         isLocal: true,
                         title: 'Local Computer',
                         platformGlyph: LdIcons.linux,
-                        location: _bread(['home', 'minigun', 'lab']),
+                        location: _bread(['home', 'ops', 'lab']),
                         entries: _local,
                         selected: const {
-                          'foundry-image.tar.zst',
+                          'build-image.tar.zst',
                           'probe-readings.parquet'
                         },
                         contextTarget: 'serial-dump.txt',

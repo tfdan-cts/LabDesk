@@ -43,8 +43,9 @@ Future<void> _loadFonts() async {
   // Material's icon font ships with the SDK, not the app. The console shell
   // still draws its sidebar with Material glyphs; without the font they render
   // as empty boxes and the shot cannot be judged.
+  final flutterRoot = Platform.environment['FLUTTER_ROOT'] ?? '';
   final icons = File(
-      r'C:\Users\DVonR\TrapLab\flutter\flutter\bin\cache\artifacts\material_fonts\materialicons-regular.otf');
+      '$flutterRoot/bin/cache/artifacts/material_fonts/materialicons-regular.otf');
   if (icons.existsSync()) await load('MaterialIcons', [icons.path]);
 }
 
@@ -71,25 +72,25 @@ MachineRow _m(
 
 final _machines = <MachineRow>[
   _m('914203771',
-      alias: 'trapLab-Foundry',
-      hostname: 'traplab-foundry',
-      username: 'minigun',
+      alias: 'Build server',
+      hostname: 'build-server',
+      username: 'ops',
       platform: 'Windows',
       status: LabDeskPeerStatus.online,
       group: 'Lab bench',
       seen: Duration.zero),
   _m('285119043',
-      alias: 'Homebox',
-      hostname: 'homebox-devserver',
-      username: 'homebox',
+      alias: 'Workshop PC',
+      hostname: 'workshop-pc',
+      username: 'ops',
       platform: 'Linux',
       status: LabDeskPeerStatus.online,
       group: 'Lab bench',
       seen: Duration.zero),
   _m('730884512',
-      alias: 'trapLab-Forge_Laptop',
-      hostname: 'traplab-forge',
-      username: 'minigun',
+      alias: 'Spare laptop',
+      hostname: 'spare-laptop',
+      username: 'ops',
       platform: 'Windows',
       status: LabDeskPeerStatus.offline,
       group: 'Lab bench',
@@ -145,7 +146,7 @@ final _machines = <MachineRow>[
 const _groups5 = ['Lab bench', 'Field sites', 'Customer hosted', 'Warehouse', 'Depots'];
 
 const _hosts = [
-  ('foundry', 'Windows'),
+  ('build', 'Windows'),
   ('devserver', 'Linux'),
   ('rec-center', 'Windows'),
   ('kiosk', 'Android'),
@@ -159,7 +160,7 @@ const _hosts = [
   ('backup', 'Linux'),
 ];
 
-const _users = ['minigun', 'arteco', 'frontdesk', 'ops', 'gbucci', 'cts'];
+const _users = ['bench', 'arteco', 'frontdesk', 'ops', 'gbucci', 'cts'];
 
 final _fleet = <MachineRow>[
   for (var i = 0; i < 60; i++)
@@ -195,9 +196,9 @@ final _fleet = <MachineRow>[
     ),
 ];
 
-/// The peer sets the fixture fleet belongs to. Foundry and Homebox are
-/// favourites as well as recent, which is what makes the first row's menu the
-/// interesting one: it is the union of two of the old tabs.
+/// The peer sets the fixture fleet belongs to. The build server and the
+/// workshop PC are favourites as well as recent, which is what makes the first
+/// row's menu the interesting one: it is the union of two of the old tabs.
 final _sets = <PeerSetChip>[
   PeerSetChip(
     id: kSetRecent,
@@ -260,7 +261,7 @@ Widget _app({
         // it looks beside the sidebar and title bar it is framed by.
         body: ConsoleShell(
           machines: fleet,
-          profileName: 'trapLab Tailnet',
+          profileName: 'Lab network',
           lastRefreshed: _now.subtract(const Duration(seconds: 8)),
           onRefresh: () {},
           now: _now,

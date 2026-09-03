@@ -559,13 +559,13 @@ void main() {
   });
 
   group('sentences', () {
-    String nameOf(String id) => {'a': 'homebox', 'b': 'nas'}[id] ?? id;
+    String nameOf(String id) => {'a': 'workshop', 'b': 'nas'}[id] ?? id;
 
     test('a rule reads as one line an operator can check', () {
       expect(
         _rule(const WentOffline(forMinutes: 5), targets: const ['a'])
             .sentence(nameOf),
-        'When homebox goes offline for 5 minutes → notify: "hi"',
+        'When workshop goes offline for 5 minutes → notify: "hi"',
       );
       expect(
         _rule(const MetricAbove(
@@ -578,7 +578,7 @@ void main() {
         _rule(const CameOnline(), targets: const ['a', 'b'],
                 action: const MonitorOn())
             .sentence(nameOf),
-        'When homebox or nas comes online → turn monitoring on',
+        'When workshop or nas comes online → turn monitoring on',
       );
       expect(
         _rule(const Schedule.atTime(hour: 7, minute: 5, weekdays: [1, 5]),

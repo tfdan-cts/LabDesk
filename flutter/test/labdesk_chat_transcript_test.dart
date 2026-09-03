@@ -9,7 +9,7 @@ void main() {
 
   SessionChat sample() => SessionChat(
         id: '1180573903',
-        peerLabel: 'homebox-devserver',
+        peerLabel: 'workshop-pc',
         direction: SessionDirection.outgoing,
         lines: [
           ChatLine(from: ChatFrom.mine, text: 'rebooting the box', at: at),
@@ -25,7 +25,7 @@ void main() {
       final back = decodeSessionChat(encodeSessionChat(sample()))!;
 
       expect(back.id, '1180573903');
-      expect(back.peerLabel, 'homebox-devserver');
+      expect(back.peerLabel, 'workshop-pc');
       expect(back.direction, SessionDirection.outgoing);
       expect(back.lines.length, 2);
       expect(back.lines.first.from, ChatFrom.mine);

@@ -47,8 +47,9 @@ Future<void> _loadFonts() async {
   // The console sidebar still draws its settings sub-items with Material
   // glyphs; without the font they render as empty boxes and the framing cannot
   // be judged.
+  final flutterRoot = Platform.environment['FLUTTER_ROOT'] ?? '';
   final icons = File(
-      r'C:\Users\DVonR\TrapLab\flutter\flutter\bin\cache\artifacts\material_fonts\materialicons-regular.otf');
+      '$flutterRoot/bin/cache/artifacts/material_fonts/materialicons-regular.otf');
   if (icons.existsSync()) await load('MaterialIcons', [icons.path]);
 }
 
@@ -194,7 +195,7 @@ Widget _general() {
         controlAbove: true,
         control: Row(children: [
           Expanded(
-            child: Text(r'C:\Users\minigun\Videos\LabDesk',
+            child: Text(r'C:\Users\ops\Videos\LabDesk',
                 style: C.data(size: 12, color: C.text)),
           ),
           const SizedBox(width: 12),
@@ -345,7 +346,7 @@ Widget _app(String page, Widget body) {
         // and the page body in the same plane the fleet table sits in.
         body: ConsoleShell(
           machines: const <MachineRow>[],
-          profileName: 'trapLab Tailnet',
+          profileName: 'Lab network',
           initialSection: ConsoleSection.settings,
           lastRefreshed: _now.subtract(const Duration(seconds: 8)),
           onRefresh: () {},

@@ -42,16 +42,16 @@ const _psBanner = [
 List<String> _linux(ToolId tool, List<String> rows) => [
       ..._ubuntuBanner,
       // The shell echoes the prompt and the command before it runs it.
-      'dvonr@lab-ubuntu:~\$ ${ToolCatalog.commandFor(tool, 'linux')!.command}',
+      'ops@lab-ubuntu:~\$ ${ToolCatalog.commandFor(tool, 'linux')!.command}',
       ...rows,
-      'dvonr@lab-ubuntu:~\$ ',
+      'ops@lab-ubuntu:~\$ ',
     ];
 
 List<String> _windows(ToolId tool, List<String> rows) => [
       ..._psBanner,
-      'PS C:\\Users\\dvonr> ${ToolCatalog.commandFor(tool, 'windows')!.command}',
+      'PS C:\\Users\\ops> ${ToolCatalog.commandFor(tool, 'windows')!.command}',
       ...rows,
-      'PS C:\\Users\\dvonr> ',
+      'PS C:\\Users\\ops> ',
     ];
 
 void main() {

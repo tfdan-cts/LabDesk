@@ -450,7 +450,7 @@ Future<void> showServerProfileEditDialog(
             // No API server field: the LabDesk account is global and always
             // lives at lab-desk.net, whichever profile is active. The value is
             // kept in the profile for older configs but never edited here.
-            field('Key', key),
+            field('Server key', key),
           ],
         ),
       ),

@@ -39,8 +39,9 @@ Future<void> _loadFonts() async {
   await load('JetBrainsMono', 'assets/fonts/JetBrainsMono-Medium.ttf');
   // Material's icon font ships with the SDK, not the app; without it any
   // remaining Material glyph renders as an empty box.
+  final flutterRoot = Platform.environment['FLUTTER_ROOT'] ?? '';
   final icons = File(
-      r'C:\Users\DVonR\TrapLab\flutter\flutter\bin\cache\artifacts\material_fonts\materialicons-regular.otf');
+      '$flutterRoot/bin/cache/artifacts/material_fonts/materialicons-regular.otf');
   if (icons.existsSync()) await load('MaterialIcons', icons.path);
 }
 

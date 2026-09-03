@@ -1001,7 +1001,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   void _showExistIn(String id) {
     final names = gFFI.abModel.idExistIn(id);
     gFFI.dialogManager.show((setState, close, context) => CustomAlertDialog(
-          title: Text(translate('Exist in')),
+          title: Text(translate('Also in')),
           content: Text(names.isEmpty ? translate('Empty') : names.join(', ')),
           actions: [dialogButton('OK', onPressed: close)],
           onSubmit: close,

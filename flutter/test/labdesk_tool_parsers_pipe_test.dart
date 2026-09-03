@@ -18,10 +18,10 @@ void main() {
 
   test('a bar-separated Windows row parses like a tab-separated one', () {
     final table = ToolParsers.parse(ToolId.disk, [
-      'PS C:\\Users\\minigun> \$d=Get-CimInstance ...',
+      'PS C:\\Users\\ops> \$d=Get-CimInstance ...',
       'LDROW|C:|Windows|303.1|211.2|514.3',
       'LDROW|D:||120.0|880.0|1000.0',
-      'PS C:\\Users\\minigun>',
+      'PS C:\\Users\\ops>',
     ]);
     expect(table.rows.length, 2);
     expect(table.rows.first.first, 'C:');

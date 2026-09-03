@@ -131,7 +131,7 @@ void main() {
       // The channel on Windows is already PowerShell, so the probe is bare
       // statements and the marker is one more of them. A nested
       // `powershell -Command "..."` with escaped quotes left the far shell at a
-      // continuation prompt until the probe timed out (Foundry, 2026-09-02).
+      // continuation prompt until the probe timed out (a Windows 11 test host, 2026-09-02).
       final framed =
           MetricsCollector.framed(MetricsCollector.probeFor('Windows 11')!);
       expect(framed, isNot(startsWith('powershell')));

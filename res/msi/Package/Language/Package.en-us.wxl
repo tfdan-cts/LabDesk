@@ -20,7 +20,7 @@ This file contains the declaration of all the localizable strings.
 
 	<!-- Client related strings -->
 	<String Id="F_Client" Value="Client" />
-	<String Id="F_Client_Desc" Value="The user interface. Plays media files." />
+	<String Id="F_Client_Desc" Value="The RustDesk application." />
 	<String Id="F_Client_Plugins" Value="Plugins" />
 	<String Id="F_Client_Plugins_Desc" Value="Plugins for the client." />
 	<String Id="F_LAVFilters" Value="LAV Filters" />
@@ -34,7 +34,7 @@ This file contains the declaration of all the localizable strings.
 
 	<!-- Server related strings -->
 	<String Id="F_Server" Value="Server" />
-	<String Id="F_Server_Desc" Value="The server part of RustDesk. Provides the MediaLibrary and other services." />
+	<String Id="F_Server_Desc" Value="The background service that accepts incoming sessions." />
 	<String Id="F_Server_Plugins" Value="Plugins" />
 	<String Id="F_Server_Plugins_Desc" Value="Plugins for the server." />
 
@@ -42,7 +42,7 @@ This file contains the declaration of all the localizable strings.
 	<String Id="Service_Description" Value="This service runs the RustDesk Server." />
 
 	<!-- Launch Conditions -->
-	<String Id="LC_OS" Value="[ProductName] requires minimum Windows 7 / 2008 R2 as operating system." />
+	<String Id="LC_OS" Value="[ProductName] requires Windows 10 or later." />
 	<String Id="LC_ADMIN" Value="You need to be an administrator to install [ProductName]." />
 
 	<!-- User Interfaces -->

@@ -341,7 +341,7 @@ class RemoteMenuEntry {
   }) {
     return MenuEntryButton<String>(
       childBuilder: (TextStyle? style) => Text(
-        translate('Insert Lock'),
+        translate('Lock remote screen'),
         style: style,
       ),
       proc: () {
@@ -364,7 +364,7 @@ class RemoteMenuEntry {
   }) {
     return MenuEntryButton<String>(
       childBuilder: (TextStyle? style) => Text(
-        translate("Insert Ctrl + Alt + Del"),
+        translate("Send Ctrl + Alt + Del"),
         style: style,
       ),
       proc: () {
@@ -1203,7 +1203,7 @@ class _ControlMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ToolbarSubmenuButton(
-        tooltip: translate('Control Actions'),
+        tooltip: translate('Actions'),
         glyph: LdIcons.actions,
         color: ToolbarSkin.restColor,
         hoverColor: ToolbarSkin.hoverRestColor,
@@ -1462,7 +1462,7 @@ class _DisplayMenuState extends State<_DisplayMenu> {
             Divider(),
             _SubmenuButton(
                 ffi: widget.ffi,
-                child: Text(translate('Privacy mode')),
+                child: Text(translate('Privacy screen')),
                 menuChildren: privacyModeList
                     .map((e) => CkbMenuButton(
                         value: e.value,
@@ -1501,7 +1501,7 @@ class _DisplayMenuState extends State<_DisplayMenu> {
             ...v.map((e) {
               final isCustom = e.value == kRemoteViewStyleCustom;
               final child =
-                  isCustom ? Text(translate('Scale custom')) : e.child;
+                  isCustom ? Text(translate('Custom scale')) : e.child;
               // Whether the current selection is already custom
               final bool isGroupCustomSelected =
                   e.groupValue == kRemoteViewStyleCustom;
@@ -1589,7 +1589,7 @@ class _DisplayMenuState extends State<_DisplayMenu> {
 
       return Obx(() => Column(children: [
             RdoMenuButton<String>(
-              child: Text(translate('ScrollAuto')),
+              child: Text(translate('Automatic')),
               value: kRemoteScrollStyleAuto,
               groupValue: groupValue,
               onChanged: widget.ffi.canvasModel.imageOverflow.value
@@ -1610,7 +1610,7 @@ class _DisplayMenuState extends State<_DisplayMenu> {
             ),
             if (!isWeb) ...[
               RdoMenuButton<String>(
-                child: Text(translate('ScrollEdge')),
+                child: Text(translate('Scroll at edge')),
                 value: kRemoteScrollStyleEdge,
                 groupValue: groupValue,
                 closeOnActivate: false,
@@ -2408,7 +2408,7 @@ class _KeyboardMenu extends StatelessWidget {
               }
             : null,
         ffi: ffi,
-        child: Text(translate('View Mode')));
+        child: Text(translate('View only')));
   }
 
   showMyCursor() {

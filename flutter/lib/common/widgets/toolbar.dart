@@ -482,7 +482,7 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
     );
     v.add(
       TTextMenu(
-          child: Text(translate('TCP tunneling')),
+          child: Text(translate('Port forwarding')),
           onPressed: () => connectWithToken(isTcpTunneling: true)),
     );
   }
@@ -520,7 +520,7 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
       (pi.platform == kPeerPlatformLinux || pi.sasEnabled)) {
     v.add(
       TTextMenu(
-          child: Text('${translate("Insert Ctrl + Alt + Del")}'),
+          child: Text(translate("Send Ctrl + Alt + Del")),
           onPressed: () => bind.sessionCtrlAltDel(sessionId: sessionId)),
     );
   }
@@ -541,7 +541,7 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   if (isDefaultConn && !ffiModel.viewOnly && ffi.ffiModel.keyboard) {
     v.add(
       TTextMenu(
-          child: Text(translate('Insert Lock')),
+          child: Text(translate('Lock remote screen')),
           onPressed: () => bind.sessionLockScreen(sessionId: sessionId)),
     );
   }
@@ -671,7 +671,7 @@ Future<List<TRadioMenu<String>>> toolbarViewStyle(
         groupValue: groupValue,
         onChanged: onChanged),
     TRadioMenu<String>(
-        child: Text(translate('Scale custom')),
+        child: Text(translate('Custom scale')),
         value: kRemoteViewStyleCustom,
         groupValue: groupValue,
         onChanged: onChanged)
@@ -699,7 +699,7 @@ Future<List<TRadioMenu<String>>> toolbarImageQuality(
         groupValue: groupValue,
         onChanged: onChanged),
     TRadioMenu<String>(
-        child: Text(translate('Optimize reaction time')),
+        child: Text(translate('Lowest latency')),
         value: kRemoteImageQualityLow,
         groupValue: groupValue,
         onChanged: onChanged),
@@ -1042,7 +1042,7 @@ Future<List<TToggleMenu>> toolbarDisplayToggle(
               sessionId: ffi.sessionId, value: kOptionToggleViewOnly);
           ffiModel.setViewOnly(id, value);
         },
-        child: Text(translate('View Mode'))));
+        child: Text(translate('View only'))));
   }
   return v;
 }
@@ -1092,7 +1092,7 @@ List<TToggleMenu> toolbarPrivacyMode(
                 toggleFunc(sessionId, option);
               }
             : null,
-        child: Text(translate('Privacy mode')));
+        child: Text(translate('Privacy screen')));
   }
 
   final privacyModeImpls =

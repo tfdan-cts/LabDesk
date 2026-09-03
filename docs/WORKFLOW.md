@@ -101,25 +101,13 @@ Notes on the gates as they stand today:
 ## Testing on real machines
 
 LabDesk is a remote administration tool, so a change to anything that touches a peer is not
-verified until it has been exercised against a real second machine. The two machines available
-for this are reached over the trapLab tailnet:
-
-| Machine | Address | Platform | Notes |
-|---|---|---|---|
-| `homebox-devserver` | `100.89.139.104`, user `homebox` | Ubuntu 26.04 | RustDesk 1.4.9 service active, pointed at the self-hosted relay. Passwordless sudo. |
-| `trapLab-Foundry` | `100.81.16.49`, user `minigun` | Windows 11 | Reached over SSH. |
-
-`trapLab-Forge` is also part of the fleet but is frequently powered off; confirm with
-`tailscale status` before planning to use it. While the workstation is joined to the other
-tailnet, every trapLab host looks dead in exactly the way a real outage does, so confirm which
-tailnet is active before concluding a machine is down.
+verified until it has been exercised against a real second machine. Real-machine testing happens
+on private hosts recorded outside this repository.
 
 ## Private files
 
-`AGENTS.md`, `CLAUDE.md` and `GEMINI.md` are listed in `.git/info/exclude` on the development
-clone. They are working files for automated agents and must never be committed: they have been
-leaked into this public repository once already. Do not add them to the public `.gitignore`
-either, because naming them there is itself a disclosure.
+Working files for automated agents are excluded locally and must never be committed. Do not name
+them in the public `.gitignore` either, because naming them there is itself a disclosure.
 
 Before any commit made with `git add -A`, check `git diff --cached` and confirm every hunk is
 intended.

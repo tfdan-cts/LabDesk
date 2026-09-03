@@ -262,7 +262,7 @@ Widget _sessionWindow({
     tab: '285 119 043',
     body: _card(
       identity: CmIdentity(
-        name: locked ? '' : 'Homebox',
+        name: locked ? '' : 'Workshop PC',
         peerId: '285 119 043',
         kindGlyph: LdIcons.display,
         kindLabel: 'Control Remote Desktop',
