@@ -1557,6 +1557,54 @@ pub fn quit_gui() {
     unsafe { gtk_main_quit() };
 }
 
+/// Which package manager owns the running binary: "deb" or "rpm". None for an
+/// AppImage, a flatpak, or a copy that was never installed from a package, and
+/// those get the download page rather than a package they cannot install.
+pub fn installed_package_kind() -> Option<&'static str> {
+    if std::env::var_os("APPIMAGE").is_some() || std::env::var_os("FLATPAK_ID").is_some() {
+        return None;
+    }
+    let exe = std::env::current_exe().ok()?;
+    let exe = exe.to_str()?;
+    if Command::new("dpkg").args(["-S", exe]).output().map(|o| o.status.success()).unwrap_or(false) {
+        return Some("deb");
+    }
+    if Command::new("rpm").args(["-qf", exe]).output().map(|o| o.status.success()).unwrap_or(false) {
+        return Some("rpm");
+    }
+    None
+}
+
+/// Installs a downloaded LabDesk package with one root prompt (pkexec), then
+/// relaunches the interface. The package's own scripts restart the service.
+pub fn update_to(file: &str) -> ResultType<()> {
+    let path = std::path::Path::new(file);
+    if !path.is_file() {
+        bail!("update file does not exist: {file}");
+    }
+    let kind = match path.extension().and_then(|e| e.to_str()) {
+        Some("deb") => "deb",
+        Some("rpm") => "rpm",
+        other => bail!("unsupported update package: {:?}", other),
+    };
+    let status = match kind {
+        "deb" => Command::new("pkexec").args(["dpkg", "-i", file]).status()?,
+        _ => Command::new("pkexec").args(["rpm", "-Uvh", "--replacepkgs", file]).status()?,
+    };
+    if !status.success() {
+        bail!("package install exited with {status}");
+    }
+    std::fs::remove_file(file).ok();
+    // The running binary is now the old inode. Start the new one and leave.
+    let exe = std::env::current_exe()?;
+    Command::new(exe).spawn()?;
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        std::process::exit(0);
+    });
+    Ok(())
+}
+
 /*
 pub fn exec_privileged(args: &[&str]) -> ResultType<Child> {
     Ok(Command::new("pkexec").args(args).spawn()?)

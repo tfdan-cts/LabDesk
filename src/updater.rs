@@ -352,12 +352,24 @@ fn update_new_version(update_msi: bool, version: &str, file_path: &PathBuf) {
     }
 }
 
+/// The hosts an update may be fetched from, and the path shape under each.
+/// Upstream: `https://github.com/rustdesk/rustdesk/releases/download/<tag>/<file>`.
+/// LabDesk: `https://lab-desk.net/releases/download/<version>/<file>`, which the
+/// site streams from the release its administrator made public.
 pub fn get_update_download_file_from_url(url: &str) -> Option<PathBuf> {
     let parsed = url::Url::parse(url).ok()?;
+    let labdesk_host = crate::common::LABDESK_SITE.trim_start_matches("https://");
+    let (prefix, host, repo_segments) = if url.starts_with("https://github.com/") {
+        ("https://github.com/", "github.com", 2)
+    } else if url.starts_with(&format!("https://{}/", labdesk_host)) {
+        ("", labdesk_host, 0)
+    } else {
+        return None;
+    };
     // Check the raw prefix before Url normalizes default ports.
-    if !url.starts_with("https://github.com/")
+    if (!prefix.is_empty() && !url.starts_with(prefix))
         || parsed.scheme() != "https"
-        || parsed.host_str() != Some("github.com")
+        || parsed.host_str() != Some(host)
         || !parsed.username().is_empty()
         || parsed.password().is_some()
         || parsed.port().is_some()
@@ -368,16 +380,19 @@ pub fn get_update_download_file_from_url(url: &str) -> Option<PathBuf> {
     }
 
     let mut segments = parsed.path_segments()?;
-    let owner = segments.next()?;
-    let repo = segments.next()?;
+    if repo_segments == 2 {
+        let owner = segments.next()?;
+        let repo = segments.next()?;
+        if owner != "rustdesk" || repo != "rustdesk" {
+            return None;
+        }
+    }
     let releases = segments.next()?;
     let download = segments.next()?;
     let tag = segments.next()?;
     let filename = segments.next()?;
 
-    if owner != "rustdesk"
-        || repo != "rustdesk"
-        || releases != "releases"
+    if releases != "releases"
         || download != "download"
         || tag.is_empty()
         || segments.next().is_some()
@@ -669,6 +684,29 @@ mod tests {
             file.file_name().and_then(|name| name.to_str()),
             Some("rustdesk-1.4.0-x86_64.dmg")
         );
+    }
+
+    #[test]
+    fn update_download_file_accepts_labdesk_site_asset_urls() {
+        let file = get_download_file_from_url(
+            "https://lab-desk.net/releases/download/1.2.0/rustdesk-1.2.0-x86_64.exe",
+        )
+        .expect("valid lab-desk.net release asset URL");
+        assert_eq!(
+            file.file_name().and_then(|name| name.to_str()),
+            Some("rustdesk-1.2.0-x86_64.exe")
+        );
+        for url in [
+            "http://lab-desk.net/releases/download/1.2.0/rustdesk-1.2.0-x86_64.exe",
+            "https://lab-desk.net/rustdesk-1.2.0-x86_64.exe",
+            "https://lab-desk.net/releases/download/1.2.0/",
+            "https://lab-desk.net/releases/download/1.2.0/nested/rustdesk.exe",
+            "https://lab-desk.net/releases/download/1.2.0/rustdesk.exe?x=1",
+            "https://lab-desk.net.evil.com/releases/download/1.2.0/rustdesk.exe",
+            "https://evil.com/lab-desk.net/releases/download/1.2.0/rustdesk.exe",
+        ] {
+            assert!(get_download_file_from_url(url).is_none(), "{url}");
+        }
     }
 
     #[test]

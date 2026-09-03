@@ -601,7 +601,9 @@ class _GeneralState extends State<_General> {
             ),
           ),
       ],
-      if (!isWeb && !bind.isCustomClient())
+      // LabDesk checks lab-desk.net, so the toggle applies even though the
+      // build counts as a custom client upstream.
+      if (!isWeb)
         _OptionCheckBox(
           context,
           'Check for software update on startup',

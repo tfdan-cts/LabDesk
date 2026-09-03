@@ -938,8 +938,19 @@ pub fn is_modifier(evt: &KeyEvent) -> bool {
     }
 }
 
+/// The LabDesk product site. It answers the version check the stock updater
+/// makes and streams the release assets the updater then asks for.
+pub const LABDESK_SITE: &str = "https://lab-desk.net";
+
+#[inline]
+pub fn is_labdesk() -> bool {
+    hbb_common::config::APP_NAME.read().unwrap().eq("LabDesk")
+}
+
 pub fn check_software_update() {
-    if is_custom_client() {
+    // Upstream skips the check for every renamed build because api.rustdesk.com
+    // knows nothing about them. LabDesk has its own update service.
+    if is_custom_client() && !is_labdesk() {
         return;
     }
     let opt = LocalConfig::get_option(keys::OPTION_ENABLE_CHECK_UPDATE);
@@ -949,11 +960,17 @@ pub fn check_software_update() {
 }
 
 // No need to check `danger_accept_invalid_cert` for now.
-// Because the url is always `https://api.rustdesk.com/version/latest`.
+// Because the url is always `https://api.rustdesk.com/version/latest`,
+// or lab-desk.net's equivalent for LabDesk.
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
     let (request, url) =
         hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
+    let url = if is_labdesk() {
+        format!("{}/version/latest", LABDESK_SITE)
+    } else {
+        url
+    };
     let proxy_conf = Config::get_socks();
     let tls_url = get_url_for_tls(&url, &proxy_conf);
     let tls_type = get_cached_tls_type(tls_url);
@@ -1062,6 +1079,12 @@ pub fn get_api_server(api: String, custom: String) -> String {
 }
 
 fn get_api_server_(api: String, custom: String) -> String {
+    // LabDesk accounts are global: login, address book and heartbeat always go
+    // to lab-desk.net whatever server profile is active. The per-profile api
+    // field is ignored on purpose (owner decision 2026-09-03).
+    if is_labdesk() {
+        return LABDESK_SITE.to_owned();
+    }
     #[cfg(windows)]
     if let Ok(lic) = crate::platform::windows::get_license_from_exe_name() {
         if !lic.api.is_empty() {

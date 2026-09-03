@@ -18,6 +18,9 @@ import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/pages/labdesk_machine_link.dart';
 import 'package:flutter_hbb/desktop/pages/labdesk_terminal_rpc.dart';
 import 'package:flutter_hbb/desktop/widgets/server_profile_switcher.dart';
+import 'package:flutter_hbb/desktop/widgets/update_progress.dart' show handleUpdate;
+import 'package:flutter_hbb/models/state_model.dart';
+import 'package:get/get.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
@@ -1163,7 +1166,9 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
           // belong in the console; they are named in docs/CONSOLE.md as
           // outstanding rather than quietly dropped.
           const Offstage(offstage: true, child: DesktopHomePage()),
-          ConsoleShell(
+          Column(children: [
+            _updateBanner(),
+            Expanded(child: ConsoleShell(
         machines: machines,
         samples: labdeskStatus.samples,
         profiles: _profiles,
@@ -1225,9 +1230,46 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
               ConsoleSection.automation: _automationScreen,
               ConsoleSection.tools: _toolsScreen,
             },
-          ),
+          )),
+          ]),
         ],
       ),
     );
   }
+
+  /// A new version is available from lab-desk.net. The core sets
+  /// [stateGlobal.updateUrl] after its check on start and once a day; the
+  /// banner offers the in-app update the stock client already implements
+  /// (download, then a one-time elevation to install and relaunch).
+  Widget _updateBanner() => Obx(() {
+        final url = stateGlobal.updateUrl.value;
+        if (url.isEmpty || _updateDismissed) return const SizedBox.shrink();
+        final version = url.substring(url.lastIndexOf('/') + 1);
+        final theme = Theme.of(context);
+        return Material(
+          color: theme.colorScheme.primary.withOpacity(0.12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            child: Row(children: [
+              Icon(Icons.system_update_alt, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '${translate('LabDesk')} $version ${translate('is available. Update installs in place and relaunches.')}',
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+              TextButton(
+                onPressed: () => handleUpdate(url),
+                child: Text(translate('Update now')),
+              ),
+              TextButton(
+                onPressed: () => setState(() => _updateDismissed = true),
+                child: Text(translate('Later')),
+              ),
+            ]),
+          ),
+        );
+      });
+  bool _updateDismissed = false;
 }
