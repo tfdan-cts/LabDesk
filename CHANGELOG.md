@@ -3,6 +3,19 @@
 LabDesk's own versions. The RustDesk core underneath is stated in the README, not versioned here.
 Rules: `docs/VERSIONING.md`.
 
+## 1.2.1 — 2026-09-03
+
+- Updates come from lab-desk.net. LabDesk checks for a new version on start and once a day,
+  shows a banner in the console, downloads the build the site administrator made public, and
+  installs it in place: silently on Windows, through the existing path on macOS, and on Linux
+  with one root prompt for a deb or rpm package. AppImage and flatpak copies get the download
+  page instead.
+- The LabDesk account is global. Sign-in, address book and device presence go to lab-desk.net
+  whichever server profile is active; the per-profile API server field is no longer edited.
+- The console's machine links no longer raise session dialogs in the main window; a failed
+  link reports its reason ("ID does not exist") where it used to guess at the password, and no
+  session error can close the application.
+
 ## 1.2.0 — 2026-09-02
 
 The first version the binaries carry themselves; until now they reported the core's `1.4.9`.
