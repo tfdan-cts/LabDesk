@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../charts/reachability_chart.dart';
@@ -267,39 +268,65 @@ class _ConsoleShellState extends State<ConsoleShell> {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: C.bg,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _Sidebar(
-            section: _section,
-            profileName: widget.profileName,
-            profiles: widget.profiles,
-            onProfileSelected: widget.onProfileSelected,
-            selected: _selected,
-            onSelect: _setSection,
-            subItems: widget.subItems,
-            selectedSubItem: widget.selectedSubItem,
-            onSubItemSelected: widget.onSubItemSelected,
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _TitleBar(
-                  section: _section,
-                  machine: _selected,
-                  isRefreshing: widget.isRefreshing,
-                  lastRefreshed: widget.lastRefreshed,
-                  onRefresh: widget.onRefresh,
-                  now: widget.now,
+    // Ctrl+1 .. Ctrl+9 open the sections in sidebar order, so an operator
+    // living in the terminal never has to reach for the pointer to change
+    // rooms. The same numbers are shown in each entry's tooltip.
+    final digits = [
+      LogicalKeyboardKey.digit1,
+      LogicalKeyboardKey.digit2,
+      LogicalKeyboardKey.digit3,
+      LogicalKeyboardKey.digit4,
+      LogicalKeyboardKey.digit5,
+      LogicalKeyboardKey.digit6,
+      LogicalKeyboardKey.digit7,
+      LogicalKeyboardKey.digit8,
+      LogicalKeyboardKey.digit9,
+    ];
+    return CallbackShortcuts(
+      bindings: {
+        for (var i = 0;
+            i < ConsoleSection.values.length && i < digits.length;
+            i++)
+          SingleActivator(digits[i], control: true): () =>
+              _setSection(ConsoleSection.values[i]),
+      },
+      child: Focus(
+        autofocus: true,
+        child: ColoredBox(
+          color: C.bg,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _Sidebar(
+                section: _section,
+                profileName: widget.profileName,
+                profiles: widget.profiles,
+                onProfileSelected: widget.onProfileSelected,
+                selected: _selected,
+                onSelect: _setSection,
+                subItems: widget.subItems,
+                selectedSubItem: widget.selectedSubItem,
+                onSubItemSelected: widget.onSubItemSelected,
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _TitleBar(
+                      section: _section,
+                      machine: _selected,
+                      isRefreshing: widget.isRefreshing,
+                      lastRefreshed: widget.lastRefreshed,
+                      onRefresh: widget.onRefresh,
+                      now: widget.now,
+                    ),
+                    Expanded(child: _body()),
+                  ],
                 ),
-                Expanded(child: _body()),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -355,7 +382,8 @@ class _ConsoleShellState extends State<ConsoleShell> {
               : (cmd) => widget.onTerminalSubmit?.call(_selectedId!, cmd),
           onOpenSession: _selectedId == null
               ? null
-              : () => widget.onRunAction?.call(_selectedId!, kMachineActions[1]),
+              : () =>
+                  widget.onRunAction?.call(_selectedId!, kMachineActions[1]),
         );
       case ConsoleSection.actions:
         return ActionsScreen(
@@ -557,6 +585,9 @@ class _Sidebar extends StatelessWidget {
                     _NavItem(
                       section: s,
                       active: s == section,
+                      shortcut: ConsoleSection.values.indexOf(s) < 9
+                          ? 'Ctrl+${ConsoleSection.values.indexOf(s) + 1}'
+                          : null,
                       onTap: () => onSelect(s),
                     ),
                     // Nested pages appear only under the open section, so the
@@ -644,30 +675,80 @@ class _Sidebar extends StatelessWidget {
 }
 
 class _NavItem extends StatefulWidget {
-  const _NavItem({required this.section, required this.active, required this.onTap});
+  const _NavItem({
+    required this.section,
+    required this.active,
+    required this.onTap,
+    this.shortcut,
+  });
 
   final ConsoleSection section;
   final bool active;
   final VoidCallback onTap;
+  final String? shortcut;
 
   @override
   State<_NavItem> createState() => _NavItemState();
 }
 
+/// Focus, Enter and Space, a ring, and button semantics for a sidebar entry.
+/// The entries were pointer-only; a console reached over a remote session is
+/// often driven from a keyboard, and a screen reader needs to be told which
+/// room it is in.
+Widget _navFocusable({
+  required String label,
+  required bool active,
+  required VoidCallback onTap,
+  required ValueChanged<bool> onHover,
+  required ValueChanged<bool> onFocus,
+  required bool focused,
+  required Widget child,
+}) =>
+    Semantics(
+      button: true,
+      selected: active,
+      focusable: true,
+      focused: focused,
+      label: label,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: FocusableActionDetector(
+        mouseCursor: SystemMouseCursors.click,
+        onShowHoverHighlight: onHover,
+        onShowFocusHighlight: onFocus,
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+            onTap();
+            return null;
+          }),
+        },
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: child,
+        ),
+      ),
+    );
+
 class _NavItemState extends State<_NavItem> {
   bool _hover = false;
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
     final fg = widget.active ? C.text : (_hover ? C.text : C.textMuted);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 1),
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: GestureDetector(
+      child: Tooltip(
+        message: widget.shortcut ?? '',
+        waitDuration: const Duration(milliseconds: 700),
+        child: _navFocusable(
+          label: widget.section.label,
+          active: widget.active,
           onTap: widget.onTap,
+          onHover: (v) => setState(() => _hover = v),
+          onFocus: (v) => setState(() => _focused = v),
+          focused: _focused,
           child: AnimatedContainer(
             duration: C.fast,
             height: 34,
@@ -677,6 +758,10 @@ class _NavItemState extends State<_NavItem> {
                   ? C.accent.withOpacity(0.14)
                   : (_hover ? C.surfaceHi : Colors.transparent),
               borderRadius: C.roundedSm,
+              border: Border.all(
+                color: _focused ? C.focusRing : Colors.transparent,
+                width: 1,
+              ),
             ),
             child: Row(
               children: [
@@ -765,7 +850,8 @@ class _TitleBar extends StatelessWidget {
           if (onRefresh != null &&
               (section == ConsoleSection.fleet ||
                   section == ConsoleSection.connect)) ...[
-            Text(_stamp(lastRefreshed, now), style: C.small(color: C.textFaint)),
+            Text(_stamp(lastRefreshed, now),
+                style: C.small(color: C.textFaint)),
             const SizedBox(width: 12),
             GhostButton(
               label: 'Refresh',
@@ -808,47 +894,52 @@ class _SubNavItem extends StatefulWidget {
 
 class _SubNavItemState extends State<_SubNavItem> {
   bool _hover = false;
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
     final fg = widget.active ? C.text : (_hover ? C.text : C.textMuted);
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: C.fast,
-          height: 30,
-          margin: const EdgeInsets.fromLTRB(10, 1, 10, 1),
-          padding: const EdgeInsets.only(left: 28, right: 10),
-          decoration: BoxDecoration(
-            color: widget.active ? C.surfaceHi : Colors.transparent,
-            borderRadius: C.roundedSm,
+    return _navFocusable(
+      label: widget.item.label,
+      active: widget.active,
+      onTap: widget.onTap,
+      onHover: (v) => setState(() => _hover = v),
+      onFocus: (v) => setState(() => _focused = v),
+      focused: _focused,
+      child: AnimatedContainer(
+        duration: C.fast,
+        height: 30,
+        margin: const EdgeInsets.fromLTRB(10, 1, 10, 1),
+        padding: const EdgeInsets.only(left: 28, right: 10),
+        decoration: BoxDecoration(
+          color: widget.active ? C.surfaceHi : Colors.transparent,
+          borderRadius: C.roundedSm,
+          border: Border.all(
+            color: _focused ? C.focusRing : Colors.transparent,
+            width: 1,
           ),
-          child: Row(
-            children: [
-              // A rule rather than an icon: the section above already carries
-              // one, and repeating icons at both levels flattens the hierarchy.
-              Container(
-                width: 2,
-                height: 12,
-                color: widget.active ? C.accent : C.hairline,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  widget.item.label,
-                  overflow: TextOverflow.ellipsis,
-                  style: C.small(
-                    color: fg,
-                    w: widget.active ? FontWeight.w600 : FontWeight.w500,
-                  ),
+        ),
+        child: Row(
+          children: [
+            // A rule rather than an icon: the section above already carries
+            // one, and repeating icons at both levels flattens the hierarchy.
+            Container(
+              width: 2,
+              height: 12,
+              color: widget.active ? C.accent : C.hairline,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                widget.item.label,
+                overflow: TextOverflow.ellipsis,
+                style: C.small(
+                  color: fg,
+                  w: widget.active ? FontWeight.w600 : FontWeight.w500,
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

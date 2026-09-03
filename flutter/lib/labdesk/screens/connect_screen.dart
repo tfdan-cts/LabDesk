@@ -51,7 +51,17 @@ extension ConnectModeLabel on ConnectMode {
         ConnectMode.terminal => 'Terminal (beta)',
         ConnectMode.terminalAdmin => 'Terminal as administrator (beta)',
         ConnectMode.rdp => 'RDP',
-        ConnectMode.tcpTunneling => 'TCP tunneling',
+        ConnectMode.tcpTunneling => 'Port forwarding (TCP)',
+      };
+
+  String get glyph => switch (this) {
+        ConnectMode.control => LdIcons.connect,
+        ConnectMode.fileTransfer => LdIcons.fileTransfer,
+        ConnectMode.viewCamera => LdIcons.camera,
+        ConnectMode.terminal => LdIcons.terminal,
+        ConnectMode.terminalAdmin => LdIcons.shield,
+        ConnectMode.rdp => LdIcons.windows,
+        ConnectMode.tcpTunneling => LdIcons.portForward,
       };
 }
 
@@ -103,7 +113,7 @@ extension RowActionLabel on RowAction {
         RowAction.editTags => 'Edit tags',
         RowAction.editNote => 'Edit note',
         RowAction.sharedPassword => 'Shared password',
-        RowAction.existIn => 'Exist in',
+        RowAction.existIn => 'Also in',
         RowAction.forgetPassword => 'Forget saved password',
         RowAction.removeFromAddressBook => 'Remove from address book',
         RowAction.forgetMachine => 'Forget machine',
@@ -124,6 +134,31 @@ extension RowActionLabel on RowAction {
         RowAction.forgetMachine =>
           true,
         _ => false,
+      };
+
+  /// The shape beside the line. Membership actions share the glyph of the set
+  /// they add to or remove from, so the pair reads as one thing done and undone.
+  String get glyph => switch (this) {
+        RowAction.rename => LdIcons.rename,
+        RowAction.alwaysRelay => LdIcons.switchSides,
+        RowAction.rdpSettings => LdIcons.settings,
+        RowAction.chooseIcon => LdIcons.machine,
+        RowAction.assignGroups => LdIcons.group,
+        RowAction.wakeOnLan => LdIcons.power,
+        RowAction.desktopShortcut => LdIcons.display,
+        RowAction.copyId => LdIcons.clipboard,
+        RowAction.addToFavourites ||
+        RowAction.removeFromFavourites =>
+          LdIcons.favourite,
+        RowAction.addToAddressBook ||
+        RowAction.removeFromAddressBook =>
+          LdIcons.addressBook,
+        RowAction.editTags => LdIcons.pin,
+        RowAction.editNote => LdIcons.file,
+        RowAction.sharedPassword => LdIcons.key,
+        RowAction.existIn => LdIcons.info,
+        RowAction.forgetPassword => LdIcons.lock,
+        RowAction.forgetMachine => LdIcons.trash,
       };
 }
 
@@ -413,6 +448,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
           ConsoleMenuAction<Object>(
             a,
             a.label,
+            glyph: a.glyph,
             danger: a.isDestructive,
             checked: a == RowAction.alwaysRelay
                 ? caps.alwaysRelay.contains(m.id)
@@ -429,12 +465,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
     return [
       for (final mode in _modesFor(m)) ...[
-        ConsoleMenuAction<Object>(mode, mode.label),
+        ConsoleMenuAction<Object>(mode, mode.label, glyph: mode.glyph),
         // Directly under the session it configures. Anywhere else and the
         // operator has to know that "RDP settings" belongs to the RDP line.
         if (mode == ConnectMode.rdp && offered.contains(RowAction.rdpSettings))
           ConsoleMenuAction<Object>(
-              RowAction.rdpSettings, RowAction.rdpSettings.label),
+              RowAction.rdpSettings, RowAction.rdpSettings.label,
+              glyph: RowAction.rdpSettings.glyph),
       ],
       ...run('This machine', const [
         RowAction.rename,
@@ -459,7 +496,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
       if (destructive.isNotEmpty) ...[
         const ConsoleMenuSplit<Object>(),
         for (final a in destructive)
-          ConsoleMenuAction<Object>(a, a.label, danger: true),
+          ConsoleMenuAction<Object>(a, a.label, glyph: a.glyph, danger: true),
       ],
     ];
   }
@@ -639,8 +676,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
       final from = _anchor == null ? -1 : _order.indexOf(_anchor!);
       final to = _order.indexOf(id);
       if (range && from >= 0 && to >= 0) {
-        _selected.addAll(
-            _order.sublist(math.min(from, to), math.max(from, to) + 1));
+        _selected
+            .addAll(_order.sublist(math.min(from, to), math.max(from, to) + 1));
         return;
       }
       if (!_selected.remove(id)) _selected.add(id);
@@ -982,7 +1019,8 @@ class _FilterBar extends StatelessWidget {
 }
 
 class _SetChip extends StatefulWidget {
-  const _SetChip({required this.set, required this.selected, required this.onTap});
+  const _SetChip(
+      {required this.set, required this.selected, required this.onTap});
 
   final PeerSetChip set;
   final bool selected;
@@ -1144,7 +1182,8 @@ class _GroupHeaderState extends State<_GroupHeader> {
               Text(widget.name,
                   style: C.small(color: C.text, w: FontWeight.w700)),
               const SizedBox(width: 8),
-              Text('${widget.count}', style: C.data(size: 11, color: C.textFaint)),
+              Text('${widget.count}',
+                  style: C.data(size: 11, color: C.textFaint)),
             ],
           ),
         ),
@@ -1276,7 +1315,8 @@ class _MachineTileState extends State<_MachineTile> {
                       style: C.body().copyWith(height: 1.2)),
                   Text(second,
                       overflow: TextOverflow.ellipsis,
-                      style: C.data(size: 11, color: C.textFaint)
+                      style: C
+                          .data(size: 11, color: C.textFaint)
                           .copyWith(height: 1.25)),
                 ],
               ),
@@ -1350,9 +1390,8 @@ class _MachineTileState extends State<_MachineTile> {
                 textAlign: TextAlign.right,
                 style: C.data(
                   size: 12,
-                  color: m.status == LabDeskPeerStatus.online
-                      ? C.ok
-                      : C.textMuted,
+                  color:
+                      m.status == LabDeskPeerStatus.online ? C.ok : C.textMuted,
                 ),
               ),
             ),
@@ -1676,8 +1715,7 @@ class _RowConnectState extends State<_RowConnect> {
                           : Colors.transparent,
             ),
           ),
-          child: Text('Connect',
-              style: C.small(color: fg, w: FontWeight.w600)),
+          child: Text('Connect', style: C.small(color: fg, w: FontWeight.w600)),
         ),
       ),
     );
@@ -1747,7 +1785,9 @@ Future<bool> _confirm(
             border: Border.all(color: C.hairline),
             boxShadow: const [
               BoxShadow(
-                  color: Color(0x99000000), blurRadius: 28, offset: Offset(0, 12)),
+                  color: Color(0x99000000),
+                  blurRadius: 28,
+                  offset: Offset(0, 12)),
             ],
           ),
           child: Column(
@@ -1847,7 +1887,8 @@ class _DangerButtonState extends State<_DangerButton> {
 }
 
 class _PrimaryButton extends StatefulWidget {
-  const _PrimaryButton({super.key, required this.label, required this.onPressed});
+  const _PrimaryButton(
+      {super.key, required this.label, required this.onPressed});
 
   final String label;
   final VoidCallback onPressed;
@@ -1953,7 +1994,8 @@ class _EmptyFleet extends StatelessWidget {
 }
 
 class _EmptyResults extends StatelessWidget {
-  const _EmptyResults({required this.query, required this.set, required this.onClear});
+  const _EmptyResults(
+      {required this.query, required this.set, required this.onClear});
 
   final String query;
   final String? set;

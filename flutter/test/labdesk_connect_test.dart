@@ -56,7 +56,7 @@ void main() {
         ],
         machines: [
           _m('100', alias: 'jennings-rec', group: 'Field sites'),
-          _m('200', alias: 'foundry', group: 'Lab bench'),
+          _m('200', alias: 'build', group: 'Lab bench'),
           _m('300', alias: 'loose-box'),
         ],
       )));
@@ -84,7 +84,7 @@ void main() {
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
         groups: const [(name: 'Warehouse', collapsed: false)],
-        machines: [_m('100', alias: 'foundry')],
+        machines: [_m('100', alias: 'build')],
       )));
 
       expect(find.text('Warehouse'), findsOneWidget);
@@ -99,7 +99,7 @@ void main() {
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
         groups: const [(name: 'Lab bench', collapsed: true)],
-        machines: [_m('200', alias: 'foundry', group: 'Lab bench')],
+        machines: [_m('200', alias: 'build', group: 'Lab bench')],
         onGroupCollapsed: (name, collapsed) {
           toggled = name;
           to = collapsed;
@@ -107,12 +107,12 @@ void main() {
       )));
 
       expect(find.text('Lab bench'), findsOneWidget);
-      expect(find.text('foundry'), findsNothing);
+      expect(find.text('build'), findsNothing);
 
       await tester.tap(find.byKey(const ValueKey('group-Lab bench')));
       await tester.pumpAndSettle();
 
-      expect(find.text('foundry'), findsOneWidget);
+      expect(find.text('build'), findsOneWidget);
       expect(toggled, 'Lab bench');
       expect(to, isFalse);
     });
@@ -125,9 +125,9 @@ void main() {
             groups: const [(name: 'Lab bench', collapsed: false)],
             machines: [
               _m('914203771',
-                  alias: 'foundry', hostname: 'traplab-foundry',
+                  alias: 'build', hostname: 'build-server',
                   group: 'Lab bench'),
-              _m('285119043', alias: 'homebox', hostname: 'homebox-devserver'),
+              _m('285119043', alias: 'workshop', hostname: 'workshop-pc'),
             ],
           ),
         ));
@@ -135,26 +135,26 @@ void main() {
     testWidgets('filters on the display name', (tester) async {
       await pump(tester);
       await tester.enterText(
-          find.byKey(const ValueKey('connect-search')), 'home');
+          find.byKey(const ValueKey('connect-search')), 'work');
       await tester.pumpAndSettle();
 
-      expect(find.text('homebox'), findsOneWidget);
-      expect(find.text('foundry'), findsNothing);
+      expect(find.text('workshop'), findsOneWidget);
+      expect(find.text('build'), findsNothing);
     });
 
     testWidgets('filters on the hostname and on the id', (tester) async {
       await pump(tester);
       await tester.enterText(
-          find.byKey(const ValueKey('connect-search')), 'devserver');
+          find.byKey(const ValueKey('connect-search')), 'pc');
       await tester.pumpAndSettle();
-      expect(find.text('homebox'), findsOneWidget);
-      expect(find.text('foundry'), findsNothing);
+      expect(find.text('workshop'), findsOneWidget);
+      expect(find.text('build'), findsNothing);
 
       await tester.enterText(
           find.byKey(const ValueKey('connect-search')), '914');
       await tester.pumpAndSettle();
-      expect(find.text('foundry'), findsOneWidget);
-      expect(find.text('homebox'), findsNothing);
+      expect(find.text('build'), findsOneWidget);
+      expect(find.text('workshop'), findsNothing);
     });
 
     testWidgets('a search that matches nothing says so, and does not read as '
@@ -175,8 +175,8 @@ void main() {
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
         machines: [
-          _m('100', alias: 'foundry'),
-          _m('200', alias: 'homebox'),
+          _m('100', alias: 'build'),
+          _m('200', alias: 'workshop'),
         ],
         sets: const [
           PeerSetChip(
@@ -187,15 +187,15 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('chip-favourite')));
       await tester.pumpAndSettle();
 
-      expect(find.text('homebox'), findsOneWidget);
-      expect(find.text('foundry'), findsNothing);
+      expect(find.text('workshop'), findsOneWidget);
+      expect(find.text('build'), findsNothing);
     });
 
     testWidgets('a set that cannot be sourced is disabled and says why, and '
         'tapping it changes nothing', (tester) async {
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
-        machines: [_m('100', alias: 'foundry')],
+        machines: [_m('100', alias: 'build')],
         sets: const [
           PeerSetChip(
             id: 'addressBook',
@@ -209,7 +209,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Still the whole list: a disabled chip must not silently filter.
-      expect(find.text('foundry'), findsOneWidget);
+      expect(find.text('build'), findsOneWidget);
       expect(
           find.byTooltip('Sign in to use the address book.'), findsOneWidget);
     });
@@ -222,8 +222,8 @@ void main() {
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
         machines: [
-          _m('914203771', alias: 'foundry'),
-          _m('285119043', alias: 'homebox'),
+          _m('914203771', alias: 'build'),
+          _m('285119043', alias: 'workshop'),
         ],
         onConnect: (id, mode) => calls.add((id, mode)),
       )));
@@ -239,7 +239,7 @@ void main() {
 
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
-        machines: [_m('914203771', alias: 'foundry')],
+        machines: [_m('914203771', alias: 'build')],
         onConnect: (id, mode) => calls.add((id, mode)),
       )));
 
@@ -369,13 +369,13 @@ void main() {
     testWidgets('machines exist but nothing has been checked yet', (tester) async {
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
-        machines: [_m('100', alias: 'foundry')],
+        machines: [_m('100', alias: 'build')],
       )));
 
       // Different claim from "no machines", and it does not replace the list.
       expect(find.byKey(const ValueKey('note-unchecked')), findsOneWidget);
       expect(find.byKey(const ValueKey('empty-no-machines')), findsNothing);
-      expect(find.text('foundry'), findsOneWidget);
+      expect(find.text('build'), findsOneWidget);
     });
 
     testWidgets('once anything has been checked the note goes away',
@@ -383,8 +383,8 @@ void main() {
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
         machines: [
-          _m('100', alias: 'foundry', status: LabDeskPeerStatus.online),
-          _m('200', alias: 'homebox'),
+          _m('100', alias: 'build', status: LabDeskPeerStatus.online),
+          _m('200', alias: 'workshop'),
         ],
       )));
 
@@ -400,9 +400,9 @@ void main() {
         groups: const [(name: 'Lab bench', collapsed: false)],
         machines: [
           _m('914203771',
-              alias: 'trapLab-Foundry',
-              hostname: 'traplab-foundry',
-              username: 'minigun',
+              alias: 'Build server',
+              hostname: 'build-server',
+              username: 'ops',
               platform: 'Windows',
               group: 'Lab bench',
               status: LabDeskPeerStatus.online,
@@ -410,8 +410,8 @@ void main() {
         ],
       )));
 
-      expect(find.text('trapLab-Foundry'), findsOneWidget);
-      expect(find.text('minigun@traplab-foundry'), findsOneWidget);
+      expect(find.text('Build server'), findsOneWidget);
+      expect(find.text('ops@build-server'), findsOneWidget);
       expect(find.text('914 203 771'), findsOneWidget);
       expect(find.text('Windows'), findsOneWidget);
     });
@@ -422,12 +422,12 @@ void main() {
         now: _now,
         groups: const [(name: 'Lab bench', collapsed: false)],
         machines: [
-          _m('914203771', alias: 'foundry', group: 'Lab bench'),
+          _m('914203771', alias: 'build', group: 'Lab bench'),
         ],
       )));
 
       await tester.enterText(
-          find.byKey(const ValueKey('connect-search')), 'found');
+          find.byKey(const ValueKey('connect-search')), 'buil');
       await tester.pumpAndSettle();
 
       // The heading is gone, so the row has to say where the machine lives.
@@ -446,7 +446,7 @@ void main() {
     'Terminal as administrator (beta)',
     'RDP',
     'RDP settings',
-    'TCP tunneling',
+    'Port forwarding (TCP)',
     'Rename',
     'Choose icon',
     'Always connect via relay',
@@ -460,7 +460,7 @@ void main() {
     'Edit tags',
     'Edit note',
     'Shared password',
-    'Exist in',
+    'Also in',
     'Forget saved password',
     'Remove from address book',
     'Forget machine',
@@ -477,7 +477,7 @@ void main() {
   }) async {
     await tester.pumpWidget(_wrap(ConnectScreen(
       now: _now,
-      machines: [_m('100', alias: 'foundry', platform: platform)],
+      machines: [_m('100', alias: 'build', platform: platform)],
       sets: sets,
       capabilities: capabilities,
       onAction: onAction,
@@ -516,7 +516,7 @@ void main() {
         'View camera',
         'Terminal (beta)',
         'Terminal as administrator (beta)',
-        'TCP tunneling',
+        'Port forwarding (TCP)',
         'Rename',
         'Choose icon',
         'Always connect via relay',
@@ -562,7 +562,7 @@ void main() {
       expect(shown, contains('Rename'));
       expect(shown, contains('Edit tags'));
       expect(shown, contains('Edit note'));
-      expect(shown, contains('Exist in'));
+      expect(shown, contains('Also in'));
       expect(shown, contains('Remove from address book'));
       // The card on that tab carried none of these.
       expect(shown, isNot(contains('Groups')));
@@ -590,7 +590,7 @@ void main() {
           sets: addressBook,
           capabilities: const ConnectCapabilities(addressBookWritable: false));
 
-      expect(shown, contains('Exist in'));
+      expect(shown, contains('Also in'));
       expect(shown, isNot(contains('Rename')));
       expect(shown, isNot(contains('Edit note')));
       expect(shown, isNot(contains('Remove from address book')));
@@ -653,7 +653,7 @@ void main() {
 
     testWidgets('a handset is never offered a tunnel', (tester) async {
       expect(await openMenu(tester, sets: recent, platform: 'Android'),
-          isNot(contains('TCP tunneling')));
+          isNot(contains('Port forwarding (TCP)')));
     });
 
     testWidgets('a saved password can only be forgotten when the client says '
@@ -686,14 +686,14 @@ void main() {
 
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
-        machines: [_m('100', alias: 'foundry')],
+        machines: [_m('100', alias: 'build')],
         sets: recent,
         capabilities: const ConnectCapabilities(hostIsWindows: true),
         onConnect: (id, mode) => calls.add((id, mode)),
       )));
 
       for (final (label, mode) in [
-        ('TCP tunneling', ConnectMode.tcpTunneling),
+        ('Port forwarding (TCP)', ConnectMode.tcpTunneling),
         ('RDP', ConnectMode.rdp),
         ('Terminal as administrator (beta)', ConnectMode.terminalAdmin),
       ]) {
@@ -728,7 +728,7 @@ void main() {
       final calls = await pick(tester, 'Forget machine', sets: recent);
 
       expect(find.byKey(const ValueKey('row-confirm')), findsOneWidget);
-      expect(find.textContaining('foundry'), findsWidgets);
+      expect(find.textContaining('build'), findsWidgets);
       expect(calls, isEmpty);
 
       await tester.tap(find.text('Cancel'));
@@ -792,7 +792,7 @@ void main() {
       // The dialog belongs to the client, as it did on the peer card. What
       // this pins is the round trip: the row asks, the client renames, and the
       // table is showing the new name on the next frame.
-      var machines = [_m('100', alias: 'foundry', hostname: 'traplab-foundry')];
+      var machines = [_m('100', alias: 'build', hostname: 'build-server')];
 
       await tester.pumpWidget(_wrap(StatefulBuilder(
         builder: (context, setState) => ConnectScreen(
@@ -802,23 +802,23 @@ void main() {
           onAction: (id, action) {
             if (action != RowAction.rename) return;
             setState(() => machines = [
-                  _m(id, alias: 'Foundry bench', hostname: 'traplab-foundry')
+                  _m(id, alias: 'Build bench', hostname: 'build-server')
                 ]);
           },
         ),
       )));
 
-      expect(find.text('foundry'), findsOneWidget);
+      expect(find.text('build'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('row-menu-100')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Rename'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Foundry bench'), findsOneWidget);
-      expect(find.text('foundry'), findsNothing);
+      expect(find.text('Build bench'), findsOneWidget);
+      expect(find.text('build'), findsNothing);
       // The identity beside it is untouched: a rename is an alias, not a host.
-      expect(find.text('traplab-foundry'), findsOneWidget);
+      expect(find.text('build-server'), findsOneWidget);
     });
   });
 
@@ -848,7 +848,7 @@ void main() {
 
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
-        machines: [_m('100', alias: 'foundry')],
+        machines: [_m('100', alias: 'build')],
         onConnect: (id, mode) => calls.add((id, mode)),
       )));
 
@@ -865,7 +865,7 @@ void main() {
         (tester) async {
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
-        machines: [_m('100', alias: 'foundry')],
+        machines: [_m('100', alias: 'build')],
         sets: recent,
       )));
 
@@ -884,7 +884,7 @@ void main() {
 
       await tester.pumpWidget(_wrap(ConnectScreen(
         now: _now,
-        machines: [_m('100', alias: 'foundry')],
+        machines: [_m('100', alias: 'build')],
         sets: recent,
         onConnect: (_, mode) => picked.add(mode),
         onAction: (_, a) => picked.add(a),

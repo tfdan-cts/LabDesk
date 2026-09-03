@@ -16,7 +16,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../theme/console_theme.dart';
-
+import '../theme/ld_icons.dart';
 
 /// Panel width. Fixed rather than intrinsic: a menu that changes width as its
 /// contents change between rows reads as a different menu each time.
@@ -37,10 +37,16 @@ class ConsoleMenuAction<T> extends ConsoleMenuEntry<T> {
     this.label, {
     this.checked,
     this.danger = false,
+    this.glyph,
   });
 
   final T value;
   final String label;
+
+  /// An [LdIcons] path drawn before the label, so a long menu can be scanned
+  /// by shape as well as read. Lines without one still start their text at
+  /// the same column as lines with one.
+  final String? glyph;
 
   /// Non-null turns the line into a toggle carrying this state, which is what
   /// a setting that is on or off has to look like. Null is an ordinary action.
@@ -85,6 +91,8 @@ Future<T?> showConsoleMenu<T>({
     Offset.zero & overlay.size,
   );
 
+  final glyphs =
+      entries.any((e) => e is ConsoleMenuAction<T> && e.glyph != null);
   return showMenu<T>(
     context: context,
     position: anchor,
@@ -107,7 +115,8 @@ Future<T?> showConsoleMenu<T>({
     items: [
       for (final e in entries)
         switch (e) {
-          ConsoleMenuAction<T>() => _ConsoleMenuItem<T>(entry: e),
+          ConsoleMenuAction<T>() =>
+            _ConsoleMenuItem<T>(entry: e, glyphColumn: glyphs),
           ConsoleMenuHeading<T>() => _ConsoleMenuHeading<T>(label: e.label),
           ConsoleMenuSplit<T>() => _ConsoleMenuSplit<T>(),
         },
@@ -116,9 +125,13 @@ Future<T?> showConsoleMenu<T>({
 }
 
 class _ConsoleMenuItem<T> extends PopupMenuEntry<T> {
-  const _ConsoleMenuItem({required this.entry});
+  const _ConsoleMenuItem({required this.entry, this.glyphColumn = false});
 
   final ConsoleMenuAction<T> entry;
+
+  /// Whether any line in this menu carries a glyph, so the ones that do not
+  /// reserve the same space and every label sits on one column.
+  final bool glyphColumn;
 
   @override
   double get height => _itemHeight;
@@ -169,11 +182,23 @@ class _ConsoleMenuItemState<T> extends State<_ConsoleMenuItem<T>> {
                 : (e.danger ? C.bad : C.accent).withOpacity(0.12),
             borderRadius: C.roundedSm,
             border: Border.all(
-              color: _focused ? (e.danger ? C.bad : C.accent) : Colors.transparent,
+              color:
+                  _focused ? (e.danger ? C.bad : C.accent) : Colors.transparent,
             ),
           ),
           child: Row(
             children: [
+              if (widget.glyphColumn) ...[
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: e.glyph == null
+                      ? null
+                      : LdIcon(e.glyph!,
+                          size: 14, color: e.danger ? C.bad : C.textMuted),
+                ),
+                const SizedBox(width: 10),
+              ],
               Expanded(
                 child: Text(
                   e.label,

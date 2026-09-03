@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/common/formatter/id_formatter.dart';
 import 'package:flutter_hbb/common/labdesk_peer_status.dart';
@@ -18,6 +20,7 @@ Widget _wrap(Widget child) => MaterialApp(
     );
 
 void main() {
+  _keyboardTests();
   group('ConsoleShell navigation', () {
     testWidgets('every section is offered in the sidebar', (tester) async {
       await tester.pumpWidget(_wrap(const ConsoleShell(machines: [])));
@@ -105,7 +108,7 @@ void main() {
 
   group('server profile control', () {
     const profiles = [
-      ProfileRow(name: 'trapLab Tailnet', host: 'a', relay: 'a', api: '', hasKey: true, active: true),
+      ProfileRow(name: 'Lab network', host: 'a', relay: 'a', api: '', hasKey: true, active: true),
       ProfileRow(name: 'Personal Tailnet', host: 'b', relay: 'b', api: '', hasKey: true, active: false),
     ];
 
@@ -115,11 +118,11 @@ void main() {
       await tester.pumpWidget(_wrap(ConsoleShell(
         machines: const [],
         profiles: profiles,
-        profileName: 'trapLab Tailnet',
+        profileName: 'Lab network',
         onProfileSelected: (n) => picked = n,
       )));
 
-      await tester.tap(find.text('trapLab Tailnet'));
+      await tester.tap(find.text('Lab network'));
       await tester.pumpAndSettle();
       expect(find.text('Personal Tailnet'), findsOneWidget,
           reason: 'the other profile must be on offer once the control opens');
@@ -134,9 +137,9 @@ void main() {
       await tester.pumpWidget(_wrap(const ConsoleShell(
         machines: [],
         profiles: profiles,
-        profileName: 'trapLab Tailnet',
+        profileName: 'Lab network',
       )));
-      await tester.tap(find.text('trapLab Tailnet'));
+      await tester.tap(find.text('Lab network'));
       await tester.pumpAndSettle();
       expect(find.text('Personal Tailnet'), findsNothing);
     });
@@ -273,15 +276,15 @@ void main() {
     const machines = [
       MachineRow(
         id: '914203771',
-        alias: 'trapLab-Foundry',
-        hostname: 'traplab-foundry',
+        alias: 'Build server',
+        hostname: 'build-server',
         platform: 'Windows',
         status: LabDeskPeerStatus.online,
       ),
       MachineRow(
         id: '1117890352',
-        alias: 'trapLab-Forge_Laptop',
-        hostname: 'traplab_forge',
+        alias: 'Spare laptop',
+        hostname: 'spare-laptop',
         platform: 'Windows',
         status: LabDeskPeerStatus.offline,
       ),
@@ -355,6 +358,37 @@ void main() {
             reason: '"$other" is a second name for a state this screen has '
                 'already named');
       }
+    });
+  });
+}
+
+// Appended: the sidebar is usable without a pointer.
+void _keyboardTests() {
+  group('keyboard navigation', () {
+    testWidgets('Ctrl plus a digit opens that section', (tester) async {
+      await tester.pumpWidget(_wrap(const ConsoleShell(machines: [])));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+      // Fleet is the second section and the only one with a tab strip.
+      expect(ConsoleSection.values[1], ConsoleSection.fleet);
+      expect(find.text('Health'), findsOneWidget);
+    });
+
+    testWidgets('sidebar entries are focusable buttons that report selection',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(_wrap(const ConsoleShell(machines: [])));
+      Finder nav(String label) => find.byWidgetPredicate((w) =>
+          w is Semantics && w.properties.button == true && w.properties.label == label);
+      final connect = tester.getSemantics(nav(ConsoleSection.connect.label));
+      final fleet = tester.getSemantics(nav(ConsoleSection.fleet.label));
+      expect(connect.hasFlag(SemanticsFlag.isSelected), isTrue);
+      expect(fleet.hasFlag(SemanticsFlag.isSelected), isFalse);
+      expect(fleet.hasFlag(SemanticsFlag.isFocusable), isTrue);
+      expect(fleet.hasFlag(SemanticsFlag.isButton), isTrue);
+      handle.dispose();
     });
   });
 }
