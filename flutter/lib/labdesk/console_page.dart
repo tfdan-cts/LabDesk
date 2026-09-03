@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show File, Platform;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart' show mapEquals;
@@ -40,13 +41,21 @@ import 'screens/connect_screen.dart';
 import 'screens/console_shell.dart';
 import 'screens/sessions_screen.dart';
 import 'screens/settings_screen.dart';
+import 'models/labnet.dart';
+import 'screens/labnet_card.dart';
+import 'screens/network_screen.dart';
+import 'services/elevated.dart';
+import 'services/overlay_broker.dart';
+import 'services/overlay_daemon.dart';
+import 'services/overlay_enrolment.dart';
+import 'services/overlay_session.dart';
+import 'theme/console_theme.dart';
 import 'screens/terminal_screen.dart';
 import 'screens/tools_screen.dart';
 import 'services/automation_engine.dart';
 import 'services/tool_catalog.dart';
 import 'services/tool_parsers.dart';
 import 'screens/this_machine_screen.dart';
-import 'theme/console_theme.dart';
 import 'theme/ld_icons.dart';
 
 /// The console, driven by the real client.
@@ -93,6 +102,20 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   /// the fleet rather than during a build, and the row menu offers "Forget
   /// saved password" against this.
   final _savedPasswords = <String>{};
+
+  // labnet: the encrypted direct path. The daemon, the broker and the two
+  // sequences are built once; the This machine card and the Network section
+  // render their state. Nothing reaches the daemon until the operator says so.
+  late final OverlayDaemon _daemon;
+  late final OverlayBroker _broker;
+  late final OverlayEnrolment _enrolment;
+  late final OverlaySession _overlay;
+  var _labnet = LabnetCardState.off;
+  var _inbox = LabnetInbox.empty;
+  var _labnetBusy = false;
+  var _labnetError = '';
+  Timer? _inboxTick;
+  static const _kConsentKey = 'labdesk-overlay-consent';
 
 
   void _goToSettings(SettingsTabKey tab) {
@@ -145,6 +168,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         .where((s) => s.isNotEmpty));
     _automation.rules = decodeRules(bind.mainGetLocalOption(key: _kRulesKey));
     _library = ScriptLibrary.decode(bind.mainGetLocalOption(key: _kScriptsKey));
+    _initLabnet();
     // Ask once on open so the fleet is not blank while waiting for the client's
     // own poll to come round.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -157,6 +181,8 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   @override
   void dispose() {
     _tick?.cancel();
+    _inboxTick?.cancel();
+    _enrolment.dispose();
     _sectionRequest.dispose();
     LabDeskMachineLink.closeAll();
     super.dispose();
@@ -269,6 +295,8 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
       _terminalWindowOf
         ..clear()
         ..addAll(terminal);
+      // A granted direct path is released once its session has come and gone.
+      await _overlay.noteOpenSessions({...remote.keys, ...terminal.keys});
 
       // Chat transcripts of the desktop sessions that are open.
       final chats = <String, SessionChat>{};
@@ -406,7 +434,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         if (!_monitored.contains(id)) _toggleMonitor(id);
         _automation.recordOutcome(f.id, true);
       case OpenSession():
-        if (mounted) connect(context, id);
+        if (mounted) _connectVia(id);
         _automation.recordOutcome(f.id, true);
     }
     if (mounted) setState(() {});
@@ -721,13 +749,13 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   void _runAction(String machineId, MachineAction action) {
     switch (action.id) {
       case 'connect':
-        connect(context, machineId);
+        _connectVia(machineId);
         break;
       case 'terminal':
-        connect(context, machineId, isTerminal: true);
+        _connectVia(machineId, isTerminal: true);
         break;
       case 'transfer':
-        connect(context, machineId, isFileTransfer: true);
+        _connectVia(machineId, isFileTransfer: true);
         break;
       case 'screenshot':
       case 'reboot':
@@ -1030,8 +1058,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
           // with one environment variable set, which is how the peer card
           // asked for it too.
           if (mode == ConnectMode.terminalAdmin) setEnvTerminalAdmin();
-          connect(
-            context,
+          _connectVia(
             id,
             isFileTransfer: mode == ConnectMode.fileTransfer,
             isViewCamera: mode == ConnectMode.viewCamera,
@@ -1135,6 +1162,11 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
               model.verificationMethod != kUsePermanentPassword,
           serviceRunning: model.isStart,
           profileSwitcher: const ServerProfileSwitcher(),
+          labnet: LabnetCard(
+            state: _labnet,
+            onEnable: _enableLabnet,
+            onDisable: _disableLabnet,
+          ),
           // Both of these existed on the old left rail and would have been lost
           // in the move. The catalogue of the old interface is what caught it.
           onRefreshPassword: () => bind.mainUpdateTemporaryPassword(),
@@ -1146,6 +1178,197 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
       ),
     );
   }
+
+  void _initLabnet() {
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final sep = Platform.pathSeparator;
+    _daemon = OverlayDaemon(
+      binary: [exeDir, 'netbird', Platform.isWindows ? 'netbird.exe' : 'netbird']
+          .join(sep),
+      stateDir: Platform.isWindows
+          ? [
+              Platform.environment['ProgramData'] ?? r'C:\ProgramData',
+              'LabDesk',
+              'netbird'
+            ].join(sep)
+          : '/var/lib/labdesk/netbird',
+    );
+    _broker = OverlayBroker(
+      baseUrl: 'https://lab-desk.net',
+      token: () => bind.mainGetLocalOption(key: 'access_token'),
+    );
+    _enrolment = OverlayEnrolment(
+      daemon: _daemon,
+      broker: _broker,
+      elevated: (args) => runElevated(_daemon.binary, args),
+      setOption: (k, v) => bind.mainSetOption(key: k, value: v),
+      hostname: Platform.localHostname,
+    );
+    _enrolment.states.listen((s) {
+      if (mounted) setState(() => _labnet = s);
+    });
+    _overlay = OverlaySession(
+      broker: _broker,
+      daemon: _daemon,
+      setOption: (k, v) => bind.mainSetOption(key: k, value: v),
+    );
+    // What the daemon says now, so a machine enrolled last week opens as On.
+    _daemon.status().then((s) {
+      if (!mounted || !s.isUp) return;
+      setState(
+          () => _labnet = LabnetCardState(LabnetPhase.on, ip: bareIp(s.ip)));
+    });
+    _inboxTick =
+        Timer.periodic(const Duration(seconds: 15), (_) => _pollInbox());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _pollInbox());
+  }
+
+  bool get _signedIn =>
+      bind.mainGetLocalOption(key: 'access_token').isNotEmpty;
+
+  /// Invitations waiting on this machine and the labnets it is part of, read
+  /// every 15 s while an account is signed in, like the client's own heartbeat.
+  Future<void> _pollInbox() async {
+    if (!mounted || !_signedIn) return;
+    try {
+      final inbox = await _broker.inbox();
+      if (!mounted) return;
+      setState(() {
+        _inbox = inbox;
+        _labnetError = '';
+      });
+      await _maybeAskConsent(inbox);
+    } on OverlayBrokerException catch (e) {
+      // A sign-in that no longer holds is the account surface's to report.
+      if (!e.signInAgain && mounted) setState(() => _labnetError = e.message);
+    } catch (_) {}
+  }
+
+  /// The one prompt: asked once per machine, only while signed in, never
+  /// again once answered or enrolled.
+  Future<void> _maybeAskConsent(LabnetInbox inbox) async {
+    final asked = bind.mainGetLocalOption(key: _kConsentKey) == 'asked';
+    if (!shouldAskLabnetConsent(
+        signedIn: _signedIn,
+        consentAsked: asked,
+        enrolled: inbox.enrolled || _labnet.phase == LabnetPhase.on)) {
+      return;
+    }
+    await bind.mainSetLocalOption(key: _kConsentKey, value: 'asked');
+    if (!mounted) return;
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: C.surface,
+        title: Text('Encrypted direct connections', style: C.h2()),
+        content: SizedBox(
+          width: 440,
+          child: Text(
+            'Machines on your account can open a direct encrypted path to '
+            'this one instead of going through an ID server. Nothing else can '
+            'reach it that way. You can turn this off under This machine at '
+            'any time.',
+            style: C.body(),
+          ),
+        ),
+        actions: [
+          _dialogAction('Not now', () => Navigator.of(ctx).pop(false)),
+          const SizedBox(width: 16),
+          _dialogAction('Turn on', () => Navigator.of(ctx).pop(true)),
+        ],
+      ),
+    );
+    if (yes == true) _enableLabnet();
+  }
+
+  Widget _dialogAction(String label, VoidCallback onTap) => MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Text(
+              label,
+              style: C.small(color: C.textMuted).copyWith(
+                decoration: TextDecoration.underline,
+                decorationColor: C.textFaint,
+              ),
+            ),
+          ),
+        ),
+      );
+
+  Future<void> _enableLabnet() async {
+    if (_labnet.phase == LabnetPhase.working) return;
+    await _enrolment.enable();
+    await _pollInbox();
+  }
+
+  Future<void> _disableLabnet() async {
+    if (_labnet.phase == LabnetPhase.working) return;
+    await _enrolment.disable();
+    await _pollInbox();
+  }
+
+  /// Every way the console opens a session goes through here. With the direct
+  /// path on, lab-desk.net is asked for the grant and the target is waited for
+  /// before the client dials; without it, or if anything short of that
+  /// happens, the session goes the way it always has.
+  Future<void> _connectVia(
+    String id, {
+    bool isTerminal = false,
+    bool isFileTransfer = false,
+    bool isViewCamera = false,
+    bool isTcpTunneling = false,
+    bool isRDP = false,
+  }) async {
+    if (_labnet.phase == LabnetPhase.on) await _overlay.prepare(id);
+    if (!mounted) return;
+    connect(
+      context,
+      id,
+      isTerminal: isTerminal,
+      isFileTransfer: isFileTransfer,
+      isViewCamera: isViewCamera,
+      isTcpTunneling: isTcpTunneling,
+      isRDP: isRDP,
+    );
+  }
+
+  Future<void> _labnetDo(Future<void> Function() action) async {
+    setState(() {
+      _labnetBusy = true;
+      _labnetError = '';
+    });
+    try {
+      await action();
+    } on OverlayBrokerException catch (e) {
+      _labnetError = e.message;
+    } catch (e) {
+      _labnetError = '$e';
+    }
+    if (mounted) setState(() => _labnetBusy = false);
+    await _pollInbox();
+  }
+
+  Widget _network(BuildContext context) => NetworkScreen(
+        inbox: _inbox,
+        thisMachineId: gFFI.serverModel.serverId.text,
+        machines: [
+          for (final m in _machines)
+            NetworkMachine(id: m.id, name: m.displayName),
+        ],
+        busy: _labnetBusy,
+        error: _labnetError,
+        onCreate: (name) => _labnetDo(() => _broker.createLabnet(name)),
+        onApprove: (id) => _labnetDo(() => _broker.decide(id, approve: true)),
+        onDecline: (id) => _labnetDo(() => _broker.decide(id, approve: false)),
+        onInvite: (l, d) => _labnetDo(() => _broker.invite(l, d)),
+        onFullAccess: (l, on) => _labnetDo(() => _broker.setFullAccess(l, on)),
+        onLeave: (l) => _labnetDo(() => _broker.leave(l)),
+        onRemove: (l, d) => _labnetDo(() => _broker.removeMember(l, d)),
+        onDelete: (l) => _labnetDo(() => _broker.deleteLabnet(l)),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -1240,6 +1463,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
               ConsoleSection.sessions: _sessions,
               ConsoleSection.automation: _automationScreen,
               ConsoleSection.tools: _toolsScreen,
+              ConsoleSection.network: _network,
             },
           )),
           ]),
