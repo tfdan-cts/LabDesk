@@ -2,10 +2,10 @@
 Name=LabDesk
 NoDisplay=true
 MimeType=x-scheme-handler/labdesk;
-TryExec=rustdesk
-Exec=rustdesk %u
-Icon=rustdesk
+TryExec=labdesk
+Exec=labdesk %u
+Icon=labdesk
 Terminal=false
 Type=Application
 StartupNotify=false
-StartupWMClass=rustdesk
+StartupWMClass=labdesk

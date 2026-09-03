@@ -1126,7 +1126,7 @@ mod tests {
     #[test]
     fn collect_scope_pids_walks_descendant_cgroups() {
         // regression for #15183: pids in descendant cgroups must be collected too
-        let base = std::env::temp_dir().join(format!("rustdesk-cgtest-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("labdesk-cgtest-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let scope = base.join("session-3.scope");
         let child = scope.join("app-foo.scope");

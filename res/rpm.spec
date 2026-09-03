@@ -1,4 +1,4 @@
-Name:       rustdesk
+Name:       labdesk
 Version:    1.2.2
 Release:    0
 Summary:    LabDesk remote administration client
@@ -7,6 +7,11 @@ URL:        https://lab-desk.net
 Vendor:     LabDesk
 Requires:   gtk3 libxcb libXfixes alsa-lib libva2 pam gstreamer1-plugins-base
 Recommends: libayatana-appindicator-gtk3 libxdo
+
+# The package was published under the upstream name before the rename and owns the same
+# paths, so an existing install has to be superseded rather than collided with.
+Obsoletes:  rustdesk < %{version}-%{release}
+Provides:   rustdesk = %{version}-%{release}
 
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/Scriptlets/
 
@@ -23,27 +28,27 @@ Remote administration client for the machines you look after. Based on RustDesk.
 
 %install
 mkdir -p %{buildroot}/usr/bin/
-mkdir -p %{buildroot}/usr/share/rustdesk/
-mkdir -p %{buildroot}/usr/share/rustdesk/files/
+mkdir -p %{buildroot}/usr/share/labdesk/
+mkdir -p %{buildroot}/usr/share/labdesk/files/
 mkdir -p %{buildroot}/usr/share/icons/hicolor/256x256/apps/
 mkdir -p %{buildroot}/usr/share/icons/hicolor/scalable/apps/
-install -m 755 $HBB/target/release/rustdesk %{buildroot}/usr/bin/rustdesk
-install $HBB/libsciter-gtk.so %{buildroot}/usr/share/rustdesk/libsciter-gtk.so
-install $HBB/res/rustdesk.service %{buildroot}/usr/share/rustdesk/files/
-install $HBB/res/128x128@2x.png %{buildroot}/usr/share/icons/hicolor/256x256/apps/rustdesk.png
-install $HBB/res/scalable.svg %{buildroot}/usr/share/icons/hicolor/scalable/apps/rustdesk.svg
-install $HBB/res/rustdesk.desktop %{buildroot}/usr/share/rustdesk/files/
-install $HBB/res/rustdesk-link.desktop %{buildroot}/usr/share/rustdesk/files/
+install -m 755 $HBB/target/release/labdesk %{buildroot}/usr/bin/labdesk
+install $HBB/libsciter-gtk.so %{buildroot}/usr/share/labdesk/libsciter-gtk.so
+install $HBB/res/labdesk.service %{buildroot}/usr/share/labdesk/files/
+install $HBB/res/128x128@2x.png %{buildroot}/usr/share/icons/hicolor/256x256/apps/labdesk.png
+install $HBB/res/scalable.svg %{buildroot}/usr/share/icons/hicolor/scalable/apps/labdesk.svg
+install $HBB/res/labdesk.desktop %{buildroot}/usr/share/labdesk/files/
+install $HBB/res/labdesk-link.desktop %{buildroot}/usr/share/labdesk/files/
 
 %files
-/usr/bin/rustdesk
-/usr/share/rustdesk/libsciter-gtk.so
-/usr/share/rustdesk/files/rustdesk.service
-/usr/share/icons/hicolor/256x256/apps/rustdesk.png
-/usr/share/icons/hicolor/scalable/apps/rustdesk.svg
-/usr/share/rustdesk/files/rustdesk.desktop
-/usr/share/rustdesk/files/rustdesk-link.desktop
-/usr/share/rustdesk/files/__pycache__/*
+/usr/bin/labdesk
+/usr/share/labdesk/libsciter-gtk.so
+/usr/share/labdesk/files/labdesk.service
+/usr/share/icons/hicolor/256x256/apps/labdesk.png
+/usr/share/icons/hicolor/scalable/apps/labdesk.svg
+/usr/share/labdesk/files/labdesk.desktop
+/usr/share/labdesk/files/labdesk-link.desktop
+/usr/share/labdesk/files/__pycache__/*
 
 %changelog
 # let's skip this for now
@@ -56,26 +61,26 @@ case "$1" in
   ;;
   2)
     # for upgrade
-    systemctl stop rustdesk || true
+    systemctl stop labdesk || true
   ;;
 esac
 
 %post
-cp /usr/share/rustdesk/files/rustdesk.service /etc/systemd/system/rustdesk.service
-cp /usr/share/rustdesk/files/rustdesk.desktop /usr/share/applications/
-cp /usr/share/rustdesk/files/rustdesk-link.desktop /usr/share/applications/
+cp /usr/share/labdesk/files/labdesk.service /etc/systemd/system/labdesk.service
+cp /usr/share/labdesk/files/labdesk.desktop /usr/share/applications/
+cp /usr/share/labdesk/files/labdesk-link.desktop /usr/share/applications/
 systemctl daemon-reload
-systemctl enable rustdesk
-systemctl start rustdesk
+systemctl enable labdesk
+systemctl start labdesk
 update-desktop-database
 
 %preun
 case "$1" in
   0)
     # for uninstall
-    systemctl stop rustdesk || true
-    systemctl disable rustdesk || true
-    rm /etc/systemd/system/rustdesk.service || true
+    systemctl stop labdesk || true
+    systemctl disable labdesk || true
+    rm /etc/systemd/system/labdesk.service || true
   ;;
   1)
     # for upgrade
@@ -86,8 +91,8 @@ esac
 case "$1" in
   0)
     # for uninstall
-    rm /usr/share/applications/rustdesk.desktop || true
-    rm /usr/share/applications/rustdesk-link.desktop || true
+    rm /usr/share/applications/labdesk.desktop || true
+    rm /usr/share/applications/labdesk-link.desktop || true
     update-desktop-database
   ;;
   1)
