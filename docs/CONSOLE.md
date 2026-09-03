@@ -39,6 +39,11 @@ So the console owns the navigation, the chrome and the surfaces that are genuine
 | This machine | New. This machine's id, its password with a plain statement of whether it is one-time or permanent, the server profile switcher mounted whole, and whether the background service is running |
 | Settings | Hosts `DesktopSettingPage` whole: every tab and all 214-plus controls |
 
+The sidebar is reachable without a pointer: every entry takes focus, activates on Enter or
+Space, and reports itself to assistive technology as a selected or unselected button; Ctrl+1 to
+Ctrl+9 open the sections in sidebar order. Machine menus carry a glyph per line, keep their
+text on one column, and put the destructive lines apart at the end.
+
 ## How hosting works
 
 `ConsoleShell` takes a `hosted` map from section to `WidgetBuilder`. A section with a builder
@@ -67,7 +72,7 @@ registry, and it is what makes three sections real:
 
 | Section | Source |
 |---|---|
-| Health | Identity from the peer store; round trip, throughput, frame rate and codec asked of the remote-desktop window (`labdesk_session_stats`); CPU, memory, disk and uptime read by a probe run in a hidden terminal on the terminal window's connection (`labdesk_probe`). Anything not obtained renders as `--`, never zero. The probe re-runs every 30 s while Health is showing. |
+| Health | Identity from the peer store; round trip, throughput, frame rate and codec asked of the remote-desktop window (`labdesk_session_stats`); CPU, memory, disk and uptime read by a probe run in a hidden terminal on the terminal window's connection (`labdesk_probe`). Anything not obtained renders as `--`, never zero. The probe re-runs every 30 s while monitoring is on, and every reading is kept for the session (two hours at that cadence, in memory, dropped when monitoring is turned off), so each card draws CPU, memory and disk over time under the figure: a fixed 0..100% axis that never rescales, one hue for the value, the status red only when the latest reading crosses the same 90% line as the bar, and the time and value under the pointer. |
 | Terminal | A command typed here runs in a persistent hidden shell on the terminal window's connection (`labdesk_term_run`); the output comes back as plain lines with ANSI stripped and the exit code. It needs a terminal session open to that machine; a desktop session alone is not a shell. |
 | Actions | Capture screen and Restart route to the remote-desktop window holding the session (`labdesk_action`). The console confirms Restart before sending. Without a desktop session both stay disabled. |
 
