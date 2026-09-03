@@ -25,6 +25,8 @@ Remote administration client for the machines you look after. Based on RustDesk.
 %install
 
 mkdir -p "%{buildroot}/usr/share/rustdesk" && cp -r ${HBB}/flutter/build/linux/x64/release/bundle/* -t "%{buildroot}/usr/share/rustdesk"
+# labnet: the NetBird client fetched by third_party/netbird/fetch.py, when present.
+if [ -d "${HBB}/netbird-dist" ]; then mkdir -p "%{buildroot}/usr/share/rustdesk/netbird" && cp -r ${HBB}/netbird-dist/* -t "%{buildroot}/usr/share/rustdesk/netbird"; fi
 mkdir -p "%{buildroot}/usr/bin"
 install -Dm 644 $HBB/res/rustdesk.service -t "%{buildroot}/usr/share/rustdesk/files"
 install -Dm 644 $HBB/res/rustdesk.desktop -t "%{buildroot}/usr/share/rustdesk/files"

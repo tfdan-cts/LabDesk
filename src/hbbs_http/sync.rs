@@ -236,6 +236,9 @@ async fn start_hbbs_sync_async() {
                 v["id"] = json!(id);
                 v["uuid"] = json!(crate::encode64(hbb_common::get_uuid()));
                 v["ver"] = json!(hbb_common::get_version_number(crate::VERSION));
+                // labnet: the id public key, so a direct session to this machine
+                // can run the same key exchange the rendezvous path does.
+                v["pk"] = json!(crate::encode64(Config::get_key_pair().1));
                 if !conns.is_empty() {
                     v["conns"] = json!(conns);
                 }

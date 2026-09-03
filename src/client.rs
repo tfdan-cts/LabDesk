@@ -291,6 +291,36 @@ impl Client {
         } else {
             (peer, "", key, token)
         };
+        // labnet: the console may have written an overlay address for this
+        // peer, with the peer's own id public key beside it. Try that address
+        // before any server; anything short of a live socket falls through to
+        // the path below unchanged.
+        if other_server.is_empty() {
+            let hint = Config::get_option(&format!("labdesk-overlay-addr-{}", peer));
+            if !hint.is_empty() {
+                match connect_tcp_local(hint.clone(), None, 1500).await {
+                    Ok(mut conn) => {
+                        let pk = crate::decode64(Config::get_option(&format!(
+                            "labdesk-overlay-pk-{}",
+                            peer
+                        )))
+                        .unwrap_or_default();
+                        let option_pk =
+                            Self::secure_connection_with_pk(peer, pk, &mut conn).await?;
+                        log::info!("labnet: direct path to {} at {}", peer, hint);
+                        return Ok((
+                            (conn, true, option_pk, None, "TCP"),
+                            (0, "".to_owned()),
+                            false,
+                        ));
+                    }
+                    Err(err) => {
+                        log::info!("labnet: {} not reachable at {}: {}", peer, hint, err)
+                    }
+                }
+            }
+        }
+
         let (rendezvous_server, servers, contained) = if other_server.is_empty() {
             crate::get_rendezvous_server(1_000).await
         } else {
@@ -786,6 +816,37 @@ impl Client {
                 log::error!("Handshake failed: invalid public key from rendezvous server");
             }
         }
+        Self::secure_with_sign_pk(peer_id, sign_pk, option_pk, conn).await
+    }
+
+    /// labnet: the peer's id public key arrived over lab-desk.net's
+    /// device-authenticated channel rather than signed by a rendezvous server,
+    /// so the exchange runs with it directly. A key that is not 32 bytes means
+    /// no key, and the session proceeds as an unsecured direct one would.
+    async fn secure_connection_with_pk(
+        peer_id: &str,
+        pk: Vec<u8>,
+        conn: &mut Stream,
+    ) -> ResultType<Option<Vec<u8>>> {
+        let mut sign_pk = None;
+        let mut option_pk = None;
+        if pk.len() == 32 {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&pk);
+            sign_pk = Some(sign::PublicKey(key));
+            option_pk = Some(pk);
+        } else {
+            log::error!("labnet: no usable id public key for {}", peer_id);
+        }
+        Self::secure_with_sign_pk(peer_id, sign_pk, option_pk, conn).await
+    }
+
+    async fn secure_with_sign_pk(
+        peer_id: &str,
+        sign_pk: Option<sign::PublicKey>,
+        option_pk: Option<Vec<u8>>,
+        conn: &mut Stream,
+    ) -> ResultType<Option<Vec<u8>>> {
         let sign_pk = match sign_pk {
             Some(v) => v,
             None => {

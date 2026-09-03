@@ -303,6 +303,9 @@ jobs:
           python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec ${{ matrix.job.build-args }}
           mv ./flutter/build/windows/${{ matrix.job.flutter-arch }}/runner/Release ./rustdesk
 
+          # labnet: the NetBird client and Wintun, pinned and checksummed (third_party/netbird)
+          python3 .\third_party\netbird\fetch.py windows ${{ matrix.job.arch }} .\rustdesk\netbird
+
           # Download usbmmidd_v2.zip and extract it to ./rustdesk
           Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
           Expand-Archive usbmmidd_v2.zip -DestinationPath .
@@ -1715,6 +1718,8 @@ jobs:
             pushd /workspace
             export CARGO_INCREMENTAL=0
             export DEB_ARCH=${{ matrix.job.deb_arch }}
+            # labnet: the NetBird client, pinned and checksummed (third_party/netbird)
+            python3 ./third_party/netbird/fetch.py linux ${{ matrix.job.arch }} ./netbird-dist
             python3 ./build.py --flutter --skip-cargo
             for name in labdesk*??.deb; do
               mv "$name" "${name%%.deb}-${{ matrix.job.arch }}.deb"

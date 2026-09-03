@@ -715,6 +715,9 @@ def build_flutter_deb(version, features):
     system2('rm tmpdeb/usr/bin/rustdesk || true')
     system2(
         f'cp -r {flutter_build_dir}/* tmpdeb/usr/share/rustdesk/')
+    # labnet: the NetBird client fetched by third_party/netbird/fetch.py, when present.
+    if os.path.isdir('../netbird-dist'):
+        system2('mkdir -p tmpdeb/usr/share/rustdesk/netbird && cp -r ../netbird-dist/* tmpdeb/usr/share/rustdesk/netbird/')
     system2(
         'cp ../res/rustdesk.service tmpdeb/usr/share/rustdesk/files/systemd/')
     system2(

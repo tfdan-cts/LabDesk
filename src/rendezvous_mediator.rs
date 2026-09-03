@@ -847,6 +847,8 @@ fn get_direct_port() -> i32 {
 async fn direct_server(server: ServerPtr) {
     let mut listener = None;
     let mut port = 0;
+    // labnet: when set, the listener serves this address only, never every interface.
+    let mut bind = String::new();
     loop {
         let disabled = !option2bool(
             OPTION_DIRECT_SERVER,
@@ -854,7 +856,15 @@ async fn direct_server(server: ServerPtr) {
         ) || option2bool("stop-service", &Config::get_option("stop-service"));
         if !disabled && listener.is_none() {
             port = get_direct_port();
-            match hbb_common::tcp::listen_any(port as _).await {
+            bind = Config::get_option("labdesk-direct-bind");
+            let listen = if bind.is_empty() {
+                hbb_common::tcp::listen_any(port as _).await
+            } else {
+                hbb_common::tokio::net::TcpListener::bind((bind.as_str(), port as u16))
+                    .await
+                    .map_err(|e| hbb_common::anyhow::anyhow!(e))
+            };
+            match listen {
                 Ok(l) => {
                     listener = Some(l);
                     log::info!(
@@ -870,7 +880,9 @@ async fn direct_server(server: ServerPtr) {
                         err
                     );
                     loop {
-                        if port != get_direct_port() {
+                        if port != get_direct_port()
+                            || bind != Config::get_option("labdesk-direct-bind")
+                        {
                             break;
                         }
                         sleep(1.).await;
@@ -879,7 +891,10 @@ async fn direct_server(server: ServerPtr) {
             }
         }
         if let Some(l) = listener.as_mut() {
-            if disabled || port != get_direct_port() {
+            if disabled
+                || port != get_direct_port()
+                || bind != Config::get_option("labdesk-direct-bind")
+            {
                 log::info!("Exit direct access listen");
                 listener = None;
                 continue;

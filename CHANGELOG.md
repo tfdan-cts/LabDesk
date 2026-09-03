@@ -3,6 +3,15 @@
 LabDesk's own versions. The RustDesk core underneath is stated in the README, not versioned here.
 Rules: `docs/VERSIONING.md`.
 
+## Unreleased
+
+- labnet, an encrypted direct path between machines on the same account, on a NetBird client
+  bundled beside LabDesk. One consent prompt, then a switch on This machine. A session to a
+  machine that has it on goes straight to it over the tunnel, with LabDesk's own key exchange
+  intact, and falls back to the ID server otherwise. The Network section holds labnets:
+  standing groups a machine joins only after approving on its own screen, with a per-labnet
+  full access switch. `docs/CONSOLE.md`, `docs/LABNET-SERVER.md`, `docs/THIRD-PARTY.md`.
+
 ## 1.2.2 — 2026-09-03
 
 - Health cards remember every reading while monitoring is on and draw CPU, memory and disk

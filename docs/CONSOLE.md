@@ -36,7 +36,8 @@ So the console owns the navigation, the chrome and the surfaces that are genuine
 | Health | New. What LabDesk can honestly read from a machine |
 | Terminal | New. A shell surface for a selected machine |
 | Actions | New. What the client can actually do to a machine, with the rest disabled rather than hidden |
-| This machine | New. This machine's id, its password with a plain statement of whether it is one-time or permanent, the server profile switcher mounted whole, and whether the background service is running |
+| Network | New. labnets: standing groups of machines that reach each other directly, the invitations waiting on this machine, and who is in each. See *labnet* below |
+| This machine | New. This machine's id, its password with a plain statement of whether it is one-time or permanent, the server profile switcher mounted whole, the labnet switch, and whether the background service is running |
 | Settings | Hosts `DesktopSettingPage` whole: every tab and all 214-plus controls |
 
 The sidebar is reachable without a pointer: every entry takes focus, activates on Enter or
@@ -78,3 +79,50 @@ registry, and it is what makes three sections real:
 
 Reachability is polled from the console itself, every 4 s (10 s against a public server), and the
 "Checked" stamp is the server's last answer rather than the time the button was pressed.
+
+## labnet: the encrypted direct path
+
+labnet is an optional direct path between machines on the same LabDesk account, built on the
+NetBird client that ships in the `netbird` directory beside the LabDesk executable
+(`docs/THIRD-PARTY.md`). A machine that has it on can be reached directly by the account's
+other machines over an encrypted tunnel, with no ID or relay server in the way. Nothing else
+can reach it there: every machine sits in a group of its own on LabDesk's own control plane
+(`docs/LABNET-SERVER.md`), and no rule lets one group reach another until a session or a
+labnet says so.
+
+**The switch.** This machine carries a card, *Encrypted direct connections*, with one
+action: Turn on, Turn off, or Try again. The first time an account is signed in on a machine
+that has never turned it on, the console asks once (the local option
+`labdesk-overlay-consent` records that it asked) and never again. Turning it on: the daemon is
+installed as LabDesk's own service (`labdesk-netbird`, one elevation prompt), lab-desk.net is
+asked for a one-off setup key (`POST /api/overlay/enrol`), the daemon is brought up with it,
+the console waits for it to report Connected, tells lab-desk.net the address it got
+(`POST /api/overlay/self`), and opens the client's direct listener on that address only
+(options `direct-server=Y` and `labdesk-direct-bind=<address>`). Turning it off undoes each in
+the other order and sets `direct-server=N`.
+
+**A session.** Every way the console opens a session goes through one path. With the switch
+on, lab-desk.net is asked for a grant (`POST /api/overlay/session`), which creates a one-way
+rule from this machine's group to the target's on the target's direct port. The console waits
+for the target peer to read Connected in the daemon's status (the rule has to be signalled and
+the tunnel's handshake completed first, up to ten seconds), then hands the client two options,
+`labdesk-overlay-addr-<id>` and `labdesk-overlay-pk-<id>`, and connects as always. The client
+tries that address before any server, with the target's own id public key, so the session
+still runs LabDesk's key exchange and is never the insecure kind a bare IP connection is.
+When the session window is gone the grant is released (`DELETE /api/overlay/session/<id>`)
+and the two options cleared. If anything short of that happens, the session simply goes the
+way it always has.
+
+**Labnets.** The Network section lists the labnets the account owns or this machine belongs
+to, and the invitations waiting on this machine. A labnet is a standing group: members reach
+each other on LabDesk's port and ping, or on everything when the owner turns full access on.
+Adding a machine only creates an invitation; the machine joins when a person approves it on
+that machine's own Network section, and may leave the same way. The section is refreshed every
+15 s from `GET /api/overlay/inbox`, the same cadence as the client's heartbeat.
+
+**Where the code is.** `lib/labdesk/services/overlay_daemon.dart` is the only file that knows
+the daemon is NetBird; `overlay_broker.dart` speaks the lab-desk.net routes with the device's
+sign-in token; `overlay_enrolment.dart` and `overlay_session.dart` are the two sequences;
+`screens/labnet_card.dart` and `screens/network_screen.dart` render, `console_page.dart`
+wires. On the Rust side `_start` in `src/client.rs` tries the address hint, and
+`direct_server` in `src/rendezvous_mediator.rs` honours `labdesk-direct-bind`.
