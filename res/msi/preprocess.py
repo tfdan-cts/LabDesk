@@ -39,6 +39,13 @@ g_arpsystemcomponent = {
     },
 }
 
+# The .wxs/.wxl/.cpp sources are written with the product name as a placeholder; a custom
+# build passes --app-name and every occurrence is substituted. The upstream stock name below
+# is only the "is this an unbranded upstream build" test; it is never written to the package.
+APP_NAME_PLACEHOLDER = "LabDesk"
+UPSTREAM_STOCK_APP_NAME = "RustDesk"
+
+
 def default_revision_version():
     return int(datetime.datetime.now().timestamp() / 60)
 
@@ -48,7 +55,7 @@ def make_parser():
         "-d",
         "--dist-dir",
         type=str,
-        default="../../rustdesk",
+        default="../../labdesk",
         help="The dist directory to install.",
     )
     parser.add_argument(
@@ -73,7 +80,7 @@ def make_parser():
         help='Connection type, e.g. "incoming", "outgoing". Default is empty, means incoming-outgoing',
     )
     parser.add_argument(
-        "--app-name", type=str, default="RustDesk", help="The app name."
+        "--app-name", type=str, default="LabDesk", help="The app name."
     )
     parser.add_argument(
         "-v", "--version", type=str, default="", help="The app version."
@@ -141,7 +148,7 @@ def insert_components_between_tags(lines, index_start, app_name, dist_dir):
 
 def gen_auto_component(app_name, dist_dir):
     return gen_content_between_tags(
-        "Package/Components/RustDesk.wxs",
+        "Package/Components/LabDesk.wxs",
         "<!--$AutoComonentStart$-->",
         "<!--$AutoComponentEnd$-->",
         lambda lines, index_start: insert_components_between_tags(
@@ -185,7 +192,7 @@ def replace_app_name_in_langs(app_name):
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
         for i, line in enumerate(lines):
-            lines[i] = line.replace("RustDesk", app_name)
+            lines[i] = line.replace(APP_NAME_PLACEHOLDER, app_name)
         with open(file_path, "w", encoding="utf-8") as f:
             f.writelines(lines)
 
@@ -195,8 +202,9 @@ def replace_app_name_in_custom_actions(app_name):
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
         for i, line in enumerate(lines):
-            line = re.sub(r"\bRustDesk\b", app_name, line)
-            line = line.replace(f"{app_name} v4 Printer Driver", "RustDesk v4 Printer Driver")
+            # The printer driver name is fixed by the signed third-party .inf that ships in
+            # drivers/RustDeskPrinterDriver, so it is deliberately NOT part of the placeholder.
+            line = re.sub(rf"\b{APP_NAME_PLACEHOLDER}\b", app_name, line)
             lines[i] = line
         with open(file_path, "w", encoding="utf-8") as f:
             f.writelines(lines)
@@ -492,7 +500,7 @@ def init_global_vars(dist_dir, app_name, args):
 
 
 def update_license_file(app_name):
-    if app_name == "RustDesk":
+    if app_name == UPSTREAM_STOCK_APP_NAME:
         return
     license_file = Path(sys.argv[0]).parent.joinpath("Package/License.rtf")
     with open(license_file, "r", encoding="utf-8") as f:
@@ -538,7 +546,7 @@ if __name__ == "__main__":
     if not gen_pre_vars(args, dist_dir):
         sys.exit(-1)
 
-    if app_name != "RustDesk":
+    if app_name != UPSTREAM_STOCK_APP_NAME:
         replace_component_guids_in_wxs()
 
     if not gen_upgrade_info():

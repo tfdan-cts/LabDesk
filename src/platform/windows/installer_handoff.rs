@@ -71,7 +71,7 @@ fn write_install_script(cmds: String) -> ResultType<InstallCommandScript> {
     let commands = prepare_install_commands(&cmds)?;
     let expected_hash = Sha256::digest(commands.as_bytes()).into();
     let path = directory.join(format!(
-        "rustdesk_install_{}.bat",
+        "labdesk_install_{}.bat",
         uuid::Uuid::new_v4().simple()
     ));
     let mut file = fs::OpenOptions::new()
@@ -100,7 +100,7 @@ fn verified_install_bootstrap(
 ) -> ResultType<String> {
     let source = path_for_cmd_assignment(&script.path)?;
     let runner = runner_directory.join(format!(
-        "rustdesk_install_{}.bat",
+        "labdesk_install_{}.bat",
         uuid::Uuid::new_v4().simple()
     ));
     let runner = path_for_cmd_assignment(&runner)?;
