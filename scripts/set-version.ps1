@@ -32,7 +32,7 @@ foreach ($spec in 'res/rpm.spec', 'res/rpm-flutter.spec', 'res/rpm-suse.spec', '
 }
 # The lockfiles record our own crates' versions too; cargo would rewrite them on the next build,
 # but a --locked build must not be the thing that discovers the mismatch.
-Rewrite 'Cargo.lock' '(?m)^(name = "rustdesk"\r?\nversion = )"[^"]+"' "`$1`"$bare`""
-Rewrite 'Cargo.lock' '(?m)^(name = "rustdesk-portable-packer"\r?\nversion = )"[^"]+"' "`$1`"$bare`""
-Rewrite 'libs/portable/Cargo.lock' '(?m)^(name = "rustdesk-portable-packer"\r?\nversion = )"[^"]+"' "`$1`"$bare`""
+Rewrite 'Cargo.lock' '(?m)^(name = "labdesk"\r?\nversion = )"[^"]+"' "`$1`"$bare`""
+Rewrite 'Cargo.lock' '(?m)^(name = "labdesk-portable-packer"\r?\nversion = )"[^"]+"' "`$1`"$bare`""
+Rewrite 'libs/portable/Cargo.lock' '(?m)^(name = "labdesk-portable-packer"\r?\nversion = )"[^"]+"' "`$1`"$bare`""
 "version $Version, build $build"

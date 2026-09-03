@@ -24,7 +24,7 @@ struct MacUpdateLock {
 
 #[cfg(target_os = "macos")]
 fn acquire_mac_update_lock() -> ResultType<MacUpdateLock> {
-    let path = std::path::PathBuf::from("/var/run/rustdesk-update.lock");
+    let path = std::path::PathBuf::from("/var/run/labdesk-update.lock");
     let handle = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -470,7 +470,7 @@ pub fn has_no_active_conns_ipc() -> bool {
 
 #[cfg(target_os = "macos")]
 fn wait_for_failed_update_retry() {
-    const FAILURE_MARKER: &str = "/var/root/.rustdeskupdate_failed";
+    const FAILURE_MARKER: &str = "/var/root/.labdeskupdate_failed";
     let marker = std::path::Path::new(FAILURE_MARKER);
     if !marker.exists() {
         return;
@@ -508,7 +508,7 @@ fn wait_for_failed_update_retry() {
 #[cfg(target_os = "macos")]
 pub fn start_auto_update_macos() {
     let spawn_result = std::thread::Builder::new()
-        .name("rustdesk-auto-update".to_owned())
+        .name("labdesk-auto-update".to_owned())
         .spawn(|| {
             log::info!("[root-update] Auto-update scheduler thread started.");
             std::thread::sleep(INITIAL_CHECK_DELAY);
@@ -566,8 +566,8 @@ pub fn check_update_as_root() -> ResultType<bool> {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
-            if name_str.starts_with(".rustdeskupdate-root-")
-                || name_str.starts_with(".rustdeskdownload-")
+            if name_str.starts_with(".labdeskupdate-root-")
+                || name_str.starts_with(".labdeskdownload-")
             {
                 let path = entry.path();
                 let Ok(metadata) = std::fs::symlink_metadata(&path) else {
@@ -614,7 +614,7 @@ pub fn check_update_as_root() -> ResultType<bool> {
     // Use mktemp so a local user cannot pre-create a predictable path and
     // permanently deny updates for a reused service PID.
     let private_tmp_output = std::process::Command::new("/usr/bin/mktemp")
-        .args(["-d", "/tmp/.rustdeskdownload-XXXXXX"])
+        .args(["-d", "/tmp/.labdeskdownload-XXXXXX"])
         .output()?;
     if !private_tmp_output.status.success() {
         bail!(
@@ -633,7 +633,7 @@ pub fn check_update_as_root() -> ResultType<bool> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&private_tmp, std::fs::Permissions::from_mode(0o700))?;
     }
-    let filename = dmg_url.split('/').last().unwrap_or("rustdesk.dmg");
+    let filename = dmg_url.split('/').last().unwrap_or("labdesk.dmg");
     let file_path = std::path::PathBuf::from(format!("{}/{}", private_tmp, filename));
     let tmp_path = file_path.to_string_lossy().to_string();
     // Download
