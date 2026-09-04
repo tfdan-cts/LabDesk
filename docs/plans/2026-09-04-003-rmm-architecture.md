@@ -27,6 +27,15 @@ wrong, the correction is recorded here rather than left to be rediscovered.
    dropped the approval gate every other authenticated surface enforces, so an account an admin had
    revoked still ran.
 
+3b. WP19 (Linux delivery) was BUILT AND REVERTED, and is still outstanding. The attempt shipped
+   src/platform/linux.rs calling /usr/share/rustdesk/labdesk-helper, a path that NO package this
+   repository builds produces, and its new Linux update arm was unreachable, so Linux still received
+   no unattended update while the code implied otherwise. It also asserted invented pkexec behaviour
+   as fact in shipped comments. A reviewer returned BROKEN and the change was reverted rather than
+   committed, because a broken and misleading state is worse than the honest broken state that
+   preceded it. Re-scoping WP19 must start by making build.py actually produce and package the
+   helper; until then the true statement is that Linux machines receive no updates at all.
+
 3. WP1's migration number (section 9). 0003 was already taken by the organization migration, so the
    indexes ship as 0008. drizzle-kit reports no pending schema changes, and wrangler lists 0002
    through 0008 as pending on the remote.
