@@ -201,22 +201,25 @@ annual if LabDesk moves to one.
 
 # Signing the update manifest
 
-**Nothing in this section is switched on**, and the digest path it falls back to
-does not reach anything either. No release carries a digest and the route that
-would serve one is not deployed, so an unattended update stops at its first
-fetch and installs nothing on any platform. That is set out in
-[Outstanding: nothing publishes a digest](#outstanding-nothing-publishes-a-digest),
-and the rest of what is missing is in [The key ceremony](#the-key-ceremony) and
-[Turning enforcement on](#turning-enforcement-on). Read this section as a
-description of machinery that is built and not yet reachable.
+**The signature is not switched on; the digest underneath it is.** A release
+carries `SHA256SUMS`, the site serves it, and a client reads its own asset's
+digest out of it and refuses to install bytes that do not match. What is still
+missing is the key: `RELEASE_SIGNING_PUBLIC_KEY_B64` is empty, so nothing checks
+who wrote that manifest. [The key ceremony](#the-key-ceremony) and
+[Turning enforcement on](#turning-enforcement-on) are what remain.
 
-`.github/workflows/release-checksums.yml` produces two files for a release:
-`SHA256SUMS`, a line per asset giving that asset's SHA-256, and
-`SHA256SUMS.sig`, a detached Ed25519 signature over that file. That workflow
-file exists on `feat/labnet` and not on the repository's default branch,
-`master`. GitHub runs the default branch's copy of a `workflow_run` workflow and
-offers `workflow_dispatch` only for workflows present there, so until the file is
-merged neither a tag push nor a manual dispatch runs it.
+`SHA256SUMS` is a line per asset giving that asset's SHA-256, and
+`SHA256SUMS.sig` is a detached Ed25519 signature over that file. The manifest is
+produced by the `release-manifest` job in
+`.github/workflows/flutter-build.yml`, which downloads the release's assets,
+hashes them and uploads the result to the same tag. It lives inside the build
+workflow deliberately: `.github/workflows/release-checksums.yml` was the earlier
+design and it never ran once, because GitHub takes a `workflow_run` trigger only
+from the default branch and the file is not on `master`. The job runs after the
+Windows, Linux and Android build jobs, so an asset published by a later job (the
+flatpaks, the AppImages) can be absent from the manifest; a Windows update is
+unaffected, and a platform whose asset is missing is refused rather than
+installed unverified.
 
 `src/updater.rs` holds the client half. `published_sha256` fetches the manifest
 and its signature from the same `/releases/download/<version>/` path the asset
@@ -225,9 +228,11 @@ of them, and only then reads that asset's digest from the manifest. All of it is
 gated on a pinned public key, and the constant that pins it,
 `RELEASE_SIGNING_PUBLIC_KEY_B64` at `src/updater.rs:509`, is the empty string.
 With no key pinned, `published_sha256` falls through to
-`published_digest_sha256`, the single-digest path the client already shipped, so
-a client built from this branch never asks for `SHA256SUMS` or `SHA256SUMS.sig`
-at all.
+`unsigned_manifest_sha256`, which reads the same `SHA256SUMS` without checking
+who signed it, and only if that fetch fails does it fall back to
+`published_digest_sha256`, the per-asset route the client shipped first. So a
+client built from this branch does ask for `SHA256SUMS`; it does not ask for
+`SHA256SUMS.sig` until a key is pinned.
 
 The same workflow carries a `release-dry-run` job. It makes those two files
 from a fixture and a key that lives for one job, checks the signature is 64
@@ -249,12 +254,9 @@ The client fetches the digest before the download (`src/updater.rs:220`,
 the installer (`verify_downloaded_file`), so a mismatch anywhere in that window
 stops the install.
 
-There is no digest to fetch today. Nothing publishes one and the route the
-client asks is not live, so that fetch fails, and the `?` on line 220 makes the
-failure fatal to the whole update before a byte is downloaded. The checks are in
-[Outstanding: nothing publishes a digest](#outstanding-nothing-publishes-a-digest).
-The rest of this section describes what the mechanism reaches once a digest
-exists.
+There is a digest to fetch today, and the fetch is fatal when it fails: the `?`
+on that line stops the update before a byte is downloaded, which is why the site
+serving the manifest is a release-blocking dependency rather than a nicety.
 
 What it cannot close is the case where the thing publishing the digest is the
 thing that has been taken over. The digest and the asset come out of the same
@@ -435,66 +437,45 @@ steps are outstanding.
 Step 5 before step 4 gives you a fleet that refuses to update, which is the
 safe direction to fail in and still a dead update channel.
 
-## Outstanding: nothing publishes a digest
+## Outstanding: the key, not the digest
 
-Three things are missing and they stack. The first two stop the client that
-ships today, which asks for a digest and no signature. The third is what the
-signature half needs on top.
+The digest half is live. What is left is the signature over it, and one route
+that is committed but not deployed.
 
-**No release carries `SHA256SUMS`.** The workflow has only ever run its
-`pull_request` dry run, which publishes nothing:
-`gh run list --repo tfdan-cts/LabDesk --workflow "Release checksums"` lists
-three runs and all three are `pull_request`. So no tag has the file, and
-`gh release view <tag> --repo tfdan-cts/LabDesk --json assets` finds none on any
-of the thirteen releases.
+**A release carries `SHA256SUMS`.** The `release-manifest` job publishes it on
+every dispatch that uploads artifacts. `labnet-win` was the first release to
+carry one, on 2026-09-04, and every release built since carries its own.
 
-**The digest route is not deployed.** The client asks
-`https://lab-desk.net/releases/checksums/<version>/<asset>`
-(`RELEASE_CHECKSUM_PATH` at `src/updater.rs:460`, built by
-`get_update_checksum_url`). That route is committed at labdesk-site
-`src/worker/routes/updates.ts:97`, and it is not in the deployed Worker:
+**The site serves the manifest.** `https://lab-desk.net/releases/download/<version>/SHA256SUMS`
+and `.../SHA256SUMS.sig` resolve as of labdesk-site `a02e3aa`. Before that they
+answered `{"error":"no such asset in the published release"}`, because the
+download route accepted only names that appear in the release channel row's
+per-platform asset map, and a manifest is a release asset but not a platform
+asset. That 404 made every update stop at its first request while the manifest
+sat on the release, which is the whole reason this is called out here: the
+client talks to no host but lab-desk.net, so the site has to serve the file even
+though the file lives on the GitHub release.
 
-```
-$ curl -s https://lab-desk.net/releases/checksums/1.2.2/labdesk-1.2.2-x86_64.exe
-{"error":"not found"}
-```
+**The per-asset digest route is still not deployed.**
+`https://lab-desk.net/releases/checksums/<version>/<asset>` answers
+`{"error":"not found"}`, the site's catch-all, because that route is committed
+on labdesk-site `feat/labnet-broker` and not on `dev`, which is the branch
+Cloudflare deploys. The client uses it only as a fallback for a release that
+carries no manifest, so nothing is blocked by it today.
 
-`{"error":"not found"}` is the catch-all at labdesk-site
-`src/worker/index.ts:101`, not either miss the route itself returns, which read
-`no such published version` and `no such asset in the published release`. The
-site is up and that version is published: the same host answers
-`/releases/download/1.2.2/labdesk-1.2.2-x86_64.exe` with 200. So the fetch at
-`src/updater.rs:220` fails, the `?` there makes it fatal, and an unattended
-update ends with a log line and nothing downloaded. Deploying the Worker fixes
-the route and not the missing file above; the route reads that file off the
-release to answer at all.
-
-**The site does not serve the manifest.** The signature half needs two more
-names. The client fetches
-`https://lab-desk.net/releases/download/<version>/SHA256SUMS`
-and `.../SHA256SUMS.sig`. As the site stands, both return 404.
-
-`labdesk-site/src/worker/routes/updates.ts:124` resolves every download through
-`resolvePublishedAsset` (`:60`), which only accepts a name that appears in the
-release channel row's per-platform asset map (`:64` parses the map, `:65` tests
-membership, and a miss is a 404). Line numbers are from that repository as
-committed; it is under active change. `SHA256SUMS` and
-`SHA256SUMS.sig` are release assets but not platform assets, so they are not in
-that map, and a request for one comes back
-`{"error":"no such asset in the published release"}`. The digest route (`:97`),
-once it is deployed, reads the manifest server side and returns one asset's
-digest as text, which is not a byte stream a signature can be checked against.
-
-The site needs to serve those two names verbatim from the published release.
-That is a change in the site repository, not this one, and it belongs to
-whoever owns the updates route. Until it lands, leave the public key constant
-empty; the client on the digest path does not ask for either file.
+**Nothing checks who wrote the manifest.** `RELEASE_SIGNING_PUBLIC_KEY_B64` is
+the empty string, so the client reads the manifest unsigned. Anyone who controls
+the release or the site controls the manifest and the asset together and can
+serve a matching pair. That is what the ceremony below closes, and it is the
+only thing on this page that is still missing.
 
 ## Verifying a release by hand
 
-Once the ceremony has been performed, a release has been signed and the site
-serves the two files, with the public PEM from step 3. Today both URLs 404, for
-the reason above.
+Once the ceremony has been performed and a release has been signed, with the
+public PEM from step 3. The site serves both names today; `SHA256SUMS.sig` is
+the one no release carries yet, so the verify step below has nothing to check
+until the ceremony is done. The digest half can be checked by hand now: fetch
+`SHA256SUMS`, fetch the asset, and compare.
 
 ```bash
 curl -fsSLO https://lab-desk.net/releases/download/1.2.2/SHA256SUMS
