@@ -88,3 +88,35 @@ and `signal.connected: true`.
 The Worker hands each enrolling machine the management address it holds in
 `NETBIRD_API_URL` and a one-off setup key it created for that machine's own
 group. Nothing else about the server reaches a client.
+
+## As built, 2026-09-03
+
+The server exists. What follows is what was done, so the next person does not repeat it.
+
+- Oracle Cloud, tenancy `trapadmin`, region us-chicago-1, availability domain 1. Instance
+  `labnet-netbird`, `VM.Standard.A1.Flex` with 1 OCPU and 6 GB, Ubuntu 24.04 Minimal aarch64,
+  50 GB boot volume. Public address `64.181.204.25`, private `10.30.20.160`. This VM bills
+  (the tenancy's free A1 hours are used by other instances): $0.01 per OCPU-hour plus
+  $0.0015 per GB-hour, about $14 a month.
+- Its own network security group, `labnet-netbird`: ingress 80/tcp, 443/tcp, 3478/udp from
+  anywhere; the VCN's shared security list was left alone. The host firewall carries the same
+  three ports, persisted in `/etc/iptables/rules.v4` (Oracle's images reject by default).
+- SSH from the workstation goes through the Safe Sight backend as a jump host:
+  `ssh -J ubuntu@100.111.222.91 ubuntu@10.30.20.160`. Port 22 is reachable only from inside
+  the subnet.
+- `nb.lab-desk.net` is an `A` record to the public address, proxied off.
+- Installed with `getting-started.sh` from the v0.78.0 release, unattended
+  (`NETBIRD_DOMAIN`, `NETBIRD_LETSENCRYPT_EMAIL=mgmtsrvr@lab-desk.net`,
+  `NETBIRD_REVERSE_PROXY_TYPE=0`, `NETBIRD_NON_INTERACTIVE=true`) as root, in
+  `/home/ubuntu/netbird/`. Three containers: `netbird-traefik`, `netbird-server`,
+  `netbird-dashboard`. Certificate from Let's Encrypt, valid to 2026-12-03 and renewed by
+  Traefik.
+- The first admin was created through the setup API with `NB_SETUP_PAT_ENABLED=true` set on
+  `netbird-server` for that one step and removed afterwards. Admin: `trapadmin@proton.me`,
+  password in `/root/netbird-admin.txt` on the VM, mode 600, nowhere else. Sign in at
+  `https://nb.lab-desk.net`.
+- Service user `lab-desk-net` (admin) with token `labdesk-worker`, valid to 2027-09-04, in
+  `/root/netbird-labdesk-token` on the VM (mode 600) and on the lab-desk.net Worker as
+  `NETBIRD_TOKEN`, alongside `NETBIRD_API_URL=https://nb.lab-desk.net`. Renew before it expires.
+- The default all-to-all policy was deleted. Verified from outside: `GET /api/peers` 200 `[]`,
+  `GET /api/policies` `[]`, a STUN binding request to UDP 3478 answered.
