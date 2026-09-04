@@ -272,3 +272,39 @@ already holds. All three now run `cap_drop: ALL`: Traefik and the server keep on
 
 Both changes were confirmed to survive a second deliberate reboot, along with the firewall
 policy, the disabled apport and `fs.suid_dumpable` reading 0.
+
+### Two more gaps, found by the second critic
+
+**The containers could read the cloud's identity.** From inside any of the three containers'
+network namespaces, `http://169.254.169.254/opc/v2/identity/cert.pem` answered 200 with a real
+certificate. Oracle's default `InstanceServices` rules allow port 80 to the metadata address with
+no owner restriction, and NAT'd container traffic reaches it, so any code execution in an
+internet-facing container could take the instance's signing key and act as the instance in
+Oracle. The blast radius today is small and was measured rather than assumed: the tenancy has
+zero dynamic groups, so that principal matches no policy and can do nothing. That is a reason it
+is not urgent, not a reason to leave it, because the day someone adds a dynamic group the hole
+arms itself silently. `DOCKER-USER` now drops anything from a container to `169.254.0.0/16` as
+its first rule. Measured after: the same request from inside the container returns nothing, and
+the host still reads its own metadata.
+
+**The IP fence trusted every Cloudflare customer.** The allow list carried Cloudflare's published
+egress ranges on the dashboard, `/oauth2` and `/api` alike. Those ranges are shared by everyone
+who runs a Worker, so anyone could have reached those paths from their own Worker. Only `/api`
+needs them, because that is the one path the lab-desk.net Worker calls, and `/api` is gated by the
+service token underneath. The middleware was split: `labnet-admin` on the dashboard and `/oauth2`
+now allows only the box, its Docker network, loopback and the subnet, while `labnet-api` on
+`/api` keeps the Cloudflare ranges.
+
+That was measured from Cloudflare's edge with a throwaway Worker, and the first measurement
+failed in a way worth writing down. The routing file is bind-mounted into the container as a
+single file, which binds an inode, so replacing it on the host with `mv` left the container
+reading the old file. Traefik logged no error, because from its side nothing had changed. The
+Worker probe was what caught it: the dashboard still answered 200 from Cloudflare. After
+recreating the container so it binds the current file, the same probe reads `/api` 401, the
+dashboard 403 and `/oauth2` 403 from Cloudflare, and from the box the dashboard answers 200,
+`/api` answers 200 with the service token, `/relay` answers 426 and a gRPC POST answers 200 over
+HTTP/2. When a config lives in a bind-mounted file, compare what the container reads against the
+host file. A clean log is not a reload.
+
+`dashboard.env` was world-readable at mode 644 and is now 600. Its `AUTH_CLIENT_SECRET` is empty,
+because the dashboard is a public PKCE client, so nothing was leaking; the mode was wrong anyway.
