@@ -206,8 +206,12 @@ survives until the next restart is not a rule.
 - **STUN on 3478/udp served by this box.** Owner decision, recorded above. The relay is TCP and
   cannot reflect the UDP mapping WireGuard needs, public STUN would hand peer addresses to a third
   party, and relay-only forfeits the direct path.
-- **Traefik mounts the Docker socket read-only.** Its Docker provider requires it. Read-only
-  limits it to reading container labels, and the container cannot gain privileges.
+- ~~Traefik mounts the Docker socket read-only.~~ NO LONGER TRUE, and it was never as safe as this
+  entry claimed. The `:ro` flag freezes the mount point, not the socket inode, so the process could
+  still write to the Docker API, which is host root. The Docker provider was deleted rather than
+  wrapped and the socket mount is gone; routing moved to a file provider. See "The Docker socket,
+  and why Traefik no longer has one" below. The entry is kept struck through because the reasoning
+  in it is exactly the kind that should not be trusted again.
 - **`AllowTcpForwarding` stays on.** An SSH tunnel is the operator's only ad-hoc route to the
   dashboard, which is fenced to Cloudflare's ranges and the box itself. SSH is key-only, subnet
   only and watched by fail2ban, so the pivot this would open is already behind three doors.

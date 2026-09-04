@@ -1,26 +1,34 @@
 # Signing LabDesk releases
 
-A release carries two different signatures, because there are two different
-questions to answer.
+A LabDesk release has two signatures to think about, because there are two
+different questions to answer. The build produces neither of them today.
 
 - **Authenticode over the installer** answers "does this machine's Windows
   trust whoever published this file". It is what decides whether SmartScreen
   warns the person who double-clicks it. That is the subject of the rest of
   this page, up to the update-manifest section.
-- **Ed25519 over the update manifest** answers "did the LabDesk release
-  pipeline really publish this update". It is what stops a compromised website
-  from pushing a different binary to a fleet that has already decided to trust
-  us and installs updates without a human present. It does not stop someone who
-  can make the pipeline itself sign for them, and that limit is set out in
+- **Ed25519 over the update manifest** is meant to answer "did the LabDesk
+  release pipeline really publish this update", so that a compromised website
+  cannot push a different binary to a fleet that has already decided to trust us
+  and installs updates without a human present. **It is not in force.** The key
+  ceremony has not been performed, the constant that pins the public key in
+  `src/updater.rs` is the empty string, and no client checks a signature. The
+  code and the workflow are written; the switch is off. Even switched on it
+  would not stop someone who can make the pipeline itself sign for them, and
+  that limit is set out in
   [What this does not close](#what-this-does-not-close). See
-  [Signing the update manifest](#signing-the-update-manifest).
+  [Signing the update manifest](#signing-the-update-manifest) and
+  [The key ceremony](#the-key-ceremony).
 
 Neither one substitutes for the other, and they are held in different places
 for a reason given in each section.
 
-LabDesk's build runs on GitHub's machines, and a signing key does not belong
-there, so continuous integration publishes unsigned binaries. Signing happens
-afterwards, on a machine that holds the key, with `scripts/sign-labdesk.ps1`.
+LabDesk's build runs on GitHub's machines, and the binaries it publishes today
+are unsigned. Signing happens afterwards, on a machine that holds the key, with
+`scripts/sign-labdesk.ps1`. That is a fact about how this repository is
+configured rather than about the pipeline, and the difference matters; it is
+spelled out under
+[What signing buys, and what it does not](#what-signing-buys-and-what-it-does-not).
 
 ## What signing buys, and what it does not
 
@@ -42,10 +50,33 @@ presence of one.
   distribution outside a fleet you control, Microsoft's own recommendation is
   Azure Trusted Signing, at roughly ten dollars a month.
 
-LabDesk currently uses a self-signed certificate. Anyone outside the fleet will
-see an untrusted-publisher warning, and Smart App Control will refuse the
-installer. Moving to a public certificate is a change of thumbprint in the same
-script, not a rework.
+What the repository can tell you: no certificate is committed here, and no
+LabDesk-specific step calls `signtool` or `scripts/sign-labdesk.ps1`. Which
+certificate any published installer actually carries cannot be read out of this
+repository at all, because it lives only in the signing machine's certificate
+store. Check an actual file with `Get-AuthenticodeSignature`, below, rather than
+assuming.
+
+Continuous integration publishes unsigned binaries today, but not because the
+pipeline has no way to sign. `.github/workflows/flutter-build.yml` still carries
+RustDesk's own signing, inherited with the fork: four Windows steps run `python3
+res/job.py sign_files` against a remote signing service (lines 374, 421, 558 and
+576), and the macOS job imports a p12 and notarizes with `rcodesign` (lines 749
+to 779 and 900 to 915). Each one is gated on a secret. Line 60 sets
+`SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}-2"` and every Windows step tests
+`if: env.SIGN_BASE_URL != '-2'`; the macOS steps test `if: env.MACOS_P12_BASE64
+!= null`. This repository has no Actions secrets at all, which
+`gh api repos/tfdan-cts/LabDesk/actions/secrets` answers as
+`{"total_count":0,"secrets":[]}`, so every one of those steps is skipped. Set
+`SIGN_BASE_URL` and `SIGN_SECRET_KEY` and continuous integration starts signing
+Windows binaries through that service, with nobody running
+`scripts/sign-labdesk.ps1` and nothing on this page applying. Signing on a
+separate machine is therefore a choice that is currently in force, not a
+property of the build.
+
+On the self-signed path, anyone outside the fleet sees an untrusted-publisher
+warning and Smart App Control refuses the installer. Moving to a public
+certificate is a change of thumbprint in the same script, not a rework.
 
 ## Creating the certificate
 
@@ -95,15 +126,18 @@ handled. Timestamping is on by default: without it the signature dies with the
 certificate, so every installer you ever shipped breaks on the day it expires.
 
 On a machine that has not been told to trust the certificate, signing succeeds
-and verification fails with
+and verification fails. The script runs `signtool verify /pa /q` quietly, so what
+you see from it is
 
 ```
-SignTool Error: A certificate chain processed, but terminated in a root
-certificate which is not trusted by the trust provider.
+signed but DOES NOT VERIFY : LabDesk-1.2.0-x86_64-install.exe
 ```
 
-That is expected for a self-signed certificate and the script says so. On a
-machine that does trust it, the same message is a real failure.
+followed by two lines pointing back here, and the run exits 1. Run `signtool verify
+/pa <file>` yourself for the underlying reason, which for this case is a
+certificate chain terminating in an untrusted root. That is expected for a
+self-signed certificate on an untrusting machine. On a machine that does trust
+it, the same output is a real failure.
 
 ## Making your machines trust it
 
@@ -167,56 +201,109 @@ annual if LabDesk moves to one.
 
 # Signing the update manifest
 
-Every release publishes `SHA256SUMS`, a line per asset giving that asset's
-SHA-256, and `SHA256SUMS.sig`, a detached Ed25519 signature over that file.
-`.github/workflows/release-checksums.yml` produces both. The installed client
-carries the public half as a constant and checks the signature before it
-believes any digest in the manifest, in `src/updater.rs`.
+**Nothing in this section is switched on**, and the digest path it falls back to
+does not reach anything either. No release carries a digest and the route that
+would serve one is not deployed, so an unattended update stops at its first
+fetch and installs nothing on any platform. That is set out in
+[Outstanding: nothing publishes a digest](#outstanding-nothing-publishes-a-digest),
+and the rest of what is missing is in [The key ceremony](#the-key-ceremony) and
+[Turning enforcement on](#turning-enforcement-on). Read this section as a
+description of machinery that is built and not yet reachable.
+
+`.github/workflows/release-checksums.yml` produces two files for a release:
+`SHA256SUMS`, a line per asset giving that asset's SHA-256, and
+`SHA256SUMS.sig`, a detached Ed25519 signature over that file. That workflow
+file exists on `feat/labnet` and not on the repository's default branch,
+`master`. GitHub runs the default branch's copy of a `workflow_run` workflow and
+offers `workflow_dispatch` only for workflows present there, so until the file is
+merged neither a tag push nor a manual dispatch runs it.
+
+`src/updater.rs` holds the client half. `published_sha256` fetches the manifest
+and its signature from the same `/releases/download/<version>/` path the asset
+came from, verifies the signature over the raw bytes before parsing a field out
+of them, and only then reads that asset's digest from the manifest. All of it is
+gated on a pinned public key, and the constant that pins it,
+`RELEASE_SIGNING_PUBLIC_KEY_B64` at `src/updater.rs:509`, is the empty string.
+With no key pinned, `published_sha256` falls through to
+`published_digest_sha256`, the single-digest path the client already shipped, so
+a client built from this branch never asks for `SHA256SUMS` or `SHA256SUMS.sig`
+at all.
 
 The same workflow carries a `release-dry-run` job. It makes those two files
-from a fixture and a key that lives for one job, checks the signature is the 64
-raw bytes the client expects, and checks that a manifest edited afterwards no
-longer verifies. It reads no secret and publishes nothing. It runs on pull
+from a fixture and a key that lives for one job, checks the signature is 64
+bytes, the raw detached form the client expects, checks that the public key DER
+is the 44 bytes the `tail -c 32` in the ceremony below assumes, and checks that a
+manifest edited afterwards no longer verifies. It reads no secret and publishes nothing. It runs on pull
 requests that touch this page, the workflow or `src/updater.rs`, so an openssl
 change on the runner, or a mistake in the commands below, is found there rather
 than on a production tag.
 
 ## Why the digest alone is not enough
 
-The digest was worth having on its own. It closes tampering in transit, a
+The digest is the only protection the shipped client asks for, so be exact about
+its reach. Where there is a digest to fetch, it closes tampering in transit, a
 poisoned cache, a truncated download, and a file swapped in the temporary
 directory by another local user between the download and the elevated install.
+The client fetches the digest before the download (`src/updater.rs:220`,
+`get_published_sha256`) and re-hashes the file immediately before handing it to
+the installer (`verify_downloaded_file`), so a mismatch anywhere in that window
+stops the install.
+
+There is no digest to fetch today. Nothing publishes one and the route the
+client asks is not live, so that fetch fails, and the `?` on line 220 makes the
+failure fatal to the whole update before a byte is downloaded. The checks are in
+[Outstanding: nothing publishes a digest](#outstanding-nothing-publishes-a-digest).
+The rest of this section describes what the mechanism reaches once a digest
+exists.
 
 What it cannot close is the case where the thing publishing the digest is the
 thing that has been taken over. The digest and the asset come out of the same
 GitHub release and travel through the same Cloudflare Worker, so anyone who
 controls the Worker controls both halves and can serve a matching pair. The
 client hashes the file, the hash agrees, and it hands a hostile installer to a
-process running as SYSTEM or root, unattended, on every machine in the fleet.
-That is the whole reason this project exists to be careful about, so a hash was
-always going to be the first half of the answer and not the answer.
+process running as SYSTEM or root, with no human present. That is the whole
+reason this project exists to be careful about, so a hash was always going to be
+the first half of the answer and not the answer.
 
-A detached signature closes that half. The private key never reaches the site,
-so a compromised Worker can serve any bytes it likes and still cannot produce a
-manifest the client accepts. It also closes a release asset that was replaced
-without the pipeline running again, because the published signature still
-covers the digests the manifest had when it was signed. The client pins the
-public half at build time, so nothing served at runtime gets to nominate the
-key that vouches for the update.
+That unattended path is Windows and macOS only. `update_new_version` is
+`#[cfg(target_os = "windows")]` (`src/updater.rs:253`), the other desktop
+platforms only verify the download and stop (`:258`), and
+`check_update_as_root`, the macOS service path, is `#[cfg(target_os = "macos")]`
+(`:912`). Linux has no unattended update at all: `update_to`
+(`src/platform/linux.rs:1590`) shells out to `pkexec`, and its only caller is
+the `update-me` handler in the desktop interface (`src/flutter_ffi.rs:3120`), so
+a person has to ask for the update and then authenticate. A Linux machine in the
+fleet is not exposed to this, and equally is not patched without someone sitting
+at it.
 
-What it does not close is an actor who can make the pipeline sign for them, and
-several other things worth naming. Read
+A detached signature is what closes that half, once a key exists and a client
+pins it. The private key never reaches the site, so a compromised Worker could
+serve any bytes it liked and still not produce a manifest the client accepts. It
+would also close a release asset replaced without the pipeline running again,
+because the published signature still covers the digests the manifest had when
+it was signed. The client pins the public half at build time, so nothing served
+at runtime gets to nominate the key that vouches for the update.
+
+Even switched on, a signature would not close an actor who can make the pipeline
+sign for them, and several other things worth naming. Read
 [What this does not close](#what-this-does-not-close) before deciding this
 problem is solved.
+
+And it is not switched on. The pinned constant is empty, so the case two
+paragraphs up, a site serving a matching hostile pair to an unattended elevated
+installer, is open today.
 
 ## Where the two halves live
 
 - **Private key.** A repository secret named `RELEASE_SIGNING_KEY`, holding an
   Ed25519 private key as a PKCS#8 PEM. Only the signing step of
   `release-checksums.yml` reads it. It is written to the runner with `umask
-  077` and removed by a shell trap however that step ends.
+  077` and removed by a shell trap however that step ends. **Not set:** no key
+  has been generated, and while the secret is empty that step prints an
+  `::error::` and exits 1.
 - **Public key.** `RELEASE_SIGNING_PUBLIC_KEY_B64` in `src/updater.rs`, base64
-  of the raw 32 bytes. It is compiled into every client.
+  of the raw 32 bytes, compiled into every client. **Empty:** it pins nothing,
+  which is what leaves enforcement off.
 
 This key does live in continuous integration, unlike the Authenticode key
 above, and that is a deliberate difference rather than an oversight. It has to
@@ -261,7 +348,9 @@ does not verify, stops every enforcing client from updating at all. That is the
 deliberate direction to fail in, and it is still a fleet that cannot be patched.
 It is also indistinguishable, from the client, from a release that was never
 backfilled, which is why the backfill in
-[Turning enforcement on](#turning-enforcement-on) is not optional.
+[Turning enforcement on](#turning-enforcement-on) is not optional. The client
+that ships today enforces no signature and fails the same way one step earlier,
+on the digest, and it is failing that way now.
 
 **Anything after the installer runs.** This vouches for the bytes handed to the
 installer. Everything the installer then does with SYSTEM or root rights is
@@ -269,12 +358,18 @@ outside it.
 
 ## The key ceremony
 
-**Not yet performed.** The constant in `src/updater.rs` is an empty
-placeholder, which pins no key, which means the client does not enforce
-signatures. That is what makes the pipeline half safe to ship first. Until the
-steps below are done, an update is protected by its digest and nothing more.
+**Not yet performed.** No signing key exists. The constant at
+`src/updater.rs:509` is an empty placeholder, which pins no key, which means the
+client does not enforce signatures; the `RELEASE_SIGNING_KEY` secret is unset. No
+key material of any kind is in this repository. That is what makes the pipeline
+half safe to ship first. Until the steps below are done, an update is protected
+by a published digest and nothing more, and while no release publishes one it is
+protected by nothing and does not install.
 
-Do this on a machine you control, not on a runner and not in a shared shell.
+Only the repository owner can do this, on a machine they control, not on a
+runner and not in a shared shell. It produces three things: a private PEM that
+becomes the repository secret, a base64 string that becomes the client's pinned
+constant, and a public PEM kept for verifying releases by hand.
 
 ```bash
 # 1. The keypair. This file is the whole secret; it never enters the repository.
@@ -303,21 +398,35 @@ Then:
    [rotation](#rotation-and-loss).
 6. Delete the private PEM from the machine's disk once both copies exist.
 
+At that point the key exists and the pipeline can sign, but no client enforces
+anything yet: the base64 from step 2 does not go into `src/updater.rs` until
+[Turning enforcement on](#turning-enforcement-on) has been worked through in
+order. Keep the base64 with the public PEM until then.
+
 ## Turning enforcement on
 
-Only after every release channel has a signed manifest, in this order.
+Only after every release channel has a signed manifest, in this order. All five
+steps are outstanding.
 
-1. **The workflow is on the default branch.** GitHub runs the default branch's
-   copy of a `workflow_run` workflow, and offers `workflow_dispatch` only for
-   workflows that exist there, so on a feature branch the file does nothing.
+1. **The workflow is on the default branch.** `release-checksums.yml` is on
+   `feat/labnet` only; `git fetch && git ls-tree origin/master .github/workflows/` does not
+   list it. GitHub runs the default branch's copy of a `workflow_run` workflow,
+   and offers `workflow_dispatch` only for workflows that exist there, so until
+   the branch merges the file does nothing. Its `pull_request` dry run is the
+   exception and does run from the branch.
 2. **The secret is set**, as above. Until it is, `release-checksums.yml` still
    publishes digests but ends red on every run. That red mark is the reminder,
    deliberately chosen over a warning in a log.
-3. **The site can serve the manifest.** See the outstanding item below.
+3. **The site can serve the manifest.** It cannot. See the outstanding item
+   below, which also covers the digest route the shipped client uses.
 4. **Every published tag is backfilled.** Actions, Release checksums, Run
    workflow, once per tag that any release channel points at. Older releases
    have neither file, and a client that enforces signatures refuses an update
-   whose manifest it cannot fetch and verify.
+   whose manifest it cannot fetch and verify. This step is not only for
+   enforcement: the site answers the digest route by reading `SHA256SUMS` off
+   the GitHub release (labdesk-site `src/worker/routes/updates.ts:106`), so a
+   tag without it has no digest either, and the workflow's own header says as
+   much, "A release with no SHA256SUMS is a release nobody can auto-update to".
 5. **Only then** paste the base64 public key into
    `RELEASE_SIGNING_PUBLIC_KEY_B64` in `src/updater.rs` and cut a client
    release. That constant is the switch, and it is the only change needed:
@@ -326,18 +435,55 @@ Only after every release channel has a signed manifest, in this order.
 Step 5 before step 4 gives you a fleet that refuses to update, which is the
 safe direction to fail in and still a dead update channel.
 
-## Outstanding: the site does not serve the manifest yet
+## Outstanding: nothing publishes a digest
 
-The client fetches `https://lab-desk.net/releases/download/<version>/SHA256SUMS`
+Three things are missing and they stack. The first two stop the client that
+ships today, which asks for a digest and no signature. The third is what the
+signature half needs on top.
+
+**No release carries `SHA256SUMS`.** The workflow has only ever run its
+`pull_request` dry run, which publishes nothing:
+`gh run list --repo tfdan-cts/LabDesk --workflow "Release checksums"` lists
+three runs and all three are `pull_request`. So no tag has the file, and
+`gh release view <tag> --repo tfdan-cts/LabDesk --json assets` finds none on any
+of the thirteen releases.
+
+**The digest route is not deployed.** The client asks
+`https://lab-desk.net/releases/checksums/<version>/<asset>`
+(`RELEASE_CHECKSUM_PATH` at `src/updater.rs:460`, built by
+`get_update_checksum_url`). That route is committed at labdesk-site
+`src/worker/routes/updates.ts:97`, and it is not in the deployed Worker:
+
+```
+$ curl -s https://lab-desk.net/releases/checksums/1.2.2/labdesk-1.2.2-x86_64.exe
+{"error":"not found"}
+```
+
+`{"error":"not found"}` is the catch-all at labdesk-site
+`src/worker/index.ts:101`, not either miss the route itself returns, which read
+`no such published version` and `no such asset in the published release`. The
+site is up and that version is published: the same host answers
+`/releases/download/1.2.2/labdesk-1.2.2-x86_64.exe` with 200. So the fetch at
+`src/updater.rs:220` fails, the `?` there makes it fatal, and an unattended
+update ends with a log line and nothing downloaded. Deploying the Worker fixes
+the route and not the missing file above; the route reads that file off the
+release to answer at all.
+
+**The site does not serve the manifest.** The signature half needs two more
+names. The client fetches
+`https://lab-desk.net/releases/download/<version>/SHA256SUMS`
 and `.../SHA256SUMS.sig`. As the site stands, both return 404.
 
 `labdesk-site/src/worker/routes/updates.ts:124` resolves every download through
 `resolvePublishedAsset` (`:60`), which only accepts a name that appears in the
-release channel row's per-platform asset map (`:64`). `SHA256SUMS` and
+release channel row's per-platform asset map (`:64` parses the map, `:65` tests
+membership, and a miss is a 404). Line numbers are from that repository as
+committed; it is under active change. `SHA256SUMS` and
 `SHA256SUMS.sig` are release assets but not platform assets, so they are not in
-that map. The existing digest route (`:97`) reads the manifest server side and
-returns one asset's digest as text, which is not a byte stream a signature can
-be checked against.
+that map, and a request for one comes back
+`{"error":"no such asset in the published release"}`. The digest route (`:97`),
+once it is deployed, reads the manifest server side and returns one asset's
+digest as text, which is not a byte stream a signature can be checked against.
 
 The site needs to serve those two names verbatim from the published release.
 That is a change in the site repository, not this one, and it belongs to
@@ -346,7 +492,9 @@ empty; the client on the digest path does not ask for either file.
 
 ## Verifying a release by hand
 
-With the public PEM from step 3 of the ceremony:
+Once the ceremony has been performed, a release has been signed and the site
+serves the two files, with the public PEM from step 3. Today both URLs 404, for
+the reason above.
 
 ```bash
 curl -fsSLO https://lab-desk.net/releases/download/1.2.2/SHA256SUMS
@@ -361,6 +509,8 @@ the pipeline signed, and the release should be treated as compromised until
 proven otherwise rather than re-signed to make the message go away.
 
 ## Rotation and loss
+
+Nothing to rotate yet; this is the procedure for once a key is in force.
 
 The public key is compiled into clients, so changing it is a client release,
 and clients that have not taken that release still expect the old key. Rotation
