@@ -659,6 +659,22 @@ pub fn core_main() -> Option<Vec<String>> {
                 println!("Installation and administrative privileges required!");
             }
             return None;
+        } else if args[0] == "--enrol" {
+            if crate::platform::is_installed() && is_root() {
+                let max = args.len() - 1;
+                let pos = args.iter().position(|x| x == "--token").unwrap_or(max);
+                if pos < max {
+                    match crate::labdesk::identity::enrol(&args[pos + 1]) {
+                        Err(err) => println!("{}", err),
+                        Ok(machine_id) => println!("Enrolled as {}", machine_id),
+                    }
+                } else {
+                    println!("--token is required!");
+                }
+            } else {
+                println!("Installation and administrative privileges required!");
+            }
+            return None;
         } else if args[0] == "--deploy" {
             if config::Config::no_register_device() {
                 println!("Cannot deploy an unregistrable device!");
@@ -941,6 +957,7 @@ fn is_user_main_ipc_scope_cli_command(args: &[String]) -> bool {
             | Some("--option")
             | Some("--assign")
             | Some("--deploy")
+            | Some("--enrol")
     )
 }
 
@@ -988,6 +1005,7 @@ mod tests {
             "--option",
             "--assign",
             "--deploy",
+            "--enrol",
         ] {
             assert!(is_user_main_ipc_scope_cli_command(&args(&[command])));
         }
