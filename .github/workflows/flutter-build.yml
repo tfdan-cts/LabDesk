@@ -2437,6 +2437,58 @@ jobs:
           files: |
             flatpak/labdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.flatpak
 
+  # The manifest the updater reads. It has to run after every build job that
+  # publishes an asset, because it hashes the release's assets as they finally
+  # stand, and it has to live in THIS workflow rather than in a workflow_run
+  # companion: GitHub only runs a workflow_run workflow from the default branch,
+  # so a companion never fires for a build dispatched from a feature branch, and
+  # a client that cannot fetch a manifest installs no update at all.
+  #
+  # `always()` is deliberate. A build where one platform failed still published
+  # assets for the platforms that succeeded, and those have to be checksummable
+  # or the platforms that did build are locked out of updating too.
+  release-manifest:
+    needs:
+      - build-for-windows-flutter
+      - build-for-windows-sciter
+      - build-rustdesk-linux
+      - build-rustdesk-linux-sciter
+      - build-rustdesk-android
+    if: always() && inputs.upload-artifact
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Compute and publish SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.upload-tag }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "No release for '$TAG'; nothing to checksum."
+            exit 0
+          fi
+          mkdir assets
+          cd assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY"
+          # Never hash a manifest, or a signature over one, from an earlier run
+          # into the new one.
+          rm -f SHA256SUMS SHA256SUMS.sig
+          # nullglob so an empty directory does not hash the literal "*";
+          # dotglob so a dotfile asset is not silently missing from the
+          # manifest, which the client reads as "this asset has no digest".
+          shopt -s nullglob dotglob
+          files=(*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "The release for '$TAG' publishes no assets to checksum." >&2
+            exit 1
+          fi
+          sha256sum -- "${files[@]}" > ../SHA256SUMS
+          cd ..
+          cat SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+
   build-rustdesk-web:
     if: False
     name: build-rustdesk-web

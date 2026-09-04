@@ -654,7 +654,16 @@ fn published_sha256(
     fetch: &dyn Fn(&str, u64) -> ResultType<Vec<u8>>,
 ) -> ResultType<String> {
     let Some(public_key) = pinned_key else {
-        return published_digest_sha256(download_url, fetch);
+        // No key is pinned yet, so the manifest is read without a signature.
+        // It still comes from the release the asset itself came from, which is
+        // what makes the update path work at all: the per-asset route below
+        // lives on the site and the site does not serve it yet. A release that
+        // carries no manifest falls through to that route rather than failing,
+        // so an older release keeps whatever protection it already had.
+        return match unsigned_manifest_sha256(download_url, fetch) {
+            Ok(digest) => Ok(digest),
+            Err(_) => published_digest_sha256(download_url, fetch),
+        };
     };
     let Some((version, asset)) = release_asset_parts(download_url) else {
         bail!(
@@ -676,10 +685,36 @@ fn published_sha256(
     digest_from_manifest(std::str::from_utf8(&manifest)?, asset)
 }
 
-/// The per-asset digest the site publishes. This is the path the client already
-/// ships and the only path while no key is pinned. It closes transport
-/// tampering, a poisoned cache and a corrupted download, but not a site serving
-/// a matching pair of its own making.
+/// The asset's digest read out of the release's own `SHA256SUMS`, with no
+/// signature over it. This is the path that works today, because the manifest
+/// is published as an asset of the same release the download came from and
+/// needs nothing deployed on the site to serve it.
+///
+/// What it closes: a corrupted or truncated download, a poisoned cache, and a
+/// file of the right size left in the temporary directory by another local
+/// user. What it does not close: a release or a site that serves a matching
+/// manifest of its own making. Pinning a key closes that, and the branch above
+/// takes over the moment one is pinned.
+fn unsigned_manifest_sha256(
+    download_url: &str,
+    fetch: &dyn Fn(&str, u64) -> ResultType<Vec<u8>>,
+) -> ResultType<String> {
+    let Some((version, asset)) = release_asset_parts(download_url) else {
+        bail!(
+            "No release manifest for the update URL, refusing to install: {}",
+            download_url
+        );
+    };
+    let manifest = fetch(
+        &release_asset_url(version, RELEASE_MANIFEST_ASSET),
+        RELEASE_MANIFEST_MAX_BYTES,
+    )?;
+    digest_from_manifest(std::str::from_utf8(&manifest)?, asset)
+}
+
+/// The per-asset digest the site publishes. Kept as the fallback for a release
+/// that carries no manifest, so pointing the channel at an older release does
+/// not turn into a refusal to update at all.
 fn published_digest_sha256(
     download_url: &str,
     fetch: &dyn Fn(&str, u64) -> ResultType<Vec<u8>>,
