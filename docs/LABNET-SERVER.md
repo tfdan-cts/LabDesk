@@ -308,3 +308,53 @@ host file. A clean log is not a reload.
 
 `dashboard.env` was world-readable at mode 644 and is now 600. Its `AUTH_CLIENT_SECRET` is empty,
 because the dashboard is a public PKCE client, so nothing was leaking; the mode was wrong anyway.
+
+### The third round, and the change that was wrong
+
+The third critic found that `config.yaml` was bind-mounted read-write into `netbird-server`, the
+container that terminates peer traffic and runs as uid 0. Code execution there could rewrite the
+control plane's own configuration on the host, which the operator would then load on the next
+restart. The server only reads that file (`combined/cmd/config.go`, `LoadConfig` is an
+`os.ReadFile`, and nothing under `combined/cmd/` writes the config path), so the mount is now
+`:ro`. Confirmed from inside the container: not writable, still readable, service healthy.
+
+The same round noted that the container root filesystems were writable, which is persistence
+across a restart and a reboot, and that container egress was unrestricted. Acting on both is
+where this session made its own mistake, and it is worth writing down properly.
+
+Container egress was restricted to nothing except Traefik's path to Let's Encrypt. Nothing broke,
+because nothing restarted. The next `docker compose up -d` recreated `netbird-server`, and it
+began to crash-loop. The first hypothesis was the read-only root filesystem applied in the same
+step, and that was reverted. It was the wrong hypothesis. The real message was in the log:
+
+```
+FATL management/internals/server/modules.go:50: could not initialize geolocation service:
+failed to get database filename: Head "https://pkgs.netbird.io/geolocation-dbs/GeoLite2-City/
+download?suffix=tar.gz": dial tcp 194.113.73.12:443: i/o timeout
+```
+
+`netbird-server` downloads its GeoLite2 database from `pkgs.netbird.io` at every start and treats
+failure as fatal. A blanket egress block therefore does not break the control plane when it is
+applied. It breaks it at the next restart, which on this box is the unattended-upgrade reboot at
+04:30, unattended, with nobody watching. That is a worse failure than the one it was preventing.
+
+So general egress stays open, deliberately, and the two drops that carry the real value stay:
+containers cannot reach the cloud metadata service, and containers cannot reach the production
+subnet `10.30.20.0/24`, which is where the other machines live. Both were verified from inside
+each container's network namespace, and both are persisted.
+
+Two probes in that sequence lied before they told the truth, and both are worth remembering.
+`nsenter -t <pid> -n` enters only the network namespace, so `/etc/resolv.conf` is still the host's
+and points at `127.0.0.53`, which does not exist inside that namespace; every name lookup from
+such a probe fails and looks exactly like a firewall block. And `getent hosts` on this VM returns
+the AAAA record, which cannot be reached because the VM has no global IPv6, so an IPv4 test needs
+`getent ahostsv4`. Resolve on the host, then use `curl --resolve`.
+
+The read-only root filesystem is applied to Traefik, where it works and `/letsencrypt` stays
+writable. It is not applied to the dashboard, whose entrypoint substitutes environment variables
+into the built JavaScript under the web root at start.
+
+After all of it the VM was rebooted a third time. All three containers came back with zero
+restarts, every route answered, the firewall policy and both container drops persisted, Traefik's
+root filesystem was still read-only and the server's config still read-only, the external scan
+still showed only 443 open, and STUN still answered.
