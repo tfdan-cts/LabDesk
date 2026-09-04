@@ -120,3 +120,31 @@ The server exists. What follows is what was done, so the next person does not re
   `NETBIRD_TOKEN`, alongside `NETBIRD_API_URL=https://nb.lab-desk.net`. Renew before it expires.
 - The default all-to-all policy was deleted. Verified from outside: `GET /api/peers` 200 `[]`,
   `GET /api/policies` `[]`, a STUN binding request to UDP 3478 answered.
+
+## What is exposed, and why each port exists (verified 2026-09-03)
+
+The owner asked whether the open ports are needed at all. Each was checked against the
+server's own configuration and the client source, not the installer's summary.
+
+| Port | Verdict | Evidence |
+|---|---|---|
+| 80/tcp | **Closed.** | Traefik obtains certificates by TLS-ALPN on 443 (`--certificatesresolvers.letsencrypt.acme.tlschallenge=true`), so 80 only served an HTTP-to-HTTPS redirect. Removed from Traefik, the host firewall and the security group. |
+| 443/tcp | **Open, and necessary; the admin paths on it are fenced.** | Peers register and receive their network map over gRPC (`/management.ManagementService/`), exchange connection candidates over gRPC (`/signalexchange.SignalExchange/`), and fall back to the relay over WebSocket (`/relay`, `/ws-proxy/`). Every one of those is TLS, and a peer authenticates with its one-off setup key and its WireGuard key; the server never holds a peer's private key and cannot read relayed traffic. The daemon never calls `/api` or `/oauth2` (no code path in `client/` does), so `/api`, `/oauth2` and the dashboard sit behind a Traefik IP allow list: Cloudflare's published ranges (the lab-desk.net Worker's calls arrive from 172.69.x, measured with a probe Worker), the VM's own address and its Docker network. From anywhere else they answer 403. |
+| 3478/udp | **Open; the owner decides whether it stays.** | STUN. A peer sends one small request and learns the public address and port its NAT gave it, which is what lets two machines behind two NATs connect directly. The server can replace it with external STUN (`server.stuns` in `config.yaml`; the embedded listener switches off when external servers are listed, `combined/cmd/config.go`), or run without STUN (peers then meet only through the relay on 443). |
+| 22/tcp | Reachable from inside the subnet only (the shared security list allows it from 10.30.20.8, the jump host). | |
+| 111 (rpcbind) | **Disabled.** Ubuntu's default `rpcbind` was listening on every interface for nothing this server does. | |
+
+Operator access to the dashboard and API now goes through the box: from the VM itself
+(`curl https://nb.lab-desk.net/api/...`), or through an SSH tunnel from the workstation:
+
+```
+ssh -J ubuntu@100.111.222.91 -L 8443:localhost:443 ubuntu@10.30.20.160
+```
+
+then `curl --resolve nb.lab-desk.net:8443:127.0.0.1 https://nb.lab-desk.net:8443/api/users`
+(the routers match on the host name, so the name must be kept). A browser needs a hosts-file
+entry for the same reason.
+
+What the design does not do: expose the network. A machine that enrols becomes reachable to
+nobody until a session rule or a labnet names it, and the data path between two machines is
+WireGuard between those two machines. The control plane coordinates; it does not carry.
