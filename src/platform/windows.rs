@@ -3730,7 +3730,11 @@ pub fn handle_custom_client_staging_dir_before_update(
 }
 
 // Used for auto update and manual update in the main window.
-pub fn update_to(file: &str) -> ResultType<()> {
+// `expected_sha256` is the digest the release published for this file. It is
+// checked here rather than at the call site so the check is the last act
+// before the elevated launch, after the staging work, and the file is not
+// touched again between the two.
+pub fn update_to(file: &str, expected_sha256: &str) -> ResultType<()> {
     if file.ends_with(".exe") {
         let custom_client_staging_dir = get_custom_client_staging_dir();
         if crate::is_custom_client() {
@@ -3739,6 +3743,7 @@ pub fn update_to(file: &str) -> ResultType<()> {
             // Clean up any residual staging directory from previous custom client
             allow_err!(remove_custom_client_staging_dir(&custom_client_staging_dir));
         }
+        crate::updater::verify_downloaded_file(std::path::Path::new(file), expected_sha256)?;
         if !run_uac(file, "--update")? {
             bail!(
                 "Failed to run the update exe with UAC, error: {:?}",
@@ -3746,6 +3751,7 @@ pub fn update_to(file: &str) -> ResultType<()> {
             );
         }
     } else if file.ends_with(".msi") {
+        crate::updater::verify_downloaded_file(std::path::Path::new(file), expected_sha256)?;
         if let Err(e) = update_me_msi(file, false) {
             bail!("Failed to run the update msi: {}", e);
         }

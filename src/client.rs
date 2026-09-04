@@ -200,9 +200,33 @@ fn parse_overlay_hint(hint: &str) -> Option<SocketAddr> {
     Some(addr)
 }
 
+/// labnet: the one condition on the overlay path that names a machine rather
+/// than a route. `signed_other_id` comes back from the exchange only when the
+/// far end signed an identity of its own and that identity did not answer to
+/// the key the broker gave us for the peer, so it is another machine sitting on
+/// the peer's address. Every other way the exchange can end, including the far
+/// end never offering a signed identity at all, proves nothing about who holds
+/// the address and is a fallback condition, not an impersonation.
+fn overlay_is_impersonation(secured: bool, signed_other_id: bool) -> bool {
+    !secured && signed_other_id
+}
+
 #[cfg(test)]
 mod overlay_hint_tests {
-    use super::parse_overlay_hint;
+    use super::{overlay_is_impersonation, parse_overlay_hint};
+
+    #[test]
+    fn only_a_signed_other_id_is_an_impersonation() {
+        // The far end signed an identity that is not the peer's: the wrong
+        // machine answered on the peer's address.
+        assert!(overlay_is_impersonation(false, true));
+        // The far end offered no identity to check, which is what an unsecured
+        // direct listener does, so nothing was proved either way.
+        assert!(!overlay_is_impersonation(false, false));
+        // A secured stream is the peer, whatever else happened on the way.
+        assert!(!overlay_is_impersonation(true, true));
+        assert!(!overlay_is_impersonation(true, false));
+    }
 
     #[test]
     fn only_a_literal_overlay_address_is_a_hint() {
@@ -235,6 +259,8 @@ mod overlay_hint_tests {
         assert_eq!(parse_overlay_hint("[fd00::4]:21118"), None);
         assert_eq!(parse_overlay_hint("[::ffff:127.0.0.1]:21118"), None);
         assert_eq!(parse_overlay_hint("[::ffff:100.72.0.4]:21118"), None);
+        assert_eq!(parse_overlay_hint("::ffff:100.72.0.4:21118"), None);
+        assert_eq!(parse_overlay_hint("[::ffff:6448:4]:21118"), None);
         assert_eq!(parse_overlay_hint(""), None);
     }
 }
@@ -356,8 +382,10 @@ impl Client {
         };
         // labnet: the console may have written an overlay address for this
         // peer, with the peer's own id public key beside it. Try that address
-        // before any server; anything short of a completed exchange falls
-        // through to the path below unchanged.
+        // before any server. An address that leads nowhere, or that answers
+        // without offering an identity, falls through to the path below
+        // unchanged; a machine that answers there and signs an identity that is
+        // not the peer's ends the connect instead.
         if other_server.is_empty() {
             let addr_key = format!("labdesk-overlay-addr-{}", peer);
             let pk_key = format!("labdesk-overlay-pk-{}", peer);
@@ -384,8 +412,9 @@ impl Client {
                                     Self::secure_connection_with_pk(peer, pk, &mut conn),
                                 )
                                 .await;
+                                let mut signed_other_id = false;
                                 let err = match res {
-                                    Ok(Ok(option_pk)) => {
+                                    Ok(Ok((option_pk, signed_other))) => {
                                         // secure_with_sign_pk also returns Ok on
                                         // every identity failure: a wrong id, a
                                         // key that does not verify, an
@@ -393,7 +422,7 @@ impl Client {
                                         // all. It calls set_key only once the
                                         // peer has proved it holds the id key,
                                         // so a stream that is not secured here
-                                        // is another machine at that address.
+                                        // did not prove it is the peer.
                                         if conn.is_secured() {
                                             log::info!(
                                                 "labnet: direct path to {} at {}",
@@ -406,24 +435,51 @@ impl Client {
                                                 false,
                                             ));
                                         }
-                                        "not this peer".to_owned()
+                                        signed_other_id = signed_other;
+                                        if signed_other {
+                                            "signed an id the peer's key does not answer for"
+                                                .to_owned()
+                                        } else {
+                                            // What an unsecured direct listener
+                                            // answers with: it sends its hash
+                                            // first and never offers a key.
+                                            "offered no signed id".to_owned()
+                                        }
                                     }
                                     Ok(Err(err)) => err.to_string(),
                                     Err(err) => err.to_string(),
                                 };
-                                // A socket that answers but cannot prove it is
-                                // the peer gets no session. Drop the address and
-                                // the key together, so no later connect pays the
-                                // same cost again and the two cannot drift, and
-                                // fall through to the path below.
+                                // Whatever happened, it happened at a named
+                                // address to a named peer, and the line that
+                                // says which is the only one an operator gets,
+                                // so it is written before anything ends here.
                                 log::info!(
                                     "labnet: handshake with {} at {} failed: {}",
                                     peer,
                                     addr,
                                     err
                                 );
+                                // A socket that answers but cannot prove it is
+                                // the peer gets no session. Drop the address and
+                                // the key together, so no later connect pays the
+                                // same cost again and the two cannot drift.
                                 Config::set_option(addr_key, "".to_owned());
                                 Config::set_option(pk_key, "".to_owned());
+                                if overlay_is_impersonation(conn.is_secured(), signed_other_id) {
+                                    // Another machine answered on the peer's
+                                    // address under an identity of its own. Say
+                                    // so and stop: carrying the same id on to
+                                    // another route would hide that it happened
+                                    // at all.
+                                    bail!(
+                                        "labnet: the machine at {} did not sign as {}",
+                                        addr,
+                                        peer
+                                    );
+                                }
+                                // Nothing was proved about who holds the
+                                // address, only that it led nowhere, so fall
+                                // through to the path below.
                             }
                             Err(err) => {
                                 log::info!("labnet: {} not reachable at {}: {}", peer, addr, err)
@@ -929,18 +985,22 @@ impl Client {
                 log::error!("Handshake failed: invalid public key from rendezvous server");
             }
         }
-        Self::secure_with_sign_pk(peer_id, sign_pk, option_pk, conn).await
+        Ok(Self::secure_with_sign_pk(peer_id, sign_pk, option_pk, conn)
+            .await?
+            .0)
     }
 
     /// labnet: the peer's id public key arrived over lab-desk.net's
     /// device-authenticated channel rather than signed by a rendezvous server,
     /// so the exchange runs with it directly. A key that is not 32 bytes means
-    /// no key, and the session proceeds as an unsecured direct one would.
+    /// no key, and the session proceeds as an unsecured direct one would. The
+    /// flag beside the key is the one the overlay path reads: see
+    /// secure_with_sign_pk.
     async fn secure_connection_with_pk(
         peer_id: &str,
         pk: Vec<u8>,
         conn: &mut Stream,
-    ) -> ResultType<Option<Vec<u8>>> {
+    ) -> ResultType<(Option<Vec<u8>>, bool)> {
         let mut sign_pk = None;
         let mut option_pk = None;
         if pk.len() == 32 {
@@ -954,20 +1014,30 @@ impl Client {
         Self::secure_with_sign_pk(peer_id, sign_pk, option_pk, conn).await
     }
 
+    /// labnet: the flag returned beside the key says the far end signed an
+    /// identity of its own and that identity did not answer to `sign_pk`,
+    /// either because the signature does not verify under it or because the id
+    /// inside is another machine's. Every other way out of here leaves it
+    /// false, an unreadable message and a first message that is not a signed id
+    /// above all, because those say the far end never offered an identity, not
+    /// that it offered the wrong one. Only the overlay path reads the flag,
+    /// where the key came from the broker beside the address and no other
+    /// machine may answer there; the rendezvous path drops it.
     async fn secure_with_sign_pk(
         peer_id: &str,
         sign_pk: Option<sign::PublicKey>,
         option_pk: Option<Vec<u8>>,
         conn: &mut Stream,
-    ) -> ResultType<Option<Vec<u8>>> {
+    ) -> ResultType<(Option<Vec<u8>>, bool)> {
         let sign_pk = match sign_pk {
             Some(v) => v,
             None => {
                 // send an empty message out in case server is setting up secure and waiting for first message
                 conn.send(&Message::new()).await?;
-                return Ok(option_pk);
+                return Ok((option_pk, false));
             }
         };
+        let mut signed_other_id = false;
         match timeout(READ_TIMEOUT, conn.next()).await? {
             Some(res) => {
                 let bytes = res?;
@@ -987,11 +1057,13 @@ impl Client {
                                 conn.set_key(key);
                             } else {
                                 log::error!("Handshake failed: sign failure");
+                                signed_other_id = true;
                                 conn.send(&Message::new()).await?;
                             }
                         } else {
                             // fall back to non-secure connection in case pk mismatch
                             log::info!("pk mismatch, fall back to non-secure");
+                            signed_other_id = true;
                             let mut msg_out = Message::new();
                             msg_out.set_public_key(PublicKey::new());
                             conn.send(&msg_out).await?;
@@ -1009,7 +1081,7 @@ impl Client {
                 bail!("Reset by the peer");
             }
         }
-        Ok(option_pk)
+        Ok((option_pk, signed_other_id))
     }
 
     /// Request a relay connection to the server.

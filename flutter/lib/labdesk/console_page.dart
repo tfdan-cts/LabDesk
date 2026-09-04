@@ -1203,6 +1203,8 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
       elevated: (args) => runElevated(_daemon.binary, args),
       setOption: (k, v) => bind.mainSetOption(key: k, value: v),
       hostname: Platform.localHostname,
+      identity: () async =>
+          (await bind.mainGetIdPk(), await bind.mainGetDirectAccessPort()),
     );
     _enrolment.states.listen((s) {
       if (mounted) setState(() => _labnet = s);

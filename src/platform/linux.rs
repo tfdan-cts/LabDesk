@@ -1577,7 +1577,12 @@ pub fn installed_package_kind() -> Option<&'static str> {
 
 /// Installs a downloaded LabDesk package with one root prompt (pkexec), then
 /// relaunches the interface. The package's own scripts restart the service.
-pub fn update_to(file: &str) -> ResultType<()> {
+///
+/// `expected_sha256` is the digest the release published for this file. It is
+/// checked here rather than at the call site so the check is the last act
+/// before root reads the file: the download sits in world-writable /tmp, so
+/// every syscall between the hash and the install is a window worth closing.
+pub fn update_to(file: &str, expected_sha256: &str) -> ResultType<()> {
     let path = std::path::Path::new(file);
     if !path.is_file() {
         bail!("update file does not exist: {file}");
@@ -1587,6 +1592,7 @@ pub fn update_to(file: &str) -> ResultType<()> {
         Some("rpm") => "rpm",
         other => bail!("unsupported update package: {:?}", other),
     };
+    crate::updater::verify_downloaded_file(path, expected_sha256)?;
     let status = match kind {
         "deb" => Command::new("pkexec").args(["dpkg", "-i", file]).status()?,
         _ => Command::new("pkexec").args(["rpm", "-Uvh", "--replacepkgs", file]).status()?,

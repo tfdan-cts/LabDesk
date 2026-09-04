@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -19,6 +20,10 @@ class _World {
   String? elevatedReply;
   final options = <String, String>{};
 
+  /// The body of the last POST to /api/overlay/self, so what this machine told
+  /// lab-desk.net about itself can be read back.
+  String? selfBody;
+
   Future<ProcessResult> run(String exe, List<String> args) async {
     log.add('daemon ${args.first}');
     if (args.first == 'status') return statuses.isEmpty ? daemonReply : statuses.removeAt(0);
@@ -27,6 +32,7 @@ class _World {
 
   Future<(int, String)> http(String method, Uri url, Map<String, String> h, String? body) async {
     log.add('broker $method ${url.path}');
+    if (url.path == '/api/overlay/self') selfBody = body;
     return (brokerStatus, '{"setupKey":"SK","managementUrl":"https://nb.lab-desk.net","ok":true}');
   }
 
@@ -46,6 +52,10 @@ class _World {
         elevated: elevated,
         setOption: setOption,
         hostname: 'zenbook',
+        // What the client reads back for this machine. Not the default for
+        // anything: there is no default, and these values reaching the broker
+        // unchanged is what the identity callback exists to make happen.
+        identity: () async => ('idpk=', 21119),
         sleep: (_) async {},
         connectTimeout: const Duration(seconds: 2),
       );
@@ -114,6 +124,18 @@ void main() {
     final end = await w.enrolment().enable();
     expect(end.phase, LabnetPhase.on);
     expect(w.log, ['daemon status', 'broker POST /api/overlay/self', 'option labdesk-direct-bind=100.64.0.3', 'option direct-server=Y']);
+  });
+
+  test('the machine reports the id key and the direct port the client read, not a placeholder', () async {
+    final w = _World()..daemonReply = ProcessResult(0, 0, _connected, '');
+    final end = await w.enrolment().enable();
+    expect(end.phase, LabnetPhase.on, reason: end.detail);
+    expect(jsonDecode(w.selfBody!), {
+      'overlayIp': '100.64.0.3',
+      'publicKey': 'wg=',
+      'idPk': 'idpk=',
+      'directPort': 21119,
+    });
   });
 
   test('disable closes the direct listener first, then takes the daemon down and revokes', () async {

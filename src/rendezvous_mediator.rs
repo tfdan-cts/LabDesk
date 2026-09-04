@@ -844,8 +844,8 @@ fn get_direct_port() -> i32 {
     port
 }
 
-/// labnet: how many times a literal bind is retried, roughly one attempt every
-/// two seconds, before the wait goes quiet. The overlay interface can take a
+/// labnet: how many times a literal bind is retried, one attempt a second, so
+/// about a minute, before the wait goes quiet. The overlay interface can take a
 /// moment to appear after a restart and the bind is tried again while it does.
 /// A failure that outlives that is not the interface, it is the port already
 /// being held, and retrying that forever would only fill the log, so the wait
@@ -902,6 +902,8 @@ mod direct_bind_tests {
         assert_eq!(direct_bind_ip("fd00::4"), None);
         assert_eq!(direct_bind_ip("::ffff:0.0.0.0"), None);
         assert_eq!(direct_bind_ip("::ffff:100.72.0.4"), None);
+        assert_eq!(direct_bind_ip("[::ffff:100.72.0.4]"), None);
+        assert_eq!(direct_bind_ip("::ffff:6448:4"), None);
     }
 }
 

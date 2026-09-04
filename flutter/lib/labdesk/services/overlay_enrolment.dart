@@ -27,6 +27,17 @@ typedef ElevatedRunner = Future<String?> Function(List<String> args);
 /// `labdesk-direct-bind`), kept out of this file so it stays free of the FFI.
 typedef OptionWriter = Future<void> Function(String key, String value);
 
+/// What this machine is, as the client itself holds it: the id public key a
+/// direct session runs its key exchange on (`main_get_id_pk`), and the port the
+/// direct listener answers on (`main_get_direct_access_port`). Read through a
+/// callback, like the option writer above, so this file stays free of the FFI.
+///
+/// Required, and deliberately given no default. lab-desk.net refuses a direct
+/// session to a machine that reported no id key, so a call site that forgets
+/// to read the identity produces a machine that enrols and is then unreachable.
+/// That belongs at the top of a compiler's output, not in a placeholder.
+typedef MachineIdentity = Future<(String idPk, int directPort)> Function();
+
 /// Whether the one consent prompt is due. It is asked once per machine, only
 /// while an account is signed in, and never again once answered or enrolled.
 bool shouldAskLabnetConsent({
@@ -53,7 +64,7 @@ class OverlayEnrolment {
     required this.elevated,
     required this.setOption,
     required this.hostname,
-    this.directPort = 21118,
+    required this.identity,
     Future<void> Function(Duration) sleep = Future.delayed,
     this.connectTimeout = const Duration(seconds: 60),
   }) : _sleep = sleep;
@@ -63,7 +74,7 @@ class OverlayEnrolment {
   final ElevatedRunner elevated;
   final OptionWriter setOption;
   final String hostname;
-  final int directPort;
+  final MachineIdentity identity;
   final Duration connectTimeout;
   final Future<void> Function(Duration) _sleep;
 
@@ -130,15 +141,16 @@ class OverlayEnrolment {
     return _fail(why);
   }
 
-  /// Tells lab-desk.net where this machine is and opens the direct listener
-  /// on that address only.
+  /// Tells lab-desk.net where this machine is, who it is, and which port it
+  /// answers on, then opens the direct listener on that address only.
   Future<LabnetCardState> _report(OverlayState status) async {
     final ip = bareIp(status.ip);
     _working('Registering this machine');
+    final (idPk, directPort) = await identity();
     await broker.reportSelf(
       overlayIp: ip,
       publicKey: status.publicKey,
-      idPk: '',
+      idPk: idPk,
       directPort: directPort,
     );
     await setOption('labdesk-direct-bind', ip);

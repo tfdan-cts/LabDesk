@@ -562,13 +562,18 @@ pub fn verify_downloaded_file(file_path: &Path, expected_sha256: &str) -> Result
 /// `download_url`, then hash the file that was downloaded from it, deleting
 /// the file and failing if the two do not agree.
 ///
-/// This exists for callers outside this module that download an update
-/// themselves and then hand it to an elevated installer. The Flutter UI is one
-/// of them: `flutter_ffi.rs` downloads on "download-new-version" and installs
-/// on "update-me" through `crate::platform::update_to`, which runs the file
-/// under UAC on Windows and under pkexec on Linux. That handler must call this
-/// with the same URL it downloaded from, immediately before `update_to`, or it
-/// is installing bytes nobody vouched for.
+/// This exists for callers that download an update themselves and want the
+/// whole check in one call, without an elevated install waiting on the other
+/// side of it. The Flutter UI's "extract-update-dmg" handler is the one such
+/// caller: it opens the downloaded disk image to show the user what is in it,
+/// before anything has been asked or elevated.
+///
+/// A caller that IS about to install must not use this. It fetches the digest
+/// with [get_published_sha256] and hands that digest to
+/// `crate::platform::update_to`, which checks it against the file as the last
+/// act before the elevated launch, the same ordering `update_new_version`
+/// follows. Hashing here and installing later leaves a window in a directory
+/// every local user can write.
 #[allow(dead_code)]
 pub fn verify_update_file(download_url: &str, file_path: &Path) -> ResultType<()> {
     let expected_sha256 = get_published_sha256(download_url)?;
