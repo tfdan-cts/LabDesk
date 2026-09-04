@@ -184,10 +184,10 @@ fn check_update(manually: bool) -> ResultType<()> {
     if !(manually || config::Config::get_bool_option(config::keys::OPTION_ALLOW_AUTO_UPDATE)) {
         return Ok(());
     }
-    if do_check_software_update().is_err() {
-        // ignore
-        return Ok(());
-    }
+    // A failed check is returned, not swallowed: the caller then retries in
+    // RETRY_INTERVAL rather than treating an offline moment as a day's answer.
+    do_check_software_update()
+        .map_err(|e| hbb_common::anyhow::anyhow!("Checking lab-desk.net for a new version: {}", e))?;
 
     let update_url = crate::common::SOFTWARE_UPDATE_URL.lock().unwrap().clone();
     if update_url.is_empty() {
@@ -213,35 +213,55 @@ fn check_update(manually: bool) -> ResultType<()> {
         } else {
             format!("{}/labdesk-{}-x86-sciter.exe", download_url, version)
         };
-        log::debug!("New version available: {}", &version);
+        log::info!("[update] lab-desk.net offers {} over {}", &version, crate::VERSION);
         // What the asset has to hash to, learned before a byte of it is
         // fetched. There is no unverified path from here: an update whose
         // digest cannot be read is an update that does not happen.
         let expected_sha256 = get_published_sha256(&download_url)?;
+        log::info!(
+            "[update] the release publishes sha256 {} for {}",
+            expected_sha256,
+            download_url
+        );
         let client = create_http_client_with_url_strict(&download_url)?;
-        let Some(file_path) = get_download_file_from_url(&download_url) else {
+        let Some(file_name) = get_download_file_from_url(&download_url)
+            .and_then(|p| p.file_name().map(|n| n.to_owned()))
+        else {
             bail!("Failed to get the file path from the URL: {}", download_url);
         };
-        let mut is_file_exists = false;
-        if file_path.exists() {
-            // A file left over in the temp directory is reusable only when it
-            // is byte for byte the published asset. Its size said nothing
-            // about its contents, and any local user can write that directory.
-            is_file_exists =
-                file_sha256(&file_path).ok().as_deref() == Some(expected_sha256.as_str());
+        // This runs as SYSTEM, so the temp directory is C:\Windows\Temp, where
+        // every local user may create files and owns what they create. A
+        // predictable file name there let a user pre-create the installer's
+        // path, keep the file, and rewrite it between the hash and the elevated
+        // launch. The download now lands in a directory whose name cannot be
+        // guessed, created by this process and refused if it already exists,
+        // in a file that must not exist yet either. Nothing is ever reused.
+        let dir = std::env::temp_dir().join(format!(
+            "{}-{}",
+            UPDATE_DIR_PREFIX,
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&dir)?;
+        let file_path = dir.join(file_name);
+        let response = client.get(&download_url).send()?;
+        if !response.status().is_success() {
+            std::fs::remove_dir_all(&dir).ok();
+            bail!(
+                "Failed to download the new version file: {}",
+                response.status()
+            );
         }
-        if !is_file_exists {
-            let response = client.get(&download_url).send()?;
-            if !response.status().is_success() {
-                bail!(
-                    "Failed to download the new version file: {}",
-                    response.status()
-                );
-            }
-            let file_data = response.bytes()?;
-            let mut file = std::fs::File::create(&file_path)?;
-            file.write_all(&file_data)?;
+        // Streamed and bounded rather than buffered whole in the service.
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&file_path)?;
+        let mut body = response.take(UPDATE_MAX_BYTES);
+        if let Err(e) = std::io::copy(&mut body, &mut file) {
+            std::fs::remove_dir_all(&dir).ok();
+            return Err(e.into());
         }
+        drop(file);
         // We have checked if the `conns` is empty before, but we need to check again.
         // No need to care about the downloaded file here, because it's rare case that the `conns` are empty
         // before the download, but not empty after the download.
@@ -274,8 +294,9 @@ fn update_new_version(
     file_path: &PathBuf,
     expected_sha256: &str,
 ) {
-    log::debug!(
-        "New version is downloaded, update begin, update msi: {update_msi}, version: {version}, file: {:?}",
+    log::info!(
+        "[update] {} downloaded to {:?}, msi: {update_msi}; hashing before the elevated launch",
+        version,
         file_path.to_str()
     );
     if let Some(p) = file_path.to_str() {
@@ -287,7 +308,7 @@ fn update_new_version(
                 }
                 match crate::platform::update_me_msi(p, true) {
                     Ok(_) => {
-                        log::debug!("New version \"{}\" updated.", version);
+                        log::info!("[update] {} installed from the msi", version);
                     }
                     Err(e) => {
                         log::error!(
@@ -341,7 +362,10 @@ fn update_new_version(
                             log::error!("Failed to update to the new version: {}", version);
                             false
                         } else {
-                            log::debug!("New version \"{}\" is launched.", version);
+                            log::info!(
+                                "[update] {} hashed to its published sha256 and its installer was launched elevated",
+                                version
+                            );
                             true
                         }
                     }
@@ -374,6 +398,15 @@ fn update_new_version(
         );
     }
 }
+
+/// Where an unattended download lands: a directory under the temp directory
+/// named with this prefix and a fresh UUID, one per update, removed by
+/// `try_remove_temp_update_files` once it is an hour old.
+pub const UPDATE_DIR_PREFIX: &str = "labdesk-update";
+
+/// More than any installer this project ships; a response longer than this is
+/// cut off and fails the hash rather than filling the disk.
+const UPDATE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 
 /// The hosts an update may be fetched from, and the path shape under each.
 /// Upstream: `https://github.com/rustdesk/rustdesk/releases/download/<tag>/<file>`.
@@ -958,7 +991,8 @@ pub fn check_update_as_root() -> ResultType<bool> {
         log::info!("[root-update] Auto update is disabled, skipping.");
         return Ok(false);
     }
-    if crate::is_custom_client() {
+    // LabDesk is a custom client upstream and checks lab-desk.net for itself.
+    if crate::is_custom_client() && !crate::common::is_labdesk() {
         log::info!("[root-update] Custom client detected, skipping stock update.");
         return Ok(false);
     }

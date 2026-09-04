@@ -20,6 +20,11 @@ const IDENTITY_FILE: &str = "agent-identity.toml";
 // Used until the server says otherwise; both cadences are server controlled so a fleet
 // already in the field can be slowed down.
 const DEFAULT_SAMPLE_SECONDS: u64 = 60;
+/// The range a pushed cadence is held to, whatever the server says.
+const MIN_SAMPLE_SECONDS: u64 = 15;
+const MAX_SAMPLE_SECONDS: u64 = 3600;
+const MIN_FLUSH_SECONDS: u64 = 60;
+const MAX_FLUSH_SECONDS: u64 = 86400;
 const DEFAULT_FLUSH_SECONDS: u64 = 300;
 
 #[derive(Default, Serialize, Deserialize)]
@@ -150,7 +155,10 @@ impl AgentIdentity {
         if self.sample_seconds == 0 {
             DEFAULT_SAMPLE_SECONDS
         } else {
-            self.sample_seconds
+            // Server controlled, but not without limit: one sample a second
+            // would rewrite the spool file every second on the machine this
+            // product exists to keep healthy.
+            self.sample_seconds.clamp(MIN_SAMPLE_SECONDS, MAX_SAMPLE_SECONDS)
         }
     }
 
@@ -161,7 +169,7 @@ impl AgentIdentity {
         if self.flush_seconds == 0 {
             DEFAULT_FLUSH_SECONDS
         } else {
-            self.flush_seconds
+            self.flush_seconds.clamp(MIN_FLUSH_SECONDS, MAX_FLUSH_SECONDS)
         }
     }
 

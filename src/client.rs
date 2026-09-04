@@ -180,6 +180,8 @@ const PUBLIC_SERVER: &str = "public";
 // together, is bounded by this, so a hint that leads nowhere costs the
 // session no more than it before the rendezvous path takes over.
 const OVERLAY_TIMEOUT: u64 = 1_500;
+/// The least the handshake is given even when the connect ate the budget.
+const OVERLAY_HANDSHAKE_MIN: u64 = 500;
 
 /// labnet: an overlay address hint is written into the config by the console,
 /// which takes it from lab-desk.net, so it is only ever dialled as a literal
@@ -403,8 +405,12 @@ impl Client {
                             Ok(mut conn) => {
                                 let pk =
                                     crate::decode64(Config::get_option(&pk_key)).unwrap_or_default();
+                                // A connect that used the whole budget must not
+                                // hand the handshake a zero timeout, which would
+                                // fail it before a byte is read.
                                 let left = OVERLAY_TIMEOUT
-                                    .saturating_sub(started.elapsed().as_millis() as u64);
+                                    .saturating_sub(started.elapsed().as_millis() as u64)
+                                    .max(OVERLAY_HANDSHAKE_MIN);
                                 // Bound here so the borrow of the stream ends
                                 // before the stream is handed on.
                                 let res = timeout(

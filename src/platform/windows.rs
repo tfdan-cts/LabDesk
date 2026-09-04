@@ -3850,10 +3850,14 @@ pub fn try_remove_temp_update_files() {
         if let Ok(entry) = entry {
             let path = entry.path();
             if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                // The per-update directories the unattended path downloads into.
+                let update_dir = path.is_dir()
+                    && file_name.starts_with(crate::updater::UPDATE_DIR_PREFIX);
                 // Match staged installers: labdesk-*.msi or labdesk-*.exe, and the
                 // rustdesk-* names releases up to 1.2.1 were downloaded under.
-                if (file_name.starts_with("labdesk-") || file_name.starts_with("rustdesk-"))
-                    && (file_name.ends_with(".msi") || file_name.ends_with(".exe"))
+                if update_dir
+                    || ((file_name.starts_with("labdesk-") || file_name.starts_with("rustdesk-"))
+                        && (file_name.ends_with(".msi") || file_name.ends_with(".exe")))
                 {
                     // Skip files modified within the last hour to avoid deleting files being downloaded
                     if let Ok(metadata) = std::fs::metadata(&path) {
@@ -3865,7 +3869,12 @@ pub fn try_remove_temp_update_files() {
                             }
                         }
                     }
-                    if let Err(e) = std::fs::remove_file(&path) {
+                    let removed = if update_dir {
+                        std::fs::remove_dir_all(&path)
+                    } else {
+                        std::fs::remove_file(&path)
+                    };
+                    if let Err(e) = removed {
                         log::debug!("Failed to remove temp update file {:?}: {}", path, e);
                     } else {
                         log::info!("Removed temp update file: {:?}", path);
