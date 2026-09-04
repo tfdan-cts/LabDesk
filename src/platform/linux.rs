@@ -890,6 +890,11 @@ pub fn start_os_service() {
     stop_subprocess();
     start_uinput_service();
 
+    // Telemetry: this process is root (`res/rustdesk.service` sets `User=root`), while
+    // `--server` below is launched through `run_as_user` as the desktop user. The
+    // collector runs here for that reason.
+    crate::labdesk::collector::start();
+
     std::thread::spawn(|| {
         allow_err!(crate::ipc::start(crate::POSTFIX_SERVICE));
     });

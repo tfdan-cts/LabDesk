@@ -1,5 +1,5 @@
 use crate::{common::do_check_software_update, hbbs_http::create_http_client_with_url_strict};
-use hbb_common::{bail, config, log, ResultType};
+use hbb_common::{bail, config, log, sodiumoxide::crypto::sign, ResultType};
 use std::{
     io::{Read, Write},
     path::{Component, Path, PathBuf},
@@ -481,32 +481,238 @@ fn is_sha256_hex(digest: &str) -> bool {
     digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// The SHA-256 the release publishes for the asset at `download_url`.
-/// Every failure is fatal to the update by design.
-pub fn get_published_sha256(download_url: &str) -> ResultType<String> {
+/// The release manifest and its detached signature, both produced by
+/// `.github/workflows/release-checksums.yml` and uploaded to the release as
+/// assets, so the site serves them from the same place as the asset they
+/// describe.
+const RELEASE_MANIFEST_ASSET: &str = "SHA256SUMS";
+const RELEASE_SIGNATURE_ASSET: &str = "SHA256SUMS.sig";
+
+/// A manifest is one line of about 90 bytes per release asset. This bound is
+/// far above any real release and keeps a hostile or broken endpoint from being
+/// read into memory without limit.
+const RELEASE_MANIFEST_MAX_BYTES: u64 = 64 * 1024;
+
+/// The Ed25519 public key that release manifests are signed with, base64 of the
+/// raw 32 bytes.
+///
+/// PLACEHOLDER, deliberately empty: the signing key has not been generated yet,
+/// and generating one is a ceremony only the repository owner can perform. An
+/// empty constant pins no key, which leaves this client on the published-digest
+/// path it already ships rather than making it refuse every update it is
+/// offered. Filling this constant in is the ONLY change that switches signature
+/// enforcement on, and once it is on an update whose manifest signature is
+/// missing, malformed or made by another key is refused.
+///
+/// `docs/SIGNING.md` has the ceremony, the release-secret half of it and the
+/// order the two halves have to land in.
+const RELEASE_SIGNING_PUBLIC_KEY_B64: &str = "";
+
+/// The pinned release key, or None while the constant above is the placeholder.
+fn release_signing_public_key() -> Option<sign::PublicKey> {
+    parse_release_signing_key(RELEASE_SIGNING_PUBLIC_KEY_B64)
+}
+
+/// A pinned key is a 32-byte Ed25519 public key or it is nothing. Returning
+/// None rather than panicking keeps a mistyped constant from taking the process
+/// down, and the test below turns that same mistyped constant into a build
+/// failure, which is where it has to be caught: a key that silently parses to
+/// None would switch enforcement off on every installed client at once.
+fn parse_release_signing_key(base64: &str) -> Option<sign::PublicKey> {
+    sign::PublicKey::from_slice(&crate::decode64(base64).ok()?)
+}
+
+/// The version and asset filename a release download URL names, for URLs the
+/// release allowlist accepts and only those. The manifest is therefore only
+/// ever fetched from the release the asset itself came from.
+fn release_asset_parts(download_url: &str) -> Option<(&str, &str)> {
+    get_update_download_file_from_url(download_url)?;
+    let prefix = format!("{}{}", crate::common::LABDESK_SITE, RELEASE_DOWNLOAD_PATH);
+    download_url.strip_prefix(&prefix)?.split_once('/')
+}
+
+/// Where the site serves `asset` of release `version` from.
+fn release_asset_url(version: &str, asset: &str) -> String {
+    format!(
+        "{}{}{}/{}",
+        crate::common::LABDESK_SITE,
+        RELEASE_DOWNLOAD_PATH,
+        version,
+        asset
+    )
+}
+
+/// Passes only a manifest whose detached signature verifies against the pinned
+/// release key.
+///
+/// This is the check a published digest cannot make on its own. The digest and
+/// the asset travel through the same site and out of the same release, so a
+/// hash catches a tampered transfer, a poisoned cache and a swapped local file,
+/// but whoever controls the site controls both halves and can serve a matching
+/// pair. The signing key never reaches the site, so a signature the site cannot
+/// produce is what stops that.
+///
+/// What it does NOT stop is whoever can make the release pipeline sign for
+/// them: the private key is a secret in this same repository, so repository
+/// write plus a workflow dispatch signs whatever is on the release. Nor does it
+/// bind a version, so a signed older release is still a signed release.
+/// `docs/SIGNING.md`, "What this does not close", is the honest list.
+fn verify_manifest_signature(
+    manifest: &[u8],
+    signature: &[u8],
+    public_key: &sign::PublicKey,
+) -> ResultType<()> {
+    let Ok(signature) = sign::Signature::from_bytes(signature) else {
+        bail!(
+            "The release manifest signature is not {} bytes",
+            sign::SIGNATUREBYTES
+        );
+    };
+    if !sign::verify_detached(&signature, manifest, public_key) {
+        bail!("The release manifest signature was not made by the pinned release key");
+    }
+    Ok(())
+}
+
+/// The digest a signed manifest records for `asset`. The manifest is
+/// `sha256sum` output: one `<64 hex>  <name>` line per asset, the name prefixed
+/// with `*` when the release pipeline hashed in binary mode.
+///
+/// Releases up to 1.2.1 name their assets with the inherited `rustdesk-` prefix
+/// while the client asks for them under `labdesk-`, and the site maps one onto
+/// the other when it serves the file (labdesk-site `src/worker/releases.ts`,
+/// `upstreamNames`). The lookup here accepts the same pair, or an older release
+/// reads as one that publishes no digest at all.
+///
+/// Two lines for one name is refused rather than resolved: a manifest that says
+/// two things about one asset is not a manifest to install from.
+fn digest_from_manifest(manifest: &str, asset: &str) -> ResultType<String> {
+    let own = match asset.strip_prefix("rustdesk-") {
+        Some(rest) => format!("labdesk-{}", rest),
+        None => asset.to_owned(),
+    };
+    let inherited = own
+        .strip_prefix("labdesk-")
+        .map(|rest| format!("rustdesk-{}", rest));
+    let mut found = None;
+    for line in manifest.lines() {
+        let Some((digest, rest)) = line.split_once(' ') else {
+            continue;
+        };
+        let digest = digest.to_lowercase();
+        // A banner, a blank line or a truncated digest is not a digest line.
+        if !is_sha256_hex(&digest) {
+            continue;
+        }
+        let name = rest.trim().trim_start_matches('*');
+        if name != own && Some(name) != inherited.as_deref() {
+            continue;
+        }
+        if found.is_some() {
+            bail!("The release manifest records {} more than once", asset);
+        }
+        found = Some(digest);
+    }
+    match found {
+        Some(digest) => Ok(digest),
+        None => bail!("The release manifest publishes no digest for {}", asset),
+    }
+}
+
+/// The bytes the site publishes at `url`, up to `max`. One byte over the bound
+/// is an error rather than a truncation, so a body that is not what it claims
+/// to be cannot be quietly cut down into something that parses.
+fn fetch_release_bytes(url: &str, max: u64) -> ResultType<Vec<u8>> {
+    let client = create_http_client_with_url_strict(url)?;
+    let response = client.get(url).send()?;
+    if !response.status().is_success() {
+        bail!("{} returned {}", url, response.status());
+    }
+    let mut body = Vec::new();
+    response.take(max + 1).read_to_end(&mut body)?;
+    if body.len() as u64 > max {
+        bail!("{} returned more than {} bytes", url, max);
+    }
+    Ok(body)
+}
+
+/// The SHA-256 for the asset at `download_url`, reading whatever it needs
+/// through `fetch`. Every failure is fatal to the update by design.
+///
+/// The choice between the two paths lives here, and the fetching is passed in,
+/// because this is the line that decides whether an update is checked against a
+/// signature at all and a test can only watch it if the network is a parameter.
+///
+/// With a key pinned there is deliberately NO path back to the unsigned digest:
+/// a manifest the site will not serve, or one whose signature does not verify,
+/// stops the update. A fallback there would hand any site that can answer 404
+/// the power to switch enforcement off for the whole fleet, which is the one
+/// failure this package exists to prevent.
+fn published_sha256(
+    download_url: &str,
+    pinned_key: Option<sign::PublicKey>,
+    fetch: &dyn Fn(&str, u64) -> ResultType<Vec<u8>>,
+) -> ResultType<String> {
+    let Some(public_key) = pinned_key else {
+        return published_digest_sha256(download_url, fetch);
+    };
+    let Some((version, asset)) = release_asset_parts(download_url) else {
+        bail!(
+            "No signed release manifest for the update URL, refusing to install: {}",
+            download_url
+        );
+    };
+    let manifest = fetch(
+        &release_asset_url(version, RELEASE_MANIFEST_ASSET),
+        RELEASE_MANIFEST_MAX_BYTES,
+    )?;
+    let signature = fetch(
+        &release_asset_url(version, RELEASE_SIGNATURE_ASSET),
+        sign::SIGNATUREBYTES as u64,
+    )?;
+    // Over the raw bytes, before a single field is parsed out of them, so
+    // nothing downstream ever reads a manifest nobody vouched for.
+    verify_manifest_signature(&manifest, &signature, &public_key)?;
+    digest_from_manifest(std::str::from_utf8(&manifest)?, asset)
+}
+
+/// The per-asset digest the site publishes. This is the path the client already
+/// ships and the only path while no key is pinned. It closes transport
+/// tampering, a poisoned cache and a corrupted download, but not a site serving
+/// a matching pair of its own making.
+fn published_digest_sha256(
+    download_url: &str,
+    fetch: &dyn Fn(&str, u64) -> ResultType<Vec<u8>>,
+) -> ResultType<String> {
     let Some(checksum_url) = get_update_checksum_url(download_url) else {
         bail!(
             "No published SHA-256 for the update URL, refusing to install: {}",
             download_url
         );
     };
-    let client = create_http_client_with_url_strict(&checksum_url)?;
-    let response = client.get(&checksum_url).send()?;
-    if !response.status().is_success() {
+    // A digest is 64 bytes, and the bound keeps a hostile or broken endpoint
+    // from being read into memory without limit.
+    let body = match fetch(&checksum_url, 128) {
+        Ok(body) => body,
         // Worth spelling out: this freezes the update channel until the
         // release publishes SHA256SUMS, which is the whole reason a release
         // has to be checksummed before the channel is pointed at it.
-        bail!(
-            "The release publishes no SHA-256 for this asset ({} returned {}), so no update can be installed",
-            checksum_url,
-            response.status()
-        );
-    }
-    // A digest is 64 bytes. Reading a bounded prefix keeps a hostile or broken
-    // endpoint from being read into memory without limit.
-    let mut body = String::new();
-    response.take(128).read_to_string(&mut body)?;
-    digest_from_response_body(&body)
+        Err(e) => bail!(
+            "The release publishes no SHA-256 for this asset ({}), so no update can be installed",
+            e
+        ),
+    };
+    digest_from_response_body(std::str::from_utf8(&body)?)
+}
+
+/// The SHA-256 the release publishes for the asset at `download_url`, over the
+/// real network.
+pub fn get_published_sha256(download_url: &str) -> ResultType<String> {
+    published_sha256(
+        download_url,
+        release_signing_public_key(),
+        &fetch_release_bytes,
+    )
 }
 
 /// The digest a response body carries, or an error. An error page, an empty
@@ -843,8 +1049,11 @@ pub fn check_update_as_root() -> ResultType<bool> {
 #[cfg(test)]
 mod tests {
     use super::{
-        digest_from_response_body, file_sha256, get_download_file_from_url,
-        get_update_checksum_url, is_sha256_hex, verify_downloaded_file,
+        digest_from_manifest, digest_from_response_body, file_sha256, get_download_file_from_url,
+        get_update_checksum_url, is_sha256_hex, parse_release_signing_key, published_sha256,
+        release_asset_parts, release_asset_url, release_signing_public_key, sign,
+        verify_downloaded_file, verify_manifest_signature, ResultType, RELEASE_MANIFEST_ASSET,
+        RELEASE_SIGNATURE_ASSET, RELEASE_SIGNING_PUBLIC_KEY_B64,
     };
 
     #[test]
@@ -980,6 +1189,284 @@ mod tests {
         ] {
             assert!(digest_from_response_body(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_pinned_release_key_is_the_placeholder_or_a_real_ed25519_key() {
+        // The constant is the whole switch. Empty means no key is pinned and
+        // the client stays on the digest path it shipped with; a real key means
+        // every update needs a signature. A mistyped key would parse to None
+        // and so switch enforcement off on every installed client at once, so
+        // it fails the build here instead.
+        assert_eq!(
+            release_signing_public_key().is_some(),
+            !RELEASE_SIGNING_PUBLIC_KEY_B64.is_empty(),
+            "RELEASE_SIGNING_PUBLIC_KEY_B64 is set but is not a 32-byte Ed25519 public key"
+        );
+        assert!(parse_release_signing_key("").is_none());
+        assert!(parse_release_signing_key(&crate::encode64([7u8; 32])).is_some());
+        // 31 and 33 bytes are not Ed25519 public keys, and neither is a string
+        // that is not base64 at all.
+        assert!(parse_release_signing_key(&crate::encode64([7u8; 31])).is_none());
+        assert!(parse_release_signing_key(&crate::encode64([7u8; 33])).is_none());
+        assert!(parse_release_signing_key("not base64!").is_none());
+    }
+
+    #[test]
+    fn a_manifest_is_trusted_only_with_its_own_signature_from_the_pinned_key() {
+        let (public_key, secret_key) = sign::gen_keypair();
+        let (other_public_key, _) = sign::gen_keypair();
+        let manifest = "460de39d0bfc73247f2f143b4a83d255a00a53620a116fca20af1f7963b7a2c5  labdesk-1.2.2-x86_64.exe\n";
+        let signature = sign::sign_detached(manifest.as_bytes(), &secret_key).to_bytes();
+
+        verify_manifest_signature(manifest.as_bytes(), &signature, &public_key)
+            .expect("the signature the release made over this manifest verifies");
+
+        // One character of one digest changed, the signature left alone: this
+        // is the compromised-release case the digest alone cannot catch.
+        let tampered = manifest.replace("460de39d", "460de39e");
+        assert!(verify_manifest_signature(tampered.as_bytes(), &signature, &public_key).is_err());
+
+        // The real manifest and its real signature, verified against a key that
+        // did not make it.
+        assert!(
+            verify_manifest_signature(manifest.as_bytes(), &signature, &other_public_key).is_err()
+        );
+
+        // An absent, truncated or over-long signature is refused before any
+        // verification is attempted.
+        assert!(verify_manifest_signature(manifest.as_bytes(), &[], &public_key).is_err());
+        assert!(
+            verify_manifest_signature(manifest.as_bytes(), &signature[..63], &public_key).is_err()
+        );
+        let mut too_long = signature.to_vec();
+        too_long.push(0);
+        assert!(verify_manifest_signature(manifest.as_bytes(), &too_long, &public_key).is_err());
+    }
+
+    #[test]
+    fn a_digest_is_read_out_of_a_manifest_by_asset_name() {
+        let manifest = concat!(
+            "0000000000000000000000000000000000000000000000000000000000000001  labdesk-1.2.2-aarch64.exe\n",
+            "0000000000000000000000000000000000000000000000000000000000000002  labdesk-1.2.2-x86_64.exe\n",
+            "0000000000000000000000000000000000000000000000000000000000000003 *labdesk-1.2.2-x86_64.msi\n",
+        );
+        // The asset's own digest, not the neighbouring line's.
+        assert_eq!(
+            digest_from_manifest(manifest, "labdesk-1.2.2-x86_64.exe").unwrap(),
+            "0000000000000000000000000000000000000000000000000000000000000002"
+        );
+        // `sha256sum -b` marks the name with a leading `*`.
+        assert_eq!(
+            digest_from_manifest(manifest, "labdesk-1.2.2-x86_64.msi").unwrap(),
+            "0000000000000000000000000000000000000000000000000000000000000003"
+        );
+        // A release from before the rename lists the asset under the inherited
+        // prefix while the client still asks for it under the product's own.
+        assert_eq!(
+            digest_from_manifest(
+                "0000000000000000000000000000000000000000000000000000000000000004  rustdesk-1.2.1-x86_64.exe\n",
+                "labdesk-1.2.1-x86_64.exe"
+            )
+            .unwrap(),
+            "0000000000000000000000000000000000000000000000000000000000000004"
+        );
+        // No line for the asset, a name that is only a prefix of one that is
+        // there, two lines for one name, and a line that is not a digest line
+        // at all: every one of them stops the update.
+        assert!(digest_from_manifest(manifest, "labdesk-1.2.2-x86_64.deb").is_err());
+        assert!(digest_from_manifest(manifest, "labdesk-1.2.2-x86_64.ex").is_err());
+        assert!(
+            digest_from_manifest(&format!("{manifest}{manifest}"), "labdesk-1.2.2-x86_64.exe")
+                .is_err()
+        );
+        assert!(
+            digest_from_manifest("# labdesk-1.2.2-x86_64.exe\n", "labdesk-1.2.2-x86_64.exe")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn the_manifest_is_fetched_from_the_release_the_asset_came_from() {
+        let (version, asset) = release_asset_parts(
+            "https://lab-desk.net/releases/download/1.2.2/labdesk-1.2.2-x86_64.exe",
+        )
+        .expect("a LabDesk release asset URL");
+        assert_eq!(version, "1.2.2");
+        assert_eq!(asset, "labdesk-1.2.2-x86_64.exe");
+        assert_eq!(
+            release_asset_url(version, RELEASE_MANIFEST_ASSET),
+            "https://lab-desk.net/releases/download/1.2.2/SHA256SUMS"
+        );
+        assert_eq!(
+            release_asset_url(version, RELEASE_SIGNATURE_ASSET),
+            "https://lab-desk.net/releases/download/1.2.2/SHA256SUMS.sig"
+        );
+        // Anything the release allowlist does not accept has no manifest, so no
+        // signature can be demanded of it and no update can come from it.
+        for url in [
+            "https://github.com/rustdesk/rustdesk/releases/download/1.4.0/rustdesk-1.4.0-x86_64.dmg",
+            "http://lab-desk.net/releases/download/1.2.2/labdesk-1.2.2-x86_64.exe",
+            "https://lab-desk.net/releases/download/1.2.2/nested/labdesk.exe",
+            "https://lab-desk.net.evil.com/releases/download/1.2.2/labdesk.exe",
+            "not a url",
+        ] {
+            assert!(release_asset_parts(url).is_none(), "{url}");
+        }
+    }
+
+    /// The client half of the mechanism against the CI half, with a vector
+    /// openssl actually produced.
+    ///
+    /// These constants came out of a scratch directory, from exactly the
+    /// commands `.github/workflows/release-checksums.yml` runs and
+    /// `docs/SIGNING.md` writes down:
+    ///
+    ///   openssl genpkey -algorithm ed25519 -out throwaway.pem
+    ///   openssl pkeyutl -sign -rawin -inkey throwaway.pem -in SHA256SUMS \
+    ///     -out SHA256SUMS.sig
+    ///   openssl pkey -in throwaway.pem -pubout -outform DER | tail -c 32 | base64 -w0
+    ///
+    /// The key was a throwaway made for this fixture and is not, and must never
+    /// become, the release key. A public key and a signature are not secrets.
+    ///
+    /// Every other test here signs with sodiumoxide and verifies with
+    /// sodiumoxide, which is one library agreeing with itself and says nothing
+    /// about the side that really makes these files. If openssl's output stops
+    /// being what `verify_detached` accepts, or the ceremony's key extraction
+    /// stops yielding the raw 32 bytes, the fleet's update channel breaks, and
+    /// this is the test that has to notice first.
+    #[test]
+    fn an_openssl_signature_made_the_way_ci_makes_it_verifies_here() {
+        const MANIFEST: &str = concat!(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+            "  labdesk-1.2.2-aarch64.exe\n",
+            "0000000000000000000000000000000000000000000000000000000000000002",
+            "  labdesk-1.2.2-x86_64.exe\n",
+        );
+        const PUBLIC_KEY_DER_B64: &str =
+            "MCowBQYDK2VwAyEA24i/6YbJxz+qqWbWPlVKBGK/vF3C2U0ZPqBLfk//UEY=";
+        const PUBLIC_KEY_B64: &str = "24i/6YbJxz+qqWbWPlVKBGK/vF3C2U0ZPqBLfk//UEY=";
+        const SIGNATURE_B64: &str = concat!(
+            "lmphXsCiZMUsXFydCeaW2G7JXHLIwTuJqt8mm3zVo/22zOycqIePHKYZsYQJm0b1",
+            "mAlKcjvYvlkvpQrnYcLIBg==",
+        );
+
+        // Ceremony step 2. An Ed25519 SubjectPublicKeyInfo is a 12-byte header
+        // and then the key, so the DER's last 32 bytes are exactly what the
+        // pinned constant holds. Getting this wrong produces a key that parses
+        // and then verifies nothing.
+        let der = crate::decode64(PUBLIC_KEY_DER_B64).expect("the DER the ceremony prints");
+        assert_eq!(der.len(), 44);
+        assert_eq!(crate::encode64(&der[der.len() - 32..]), PUBLIC_KEY_B64);
+
+        let public_key = parse_release_signing_key(PUBLIC_KEY_B64).expect("a pinned 32-byte key");
+        let signature = crate::decode64(SIGNATURE_B64).expect("the published signature");
+        assert_eq!(signature.len(), sign::SIGNATUREBYTES);
+
+        verify_manifest_signature(MANIFEST.as_bytes(), &signature, &public_key)
+            .expect("an openssl detached signature verifies under sodiumoxide");
+        assert_eq!(
+            digest_from_manifest(MANIFEST, "labdesk-1.2.2-x86_64.exe").unwrap(),
+            "0000000000000000000000000000000000000000000000000000000000000002"
+        );
+
+        // One digit of one digest changed, the signature left as published.
+        let tampered = MANIFEST.replace("00000002", "00000003");
+        assert!(verify_manifest_signature(tampered.as_bytes(), &signature, &public_key).is_err());
+    }
+
+    /// The switch itself, which is the highest-value line in this file: pinning
+    /// a key has to replace the unsigned digest route, not sit in front of it.
+    /// Every fetch is recorded, so a fallback cannot hide behind an assertion
+    /// that only inspects the answer.
+    #[test]
+    fn a_pinned_key_replaces_the_unsigned_digest_route_and_never_falls_back_to_it() {
+        let (public_key, secret_key) = sign::gen_keypair();
+        let url = "https://lab-desk.net/releases/download/1.2.2/labdesk-1.2.2-x86_64.exe";
+        let manifest = concat!(
+            "0000000000000000000000000000000000000000000000000000000000000002",
+            "  labdesk-1.2.2-x86_64.exe\n"
+        );
+        let digest = "0000000000000000000000000000000000000000000000000000000000000002";
+        let signature = sign::sign_detached(manifest.as_bytes(), &secret_key).to_bytes();
+        let manifest_url = "https://lab-desk.net/releases/download/1.2.2/SHA256SUMS";
+        let signature_url = "https://lab-desk.net/releases/download/1.2.2/SHA256SUMS.sig";
+        let checksum_url = "https://lab-desk.net/releases/checksums/1.2.2/labdesk-1.2.2-x86_64.exe";
+
+        let asked = std::cell::RefCell::new(Vec::new());
+        let record = |asked_url: &str| asked.borrow_mut().push(asked_url.to_owned());
+        let not_found = |asked_url: &str| -> ResultType<Vec<u8>> {
+            Err(
+                std::io::Error::new(std::io::ErrorKind::NotFound, format!("404 {asked_url}"))
+                    .into(),
+            )
+        };
+
+        // The release serves both files: the digest comes out of the manifest,
+        // and only after the signature over it verified.
+        let found = published_sha256(url, Some(public_key), &|asked_url: &str, _max: u64| {
+            record(asked_url);
+            match asked_url {
+                u if u == manifest_url => Ok(manifest.as_bytes().to_vec()),
+                u if u == signature_url => Ok(signature.to_vec()),
+                other => not_found(other),
+            }
+        })
+        .expect("a manifest the pinned key signed");
+        assert_eq!(found, digest);
+        assert_eq!(asked.take(), [manifest_url, signature_url]);
+
+        // The site will not serve the manifest. That has to stop the update: a
+        // fallback here would let anything able to answer 404 switch
+        // enforcement off for the whole fleet.
+        assert!(
+            published_sha256(url, Some(public_key), &|asked_url: &str, _max: u64| {
+                record(asked_url);
+                not_found(asked_url)
+            })
+            .is_err()
+        );
+        assert_eq!(asked.take(), [manifest_url]);
+
+        // The real manifest carrying a signature that another key made.
+        let (_, other_secret_key) = sign::gen_keypair();
+        let forged = sign::sign_detached(manifest.as_bytes(), &other_secret_key).to_bytes();
+        assert!(
+            published_sha256(url, Some(public_key), &|asked_url: &str, _max: u64| {
+                record(asked_url);
+                match asked_url {
+                    u if u == manifest_url => Ok(manifest.as_bytes().to_vec()),
+                    u if u == signature_url => Ok(forged.to_vec()),
+                    other => not_found(other),
+                }
+            })
+            .is_err()
+        );
+        assert_eq!(asked.take(), [manifest_url, signature_url]);
+
+        // A URL the release allowlist does not accept has no manifest, and with
+        // a key pinned that is the end of it, not a reason to try the digest.
+        assert!(published_sha256(
+            "https://github.com/rustdesk/rustdesk/releases/download/1.4.0/rustdesk-1.4.0-x86_64.dmg",
+            Some(public_key),
+            &|asked_url: &str, _max: u64| {
+                record(asked_url);
+                not_found(asked_url)
+            }
+        )
+        .is_err());
+        assert!(asked.take().is_empty());
+
+        // No key pinned, which is what ships today: the per-asset digest route
+        // the client already used, and no manifest asked for at all.
+        let found = published_sha256(url, None, &|asked_url: &str, _max: u64| {
+            record(asked_url);
+            Ok(format!("{digest}\n").into_bytes())
+        })
+        .expect("the digest the site publishes");
+        assert_eq!(found, digest);
+        assert_eq!(asked.take(), [checksum_url]);
     }
 
     #[test]

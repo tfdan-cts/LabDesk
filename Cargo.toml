@@ -130,12 +130,18 @@ windows = { version = "0.61", features = [
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
+    # Both added for src/labdesk/disk/windows.rs: Ioctl carries the SMART and
+    # IOCTL_STORAGE_* constants and their structs, Nvme carries the log page
+    # identifiers. Neither pulls a new crate in; they widen the `windows` crate
+    # that is already here.
+    "Win32_Storage_Nvme",
     "Win32_System",
     "Win32_System_Com",
     "Win32_System_Diagnostics",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Environment",
     "Win32_System_IO",
+    "Win32_System_Ioctl",
     "Win32_System_Memory",
     "Win32_System_Pipes",
     "Win32_System_Registry",
