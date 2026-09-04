@@ -894,6 +894,7 @@ pub fn start_os_service() {
     // `--server` below is launched through `run_as_user` as the desktop user. The
     // collector runs here for that reason.
     crate::labdesk::collector::start();
+    crate::labdesk::selfheal::start();
 
     std::thread::spawn(|| {
         allow_err!(crate::ipc::start(crate::POSTFIX_SERVICE));

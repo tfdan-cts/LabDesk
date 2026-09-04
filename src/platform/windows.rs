@@ -693,6 +693,10 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
     // Telemetry: this process is LocalSystem, which is the only account on any platform
     // that can read disk health, so the collector runs here rather than in `--server`.
     crate::labdesk::collector::start();
+    // Network self-healing runs here too: the service is the only part that
+    // keeps running with nobody logged in, which is exactly when a machine
+    // has to heal its own connectivity. Off unless the option is set.
+    crate::labdesk::selfheal::start();
 
     let mut session_id = unsafe { get_current_session(share_rdp()) };
     log::info!("session id {}", session_id);

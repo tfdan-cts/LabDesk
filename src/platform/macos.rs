@@ -842,6 +842,7 @@ pub fn start_os_service() {
     // /Library/LaunchDaemons, :190-195), while `--server` is the per-user LaunchAgent
     // (`_server.plist` under /Library/LaunchAgents). The collector runs here for that.
     crate::labdesk::collector::start();
+    crate::labdesk::selfheal::start();
     if let Err(err) = crate::ipc::start("_service") {
         log::error!("Failed to start ipc_service: {}", err);
     }
