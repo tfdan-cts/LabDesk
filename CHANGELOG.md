@@ -3,18 +3,15 @@
 LabDesk's own versions. The RustDesk core underneath is stated in the README, not versioned here.
 Rules: `docs/VERSIONING.md`.
 
-## Unreleased
+## 1.2.3 (2026-09-04)
 
 Security fixes.
 
 - An update is verified before it installs, on every path that installs one. LabDesk refuses to
-  install a download whose bytes do not hash to a published SHA-256. Read the consequence
-  plainly, because it is the most operationally important line in this release: NOTHING
-  PUBLISHES A DIGEST YET, so a client built from this commit installs no update at all on any
-  platform. `.github/workflows/release-checksums.yml` exists on this branch and not on the
-  default branch, so neither a tag push nor a manual dispatch runs it, no published release
-  carries `SHA256SUMS`, and the digest fetch is fatal rather than advisory
-  (`src/updater.rs` propagates its error), so the update stops at its first request. The old check compared the size of any file left
+  install a download whose bytes do not hash to a published SHA-256. The digest is read out of the release's own `SHA256SUMS`, which the build workflow now
+  publishes beside the assets of every release it makes, so a client built from this commit
+  can install an update; a release that carries no manifest is refused rather than installed
+  unverified. The old check compared the size of any file left
   behind in the temporary directory, which every local user can write, so a file of the right
   size was reused and handed to an elevated installer unverified. A release that publishes no
   digest, the upstream GitHub releases included, no longer installs at all. Release manifests
