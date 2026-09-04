@@ -358,3 +358,53 @@ After all of it the VM was rebooted a third time. All three containers came back
 restarts, every route answered, the firewall policy and both container drops persisted, Traefik's
 root filesystem was still read-only and the server's config still read-only, the external scan
 still showed only 443 open, and STUN still answered.
+
+### The compromise removed
+
+The fourth critic pass confirmed the three previous fixes and then found the root cause of the one
+compromise this session had accepted. Container egress had been left open because `netbird-server`
+downloads its GeoLite2 database at every start and treats failure as fatal. That was true, but it
+was a symptom, not a constraint.
+
+`combined/cmd/config.go:70` defines `disableGeoliteUpdate`, which defaults to false.
+`management/internals/server/modules.go:47` passes `autoUpdate = !disableGeoliteUpdate` into
+`geolocation.NewGeolocation`, and `management/server/geolocation/geolocation.go:225` fetches over
+the network in that branch and returns the error, which `modules.go:50` turns into `log.Fatalf`.
+The `else` branch at line 227 reuses the newest matching local file and never touches the network.
+Both files the loader globs for were already on the volume: `GeoLite2-City_20260602.mmdb` for
+`GeoLite2-City_*.mmdb` and `geonames_20260602.db` for `geonames_*.db`.
+
+So `disableGeoliteUpdate: true` went into `config.yaml`, and the log now reads
+`geolocation service has been initialized from /var/lib/netbird` with no fetch and no fatal. With
+the dependency gone, the egress rules went back on: containers reach nothing on the internet except
+Traefik, which needs Let's Encrypt. Measured after a reboot whose boot id was compared before and
+after, so the reboot cannot be assumed: all three containers back with zero restarts, no fatal
+lines, every route answering, Traefik reaching Let's Encrypt with 200 and `netbird-server` reaching
+nothing.
+
+`DOCKER-USER` now carries, in order: drop to `169.254.0.0/16`, return established, drop from the
+container subnet to `10.30.20.0/24`, return Traefik's own address outbound, drop every other
+container egress, then the inbound rules that allow only 443/tcp and 3478/udp from the public
+interface.
+
+### The health endpoint, and why it stays 503
+
+`/health` on the server's internal port 9000 answered 503. It is not published, nothing consumes
+it, and it is not a symptom of a broken relay, but it was worth chasing rather than filing as noise.
+
+Two separate causes, found in order. First, `relay/healthcheck/healthcheck.go:160` dials
+`ServiceChecker.InstanceURL()`, which is the relay's exposed address, `rels://nb.lab-desk.net:443`.
+From inside the container that is a hairpin back to the host's own public address, which this cloud
+does not do, so the dial spent five seconds timing out on every request. Resolving that one name to
+Traefik on the internal bridge, with `extra_hosts`, sends the dial down the same route a real peer
+takes: TLS to Traefik with the right SNI, the Let's Encrypt certificate, then the `/relay` router
+back to the server. The dial now completes in 0.22 s and reports `certificate_valid: true`, which is
+a stronger proof of the peer-facing relay path than the 426 an outside probe gets.
+
+Second, the body still reads `"listeners": null`. `relay/server/server.go:127` builds that list from
+the relay's own listeners, and the comment at line 142 says plainly that an external HTTP handler
+routing to the relay means the relay never starts listeners of its own. That is exactly this
+deployment. So `validateListeners` returns empty and the endpoint reports unhealthy structurally,
+on every combined-server deployment behind a reverse proxy, regardless of configuration. It is an
+upstream defect rather than anything to fix here, and it is recorded so the next person does not
+spend the evening on it a second time.
