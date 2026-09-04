@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     ffi::c_void,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     ops::Deref,
     str::FromStr,
     sync::{
@@ -176,6 +176,69 @@ lazy_static::lazy_static! {
 
 const PUBLIC_SERVER: &str = "public";
 
+// labnet: the whole overlay attempt, the connect and the key exchange
+// together, is bounded by this, so a hint that leads nowhere costs the
+// session no more than it before the rendezvous path takes over.
+const OVERLAY_TIMEOUT: u64 = 1_500;
+
+/// labnet: an overlay address hint is written into the config by the console,
+/// which takes it from lab-desk.net, so it is only ever dialled as a literal
+/// IPv4 address out of 100.64.0.0/10 with a port. That is the range NetBird
+/// allocates overlay addresses from and the only range the broker records, so
+/// nothing real is refused, while a name, an address off the overlay, and any
+/// IPv6 form of one, mapped IPv4 included, are all refused. Each of those would
+/// otherwise aim the client at a machine that is not the peer.
+fn parse_overlay_hint(hint: &str) -> Option<SocketAddr> {
+    let addr = SocketAddr::from_str(hint).ok()?;
+    let IpAddr::V4(ip) = addr.ip() else {
+        return None;
+    };
+    let octets = ip.octets();
+    if addr.port() == 0 || octets[0] != 100 || !(64..=127).contains(&octets[1]) {
+        return None;
+    }
+    Some(addr)
+}
+
+#[cfg(test)]
+mod overlay_hint_tests {
+    use super::parse_overlay_hint;
+
+    #[test]
+    fn only_a_literal_overlay_address_is_a_hint() {
+        assert_eq!(
+            parse_overlay_hint("100.72.0.4:21118").map(|a| a.to_string()),
+            Some("100.72.0.4:21118".to_owned())
+        );
+        assert_eq!(
+            parse_overlay_hint("100.64.0.9:21118").map(|a| a.to_string()),
+            Some("100.64.0.9:21118".to_owned())
+        );
+        assert_eq!(
+            parse_overlay_hint("100.127.255.255:1").map(|a| a.to_string()),
+            Some("100.127.255.255:1".to_owned())
+        );
+        assert_eq!(parse_overlay_hint("peer.example.com:21118"), None);
+        assert_eq!(parse_overlay_hint("localhost:21118"), None);
+        assert_eq!(parse_overlay_hint("100.72.0.4"), None);
+        assert_eq!(parse_overlay_hint("100.72.0.4:0"), None);
+        assert_eq!(parse_overlay_hint("100.72.0.4:21118 "), None);
+        assert_eq!(parse_overlay_hint("127.0.0.1:21118"), None);
+        assert_eq!(parse_overlay_hint("0.0.0.0:21118"), None);
+        assert_eq!(parse_overlay_hint("239.0.0.1:21118"), None);
+        assert_eq!(parse_overlay_hint("203.0.113.7:25"), None);
+        assert_eq!(parse_overlay_hint("8.8.8.8:53"), None);
+        assert_eq!(parse_overlay_hint("100.63.255.255:21118"), None);
+        assert_eq!(parse_overlay_hint("100.128.0.1:21118"), None);
+        assert_eq!(parse_overlay_hint("[::1]:21118"), None);
+        assert_eq!(parse_overlay_hint("[::]:21118"), None);
+        assert_eq!(parse_overlay_hint("[fd00::4]:21118"), None);
+        assert_eq!(parse_overlay_hint("[::ffff:127.0.0.1]:21118"), None);
+        assert_eq!(parse_overlay_hint("[::ffff:100.72.0.4]:21118"), None);
+        assert_eq!(parse_overlay_hint(""), None);
+    }
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn get_key_state(key: enigo::Key) -> bool {
     use enigo::KeyboardControllable;
@@ -293,29 +356,79 @@ impl Client {
         };
         // labnet: the console may have written an overlay address for this
         // peer, with the peer's own id public key beside it. Try that address
-        // before any server; anything short of a live socket falls through to
-        // the path below unchanged.
+        // before any server; anything short of a completed exchange falls
+        // through to the path below unchanged.
         if other_server.is_empty() {
-            let hint = Config::get_option(&format!("labdesk-overlay-addr-{}", peer));
+            let addr_key = format!("labdesk-overlay-addr-{}", peer);
+            let pk_key = format!("labdesk-overlay-pk-{}", peer);
+            let hint = Config::get_option(&addr_key);
             if !hint.is_empty() {
-                match connect_tcp_local(hint.clone(), None, 1500).await {
-                    Ok(mut conn) => {
-                        let pk = crate::decode64(Config::get_option(&format!(
-                            "labdesk-overlay-pk-{}",
-                            peer
-                        )))
-                        .unwrap_or_default();
-                        let option_pk =
-                            Self::secure_connection_with_pk(peer, pk, &mut conn).await?;
-                        log::info!("labnet: direct path to {} at {}", peer, hint);
-                        return Ok((
-                            (conn, true, option_pk, None, "TCP"),
-                            (0, "".to_owned()),
-                            false,
-                        ));
+                match parse_overlay_hint(&hint) {
+                    None => {
+                        log::error!("labnet: discarding overlay address {} for {}", hint, peer);
+                        Config::set_option(addr_key, "".to_owned());
+                        Config::set_option(pk_key, "".to_owned());
                     }
-                    Err(err) => {
-                        log::info!("labnet: {} not reachable at {}: {}", peer, hint, err)
+                    Some(addr) => {
+                        let started = Instant::now();
+                        match connect_tcp_local(addr, None, OVERLAY_TIMEOUT).await {
+                            Ok(mut conn) => {
+                                let pk =
+                                    crate::decode64(Config::get_option(&pk_key)).unwrap_or_default();
+                                let left = OVERLAY_TIMEOUT
+                                    .saturating_sub(started.elapsed().as_millis() as u64);
+                                // Bound here so the borrow of the stream ends
+                                // before the stream is handed on.
+                                let res = timeout(
+                                    left,
+                                    Self::secure_connection_with_pk(peer, pk, &mut conn),
+                                )
+                                .await;
+                                let err = match res {
+                                    Ok(Ok(option_pk)) => {
+                                        // secure_with_sign_pk also returns Ok on
+                                        // every identity failure: a wrong id, a
+                                        // key that does not verify, an
+                                        // unexpected message, no usable key at
+                                        // all. It calls set_key only once the
+                                        // peer has proved it holds the id key,
+                                        // so a stream that is not secured here
+                                        // is another machine at that address.
+                                        if conn.is_secured() {
+                                            log::info!(
+                                                "labnet: direct path to {} at {}",
+                                                peer,
+                                                addr
+                                            );
+                                            return Ok((
+                                                (conn, true, option_pk, None, "TCP"),
+                                                (0, "".to_owned()),
+                                                false,
+                                            ));
+                                        }
+                                        "not this peer".to_owned()
+                                    }
+                                    Ok(Err(err)) => err.to_string(),
+                                    Err(err) => err.to_string(),
+                                };
+                                // A socket that answers but cannot prove it is
+                                // the peer gets no session. Drop the address and
+                                // the key together, so no later connect pays the
+                                // same cost again and the two cannot drift, and
+                                // fall through to the path below.
+                                log::info!(
+                                    "labnet: handshake with {} at {} failed: {}",
+                                    peer,
+                                    addr,
+                                    err
+                                );
+                                Config::set_option(addr_key, "".to_owned());
+                                Config::set_option(pk_key, "".to_owned());
+                            }
+                            Err(err) => {
+                                log::info!("labnet: {} not reachable at {}: {}", peer, addr, err)
+                            }
+                        }
                     }
                 }
             }

@@ -1,0 +1,91 @@
+name: Release checksums
+
+# The SHA-256 of every asset in a release, computed by the pipeline and
+# published back to the release as SHA256SUMS.
+#
+# This file is what makes an update verifiable. lab-desk.net serves one line of
+# it per asset from /releases/checksums/<version>/<asset>, and the installed
+# client (src/updater.rs) refuses to hand any downloaded file to an elevated
+# installer unless it hashes to that value. A release with no SHA256SUMS is a
+# release nobody can auto-update to, which is the safe direction to fail in but
+# is still a dead update channel, so the ordering below is not optional.
+#
+# ORDER OF OPERATIONS, once and for the whole product:
+#   1. Merge this file to the repository's default branch. GitHub only ever
+#      runs the default branch's copy of a workflow_run-triggered workflow, and
+#      only offers workflow_dispatch for workflows that exist on the default
+#      branch, so on a feature branch this file does nothing at all.
+#   2. Run it by hand (Actions -> Release checksums -> Run workflow) for every
+#      tag any release channel currently points at. Existing releases have no
+#      SHA256SUMS, so until this backfill runs, a client built with the
+#      verifying updater will refuse every update it is offered.
+#   3. Only then ship a client that verifies.
+#
+# Re-running is safe and is the fix whenever assets arrive after the file was
+# written: the digests are recomputed from the release's current assets and the
+# uploaded file is replaced.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to checksum"
+        required: true
+  workflow_run:
+    workflows: ["Flutter Tag Build"]
+    types: [completed]
+
+# Uploading an asset to the release needs to write repository contents; the
+# default workflow token is read-only. Same declaration as flutter-tag.yml.
+permissions:
+  contents: write
+
+# Two runs for the same tag would race to upload SHA256SUMS, and the digests
+# are only correct if the last upload is the one computed from the release's
+# current assets.
+concurrency:
+  group: release-checksums-${{ inputs.tag || github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  checksums:
+    runs-on: ubuntu-latest
+    steps:
+      # Deliberately not gated on the build's conclusion. A build where one
+      # platform job failed still published assets for every platform that
+      # succeeded, and those have to be checksummable or the platforms that did
+      # build are locked out of updating too. A build that published nothing is
+      # handled below, by the release lookup.
+      - name: Compute and publish SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          # head_branch is a tag for a tag push and a BRANCH name for a manually
+          # dispatched Flutter Tag Build, and a build that died before creating
+          # the release leaves nothing behind either way. Neither case is an
+          # error; there is simply nothing to checksum.
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "No release for '$TAG'; nothing to checksum."
+            exit 0
+          fi
+          mkdir assets
+          cd assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY"
+          # Never hash a digest file from an earlier run into the new one.
+          rm -f SHA256SUMS
+          # Without nullglob an empty directory would hash the literal "*" and
+          # without dotglob a dotfile asset would be missing from SHA256SUMS
+          # with no error at all, which the client reads as "this asset has no
+          # digest" and refuses to install.
+          shopt -s nullglob dotglob
+          files=(*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "The release for '$TAG' publishes no assets to checksum." >&2
+            exit 1
+          fi
+          sha256sum -- "${files[@]}" > ../SHA256SUMS
+          cd ..
+          cat SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber

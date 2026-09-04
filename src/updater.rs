@@ -1,7 +1,7 @@
 use crate::{common::do_check_software_update, hbbs_http::create_http_client_with_url_strict};
 use hbb_common::{bail, config, log, ResultType};
 use std::{
-    io::Write,
+    io::{Read, Write},
     path::{Component, Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -214,32 +214,21 @@ fn check_update(manually: bool) -> ResultType<()> {
             format!("{}/labdesk-{}-x86-sciter.exe", download_url, version)
         };
         log::debug!("New version available: {}", &version);
+        // What the asset has to hash to, learned before a byte of it is
+        // fetched. There is no unverified path from here: an update whose
+        // digest cannot be read is an update that does not happen.
+        let expected_sha256 = get_published_sha256(&download_url)?;
         let client = create_http_client_with_url_strict(&download_url)?;
         let Some(file_path) = get_download_file_from_url(&download_url) else {
             bail!("Failed to get the file path from the URL: {}", download_url);
         };
         let mut is_file_exists = false;
         if file_path.exists() {
-            // Check if the file size is the same as the server file size
-            // If the file size is the same, we don't need to download it again.
-            let file_size = std::fs::metadata(&file_path)?.len();
-            let response = client.head(&download_url).send()?;
-            if !response.status().is_success() {
-                bail!("Failed to get the file size: {}", response.status());
-            }
-            let total_size = response
-                .headers()
-                .get(reqwest::header::CONTENT_LENGTH)
-                .and_then(|ct_len| ct_len.to_str().ok())
-                .and_then(|ct_len| ct_len.parse::<u64>().ok());
-            let Some(total_size) = total_size else {
-                bail!("Failed to get content length");
-            };
-            if file_size == total_size {
-                is_file_exists = true;
-            } else {
-                std::fs::remove_file(&file_path)?;
-            }
+            // A file left over in the temp directory is reusable only when it
+            // is byte for byte the published asset. Its size said nothing
+            // about its contents, and any local user can write that directory.
+            is_file_exists =
+                file_sha256(&file_path).ok().as_deref() == Some(expected_sha256.as_str());
         }
         if !is_file_exists {
             let response = client.get(&download_url).send()?;
@@ -257,15 +246,34 @@ fn check_update(manually: bool) -> ResultType<()> {
         // No need to care about the downloaded file here, because it's rare case that the `conns` are empty
         // before the download, but not empty after the download.
         if has_no_active_conns() {
+            // The installer runs elevated, so it runs on verified bytes or it
+            // does not run. `update_new_version` hashes the file as its last
+            // act before the handover, after the staging work, so nothing this
+            // process does can come between the check and the launch.
             #[cfg(target_os = "windows")]
-            update_new_version(update_msi, &version, &file_path);
+            update_new_version(update_msi, &version, &file_path, &expected_sha256);
+            // Nothing installs on the other desktop platforms from here, but a
+            // download that does not match still has to fail the check loudly
+            // and be deleted rather than left in the temp directory.
+            #[cfg(not(target_os = "windows"))]
+            verify_downloaded_file(&file_path, &expected_sha256)?;
         }
     }
     Ok(())
 }
 
+/// Hands the downloaded installer to the elevated installer, and hashes it
+/// immediately before doing so. The file lives in the temp directory, which
+/// every local user can write, so the gap between the check and the launch is
+/// the window an attacker gets; everything that can be done first is done
+/// first, and the hash is the last thing before the handover.
 #[cfg(target_os = "windows")]
-fn update_new_version(update_msi: bool, version: &str, file_path: &PathBuf) {
+fn update_new_version(
+    update_msi: bool,
+    version: &str,
+    file_path: &PathBuf,
+    expected_sha256: &str,
+) {
     log::debug!(
         "New version is downloaded, update begin, update msi: {update_msi}, version: {version}, file: {:?}",
         file_path.to_str()
@@ -273,6 +281,10 @@ fn update_new_version(update_msi: bool, version: &str, file_path: &PathBuf) {
     if let Some(p) = file_path.to_str() {
         if let Some(session_id) = crate::platform::get_current_process_session_id() {
             if update_msi {
+                if let Err(e) = verify_downloaded_file(file_path, expected_sha256) {
+                    log::error!("Refusing to install the new msi version \"{}\": {}", version, e);
+                    return;
+                }
                 match crate::platform::update_me_msi(p, true) {
                     Ok(_) => {
                         log::debug!("New version \"{}\" updated.", version);
@@ -309,6 +321,17 @@ fn update_new_version(update_msi: bool, version: &str, file_path: &PathBuf) {
                     ));
                     None
                 };
+                // Last act before the elevated launch, after the staging work,
+                // so the file is not touched again between here and there.
+                if let Err(e) = verify_downloaded_file(file_path, expected_sha256) {
+                    log::error!("Refusing to install the new version \"{}\": {}", version, e);
+                    if let Some(dir) = custom_client_staging_dir.as_deref() {
+                        hbb_common::allow_err!(crate::platform::remove_custom_client_staging_dir(
+                            dir
+                        ));
+                    }
+                    return;
+                }
                 let update_launched = match crate::platform::launch_privileged_process(
                     session_id,
                     &format!("{} --update", p),
@@ -420,8 +443,136 @@ fn is_plain_update_filename(filename: &str) -> bool {
     ) && components.next().is_none()
 }
 
+/// The temp path an update from `url` is downloaded to. This says nothing at
+/// all about the file's contents: a path coming back from here is not a
+/// vouched-for installer, and every local user can write that directory. Any
+/// caller about to hand the file to an elevated or root installer must call
+/// [verify_update_file] with the same URL first.
 pub fn get_download_file_from_url(url: &str) -> Option<PathBuf> {
     get_update_download_file_from_url(url)
+}
+
+/// Where the site serves a release asset, and where it publishes that asset's
+/// SHA-256. The digest is produced by the release pipeline and uploaded to the
+/// release as `SHA256SUMS`; the site reads it from there and serves one line
+/// of it per asset.
+const RELEASE_DOWNLOAD_PATH: &str = "/releases/download/";
+const RELEASE_CHECKSUM_PATH: &str = "/releases/checksums/";
+
+/// The URL that publishes the SHA-256 of the asset at `download_url`.
+/// None for anything that is not a LabDesk release asset, including upstream
+/// GitHub, which publishes no digest. Refusing to install what cannot be
+/// verified is the point, so there is deliberately no fallback here.
+pub fn get_update_checksum_url(download_url: &str) -> Option<String> {
+    // Only a URL the release allowlist already accepted may be asked about.
+    get_update_download_file_from_url(download_url)?;
+    let prefix = format!("{}{}", crate::common::LABDESK_SITE, RELEASE_DOWNLOAD_PATH);
+    let rest = download_url.strip_prefix(&prefix)?;
+    Some(format!(
+        "{}{}{}",
+        crate::common::LABDESK_SITE,
+        RELEASE_CHECKSUM_PATH,
+        rest
+    ))
+}
+
+/// A SHA-256 as the site publishes it: 64 hex characters and nothing else.
+fn is_sha256_hex(digest: &str) -> bool {
+    digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The SHA-256 the release publishes for the asset at `download_url`.
+/// Every failure is fatal to the update by design.
+pub fn get_published_sha256(download_url: &str) -> ResultType<String> {
+    let Some(checksum_url) = get_update_checksum_url(download_url) else {
+        bail!(
+            "No published SHA-256 for the update URL, refusing to install: {}",
+            download_url
+        );
+    };
+    let client = create_http_client_with_url_strict(&checksum_url)?;
+    let response = client.get(&checksum_url).send()?;
+    if !response.status().is_success() {
+        // Worth spelling out: this freezes the update channel until the
+        // release publishes SHA256SUMS, which is the whole reason a release
+        // has to be checksummed before the channel is pointed at it.
+        bail!(
+            "The release publishes no SHA-256 for this asset ({} returned {}), so no update can be installed",
+            checksum_url,
+            response.status()
+        );
+    }
+    // A digest is 64 bytes. Reading a bounded prefix keeps a hostile or broken
+    // endpoint from being read into memory without limit.
+    let mut body = String::new();
+    response.take(128).read_to_string(&mut body)?;
+    digest_from_response_body(&body)
+}
+
+/// The digest a response body carries, or an error. An error page, an empty
+/// body or a truncated digest all land here and all stop the update, so the
+/// hash comparison is never reached with something that is not a digest.
+fn digest_from_response_body(body: &str) -> ResultType<String> {
+    let digest = body.trim().to_lowercase();
+    if !is_sha256_hex(&digest) {
+        bail!("The published SHA-256 is not a hex digest");
+    }
+    Ok(digest)
+}
+
+/// The SHA-256 of a file on disk, as lowercase hex. Read in blocks so an
+/// installer of any size is hashed in constant memory.
+fn file_sha256(path: &Path) -> ResultType<String> {
+    use sha2::{Digest, Sha256};
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buf)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Passes only a file whose SHA-256 is the published one. Anything else is
+/// deleted, so no later run can mistake it for a download that was vouched for.
+pub fn verify_downloaded_file(file_path: &Path, expected_sha256: &str) -> ResultType<()> {
+    let actual = match file_sha256(file_path) {
+        Ok(actual) => actual,
+        Err(e) => {
+            std::fs::remove_file(file_path).ok();
+            return Err(e);
+        }
+    };
+    if actual != expected_sha256 {
+        std::fs::remove_file(file_path).ok();
+        bail!(
+            "The downloaded update does not match the published SHA-256: expected {}, got {}",
+            expected_sha256,
+            actual
+        );
+    }
+    Ok(())
+}
+
+/// The whole check in one call: fetch the digest the site publishes for
+/// `download_url`, then hash the file that was downloaded from it, deleting
+/// the file and failing if the two do not agree.
+///
+/// This exists for callers outside this module that download an update
+/// themselves and then hand it to an elevated installer. The Flutter UI is one
+/// of them: `flutter_ffi.rs` downloads on "download-new-version" and installs
+/// on "update-me" through `crate::platform::update_to`, which runs the file
+/// under UAC on Windows and under pkexec on Linux. That handler must call this
+/// with the same URL it downloaded from, immediately before `update_to`, or it
+/// is installing bytes nobody vouched for.
+#[allow(dead_code)]
+pub fn verify_update_file(download_url: &str, file_path: &Path) -> ResultType<()> {
+    let expected_sha256 = get_published_sha256(download_url)?;
+    verify_downloaded_file(file_path, &expected_sha256)
 }
 
 /// Queries all active connections (remote, file-transfer, port-forward, camera, terminal)
@@ -610,6 +761,9 @@ pub fn check_update_as_root() -> ResultType<bool> {
         bail!("[root-update] URL failed allowlist check: {}", dmg_url);
     };
     drop(file_path_validated);
+    // What the disk image has to hash to, learned before it is fetched. A root
+    // installer is never pointed at bytes nobody vouched for.
+    let expected_sha256 = get_published_sha256(&dmg_url)?;
     let client = create_http_client_with_url_strict(&dmg_url)?;
     // Use mktemp so a local user cannot pre-create a predictable path and
     // permanently deny updates for a reused service PID.
@@ -660,6 +814,18 @@ pub fn check_update_as_root() -> ResultType<bool> {
         }
         bail!("[root-update] Active session started during download, deferring update.");
     }
+    // The installer runs as root, so it runs on verified bytes or it does not
+    // run. Checked here, immediately before the disk image is handed over.
+    if let Err(e) = verify_downloaded_file(&file_path, &expected_sha256) {
+        if let Err(err) = std::fs::remove_dir_all(&private_tmp) {
+            log::warn!(
+                "[root-update] Failed to remove temp dir {}: {}",
+                private_tmp,
+                err
+            );
+        }
+        return Err(e);
+    }
     // Install silently as root
     let result = crate::platform::update_from_dmg_as_root(&tmp_path, &version);
     // Clean up download directory
@@ -671,7 +837,10 @@ pub fn check_update_as_root() -> ResultType<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::get_download_file_from_url;
+    use super::{
+        digest_from_response_body, file_sha256, get_download_file_from_url,
+        get_update_checksum_url, is_sha256_hex, verify_downloaded_file,
+    };
 
     #[test]
     fn update_download_file_accepts_expected_github_asset_urls() {
@@ -725,6 +894,101 @@ mod tests {
             "not a url",
         ] {
             assert!(get_download_file_from_url(url).is_none(), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_digest_url_exists_only_for_a_labdesk_release_asset() {
+        assert_eq!(
+            get_update_checksum_url(
+                "https://lab-desk.net/releases/download/1.2.0/labdesk-1.2.0-x86_64.exe"
+            )
+            .as_deref(),
+            Some("https://lab-desk.net/releases/checksums/1.2.0/labdesk-1.2.0-x86_64.exe")
+        );
+        for url in [
+            // Upstream GitHub publishes no digest, so nothing fetched from it
+            // can be verified, so nothing fetched from it may be installed.
+            "https://github.com/rustdesk/rustdesk/releases/download/1.4.0/rustdesk-1.4.0-x86_64.dmg",
+            "http://lab-desk.net/releases/download/1.2.0/labdesk-1.2.0-x86_64.exe",
+            "https://lab-desk.net/releases/download/1.2.0/nested/labdesk.exe",
+            "https://lab-desk.net/releases/download/1.2.0/labdesk.exe?x=1",
+            "https://lab-desk.net.evil.com/releases/download/1.2.0/labdesk.exe",
+            "https://evil.com/lab-desk.net/releases/download/1.2.0/labdesk.exe",
+            "not a url",
+        ] {
+            assert!(get_update_checksum_url(url).is_none(), "{url}");
+        }
+    }
+
+    #[test]
+    fn an_update_that_does_not_match_the_published_digest_is_refused_and_deleted() {
+        // Process-unique so two test binaries on one runner cannot collide.
+        let path = std::env::temp_dir().join(format!(
+            "labdesk-update-verify-test-{}.bin",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"labdesk installer").expect("write the test payload");
+
+        // A known vector, so this proves the digest is really SHA-256 and not
+        // merely self-consistent.
+        let digest = file_sha256(&path).expect("hash the test payload");
+        assert!(is_sha256_hex(&digest));
+        assert_eq!(
+            digest,
+            "460de39d0bfc73247f2f143b4a83d255a00a53620a116fca20af1f7963b7a2c5"
+        );
+
+        verify_downloaded_file(&path, &digest).expect("the published digest verifies");
+        assert!(path.exists(), "a verified file is kept for the installer");
+
+        let wrong = "0".repeat(64);
+        assert!(
+            verify_downloaded_file(&path, &wrong).is_err(),
+            "a mismatched file is refused"
+        );
+        assert!(
+            !path.exists(),
+            "a file that failed verification is deleted, not left for a later run"
+        );
+    }
+
+    #[test]
+    fn a_response_body_that_is_not_a_digest_is_refused() {
+        // The site serves the bare digest with a trailing newline, and an
+        // uppercase digest is the same digest.
+        assert_eq!(
+            digest_from_response_body(
+                "  460DE39D0BFC73247F2F143B4A83D255A00A53620A116FCA20AF1F7963B7A2C5\n"
+            )
+            .ok()
+            .as_deref(),
+            Some("460de39d0bfc73247f2f143b4a83d255a00a53620a116fca20af1f7963b7a2c5")
+        );
+        // An error page, an empty body or a truncated digest must stop the
+        // update rather than reach the hash comparison.
+        for bad in [
+            "",
+            "<html>404 Not Found</html>",
+            "460de39d0bfc73247f2f143b4a83d255a00a53620a116fca20af1f7963b7a2c",
+            "460de39d0bfc73247f2f143b4a83d255a00a53620a116fca20af1f7963b7a2c5 labdesk.exe",
+        ] {
+            assert!(digest_from_response_body(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn only_a_full_hex_digest_is_accepted() {
+        assert!(is_sha256_hex(
+            "460de39d0bfc73247f2f143b4a83d255a00a53620a116fca20af1f7963b7a2c5"
+        ));
+        for bad in [
+            "",
+            "460de39d0bfc73247f2f143b4a83d255a00a53620a116fca20af1f7963b7a2c",
+            "460de39d0bfc73247f2f143b4a83d255a00a53620a116fca20af1f7963b7a2c55",
+            "460de39d0bfc73247f2f143b4a83d255a00a53620a116fca20af1f7963b7a2cz",
+        ] {
+            assert!(!is_sha256_hex(bad), "{bad}");
         }
     }
 }

@@ -70,8 +70,19 @@ outranks every other finding in the survey.
   The health engine is a migration of that, not a new build.
 - Linux receives no updates at all: the update path is compiled only for Windows, and the packaging
   installs no daemon and ships no polkit policy.
-- Neither repository runs tests in the pipeline that deploys it. The Worker has no CI at all, and
-  roughly 320 Rust test functions are never executed by anything.
+- The Worker repository has no CI at all, and the pipeline that deploys it runs only a build and an
+  upload, so a reverted security fix ships green.
+
+## A survey claim that was wrong
+
+The survey also reported that roughly 320 Rust test functions are never executed by anything. That
+is false and was corrected by direct check rather than left standing. `.github/workflows/ci.yml`
+carries a "Run tests" step invoking `cargo test --locked --target=<target> --workspace
+--no-fail-fast`, the workflow runs on every pull request, and run 33834898725 on `feat/labnet`
+reports that step as `success`. Rust unit tests therefore do run on every pull request. What remains
+true is narrower and still worth stating: `cargo` cannot build this crate on the development
+workstation, because `kcp-sys` needs `libclang` for its bindgen step and no `libclang.dll` exists
+here, so Rust changes are proven by CI and by field checks rather than locally.
 
 ## Standing constraint
 
