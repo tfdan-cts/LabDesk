@@ -9,6 +9,30 @@ related:
 ---
 
 <!--
+CORRECTIONS FOUND WHILE BUILDING. The plan is the source of truth, so where the code proved it
+wrong, the correction is recorded here rather than left to be rediscovered.
+
+1. actor() and session.activeOrganizationId (section 2). The plan says actor() reads
+   session.activeOrganizationId. The Better Auth organization plugin DECLARES that column and never
+   writes it: the returned plugin object carries no init, no hooks and no databaseHooks, so only an
+   explicit set-active call ever populates it and a fresh sign-in carries null. Read literally, every
+   actor() call would have refused and the authorization plane would have been dead on arrival.
+   As built: membership is what authorizes. The active organization is used when present, the
+   caller's single membership is used otherwise, and a caller holding several is asked to choose. A
+   forged or stale active organization id still finds no member row and is still refused.
+
+2. The organization plugin's permissive defaults (section 2). Mounting the plugin does not by itself
+   restrict anything: organization creation is allowed by default and the organization delete
+   endpoint is live by default. Both are now set explicitly. A reviewer also found that actor() had
+   dropped the approval gate every other authenticated surface enforces, so an account an admin had
+   revoked still ran.
+
+3. WP1's migration number (section 9). 0003 was already taken by the organization migration, so the
+   indexes ship as 0008. drizzle-kit reports no pending schema changes, and wrangler lists 0002
+   through 0008 as pending on the remote.
+-->
+
+<!--
 Produced by a judge panel: independent architectures designed from a schema-first, an agent-first and
 a security-first angle, each scored by an independent judge, then synthesized from the winner with
 the best of the others grafted in. One of the three design agents failed to return a valid result, so
