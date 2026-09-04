@@ -112,6 +112,12 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   late final OverlaySession _overlay;
   var _labnet = LabnetCardState.off;
   var _inbox = LabnetInbox.empty;
+
+  /// The organization's machines as lab-desk.net holds them, read with the
+  /// inbox. The Network section is the one place the console names a machine
+  /// the way the server does rather than by its peer id, because that is what
+  /// every labnet route resolves against.
+  var _orgMachines = const <OrgMachine>[];
   var _labnetBusy = false;
   var _labnetError = '';
   Timer? _inboxTick;
@@ -1196,6 +1202,14 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     _broker = OverlayBroker(
       baseUrl: 'https://lab-desk.net',
       token: () => bind.mainGetLocalOption(key: 'access_token'),
+      // The machine plane's credential. The console cannot make it: the agent
+      // key is kept where an interactive user cannot read it
+      // (src/labdesk/identity.rs), so the core signs and only the three
+      // headers come back.
+      sign: (method, path, body) async => MachineSignature.decode(
+          await bind.mainAgentSign(method: method, path: path, body: body)),
+      peerId: () => gFFI.serverModel.serverId.text,
+      machineIdOf: _machineIdOfPeer,
     );
     _enrolment = OverlayEnrolment(
       daemon: _daemon,
@@ -1228,14 +1242,30 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   bool get _signedIn =>
       bind.mainGetLocalOption(key: 'access_token').isNotEmpty;
 
-  /// Invitations waiting on this machine and the labnets it is part of, read
-  /// every 15 s while an account is signed in, like the client's own heartbeat.
+  /// The `machine.id` lab-desk.net names [peerId] by, or empty when the
+  /// organization's machine list holds no such peer. Empty rather than the peer
+  /// id itself: a machine the server cannot name is one it must refuse.
+  String _machineIdOfPeer(String peerId) {
+    for (final m in _orgMachines) {
+      if (m.peerId == peerId) return m.id;
+    }
+    return '';
+  }
+
+  /// The organization's machines, the invitations waiting on this machine and
+  /// the labnets the account manages, read every 15 s while signed in, like the
+  /// client's own heartbeat. The account is what both halves of the read are
+  /// scoped by, so a console with nobody signed in polls nothing.
   Future<void> _pollInbox() async {
     if (!mounted || !_signedIn) return;
     try {
+      // First, because it is the map every labnet call names a machine
+      // through and the inbox is rendered against it.
+      final machines = await _broker.machines();
       final inbox = await _broker.inbox();
       if (!mounted) return;
       setState(() {
+        _orgMachines = machines;
         _inbox = inbox;
         _labnetError = '';
       });
@@ -1353,12 +1383,16 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     await _pollInbox();
   }
 
+  /// The Network section speaks `machine.id`: it is what the members of a
+  /// labnet come back as and what every route that names a machine resolves,
+  /// so the machines offered and this machine itself are named the same way
+  /// rather than by the peer id the rest of the console uses.
   Widget _network(BuildContext context) => NetworkScreen(
         inbox: _inbox,
-        thisMachineId: gFFI.serverModel.serverId.text,
+        thisMachineId: _machineIdOfPeer(gFFI.serverModel.serverId.text),
         machines: [
-          for (final m in _machines)
-            NetworkMachine(id: m.id, name: m.displayName),
+          for (final m in _orgMachines)
+            NetworkMachine(id: m.id, name: m.name),
         ],
         busy: _labnetBusy,
         error: _labnetError,

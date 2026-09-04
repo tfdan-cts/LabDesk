@@ -15,10 +15,11 @@
 // how long to wait after a failure -- lives in `super::spool` as a pure function with
 // tests. What is left here is the plumbing those functions are wired into.
 
+use super::disk::{self, DiskHealth};
 use super::identity::{uplink_signed_msg, AgentIdentity};
 use super::spool::{
     ack_for, backoff_seconds, batch_window, flush_jitter_seconds, Ack, Spool, MAX_BATCH_BYTES,
-    MAX_BATCH_LINES,
+    MAX_BATCH_LINES, MAX_BODY_BYTES,
 };
 use hbb_common::{
     bail,
@@ -37,6 +38,16 @@ const BATCH_PATH: &str = "/agent/batch";
 /// learns about it is to re-read the file.
 const ENROLMENT_POLL: Duration = Duration::from_secs(60);
 const UPLINK_TIMEOUT: Duration = Duration::from_secs(20);
+/// The slow cadence, section 4.2: disk health once an hour.
+///
+/// Not server controlled, unlike the two metric cadences. A SMART sweep is the only thing
+/// this daemon does that touches a device, and a knob the server could turn down to a
+/// second would let a compromised console hammer every drive in a fleet.
+const DISK_INTERVAL: Duration = Duration::from_secs(3600);
+/// And section 4.2's parenthesis: once, 60 s after start, rather than at the top of the
+/// first hour. A machine that has just been enrolled reports its drives while the
+/// administrator who enrolled it is still looking at the console.
+const DISK_FIRST: Duration = Duration::from_secs(60);
 
 /// Start the collector on its own thread with its own runtime.
 ///
@@ -78,6 +89,19 @@ async fn run() {
     let jitter = flush_jitter_seconds(identity.machine_id(), identity.flush_seconds());
     let mut next_sample = Instant::now() + Duration::from_secs(sample_seconds);
     let mut next_flush = Instant::now() + Duration::from_secs(jitter);
+    let mut next_disks = Instant::now() + DISK_FIRST;
+    // The last disk sweep that no server has acknowledged yet. Held rather than spooled
+    // because it is a snapshot of the drives as they are now, not a history: a machine off
+    // the network for a day owes the server its current disks, not yesterday's twenty four
+    // readings. Cleared only on 2xx, for the same reason the spool is.
+    //
+    // `None` is "no sweep has finished since the last one was taken away". An EMPTY sweep
+    // is not that: it is the reading that says this machine was asked and no drive
+    // answered, which is what every macOS machine reports, what a Linux agent that lost
+    // its privilege reports, and what a machine whose drives were pulled reports. The
+    // ingest stores it as `unreadable`, so it clears a verdict that would otherwise stand
+    // forever behind a drive nobody can see any more.
+    let mut disks: Option<Vec<DiskHealth>> = None;
     let mut failures = 0u32;
     log::info!(
         "[collector] Started: sampling every {}s, flushing every {}s offset by {}s",
@@ -87,7 +111,7 @@ async fn run() {
     );
 
     loop {
-        let deadline = next_sample.min(next_flush);
+        let deadline = next_sample.min(next_flush).min(next_disks);
         let now = Instant::now();
         if deadline > now {
             sleep(deadline - now).await;
@@ -101,9 +125,27 @@ async fn run() {
             }
         }
 
+        if now >= next_disks {
+            next_disks = now + DISK_INTERVAL;
+            // Blocking, on this daemon's own thread, and the only thing it can delay is
+            // this loop's next sample. The newest sweep always replaces the one waiting,
+            // empty included: "no drive answered this hour" is a reading about this
+            // machine now, and holding the last hour that did answer would report a drive
+            // that has since been pulled, lost its privilege or stopped responding.
+            let read = disk::gather();
+            log::info!("[collector] Read health for {} disk(s)", read.len());
+            disks = Some(read);
+        }
+
         if now >= next_flush {
-            match flush(&mut identity, &spool, &sampler, sample_seconds).await {
-                Ok(Some(Ack::Accepted)) | Ok(None) => failures = 0,
+            match flush(&mut identity, &spool, &sampler, sample_seconds, disks.as_deref()).await {
+                // Only an accepted batch carried the disks away with it. `Ok(None)` is
+                // "nothing was owed", which means no request was made at all.
+                Ok(Some(Ack::Accepted)) => {
+                    failures = 0;
+                    disks = None;
+                }
+                Ok(None) => failures = 0,
                 Ok(Some(Ack::Revoked)) => {
                     // The org has revoked this machine. Stop collecting and take the
                     // history with us: what is on that disk is inventory about a customer
@@ -166,6 +208,7 @@ async fn flush(
     spool: &Spool,
     sampler: &Sampler,
     sample_seconds: u64,
+    disks: Option<&[DiskHealth]>,
 ) -> ResultType<Option<Ack>> {
     let lines = spool.read()?;
     let window = batch_window(&lines, MAX_BATCH_LINES, MAX_BATCH_BYTES);
@@ -181,7 +224,7 @@ async fn flush(
     }
 
     let sent = &lines[window.dropped..window.consumed()];
-    let body = match batch_body(sampler.machine(), sent, sample_seconds) {
+    let body = match batch_body(sampler.machine(), sent, sample_seconds, disks) {
         Ok(body) => body,
         Err(err) => {
             // Nothing in this window can be turned into a batch. Drop it for the same
@@ -197,7 +240,9 @@ async fn flush(
         }
     };
     let (status, text) = post_signed(identity, BATCH_PATH, &body).await?;
-    let ack = ack_for(status);
+    // The body as well as the status: a 403 alone is not proof this machine was revoked,
+    // and `ack_for` will not destroy a spool without the server's own words.
+    let ack = ack_for(status, &text);
     match ack {
         Ack::Accepted => {
             // Only now. Everything before this point leaves the spool exactly as it was,
@@ -295,10 +340,15 @@ fn adopt_cadences(identity: &mut AgentIdentity, text: &str) {
 ///
 /// The leading timestamp is the spool's own, not the wire's: the batch carries `from` and
 /// `to` once and the samples themselves are the five readings, packed positionally.
+/// `disks` is `None` when no sweep has finished since the last one the server took, and
+/// `Some` when one has -- INCLUDING when it found nothing. The two are different members
+/// on the wire and the ingest treats them differently: no member leaves
+/// `machine_state.worst_disk` exactly as it was, an empty member sets it to `unreadable`.
 fn batch_body(
     machine: serde_json::Value,
     lines: &[String],
     step: u64,
+    disks: Option<&[DiskHealth]>,
 ) -> ResultType<String> {
     // `Option` rather than a zero sentinel: the batch window is what the server
     // de-duplicates on, so a machine whose clock reads the epoch must report the epoch
@@ -324,11 +374,69 @@ fn batch_body(
     if samples.is_empty() {
         bail!("No readable samples in the batch");
     }
-    Ok(serde_json::json!({
+    let batch = serde_json::json!({ "from": from, "to": to, "step": step, "samples": samples });
+    let Some(disks) = disks else {
+        return Ok(serde_json::json!({ "machine": machine, "batch": batch }).to_string());
+    };
+    let with_disks = serde_json::json!({
         "machine": machine,
-        "batch": { "from": from, "to": to, "step": step, "samples": samples },
+        "batch": batch,
+        "disks": disks.iter().map(disk_member).collect::<Vec<_>>(),
     })
-    .to_string())
+    .to_string();
+    if with_disks.len() <= MAX_BODY_BYTES {
+        return Ok(with_disks);
+    }
+    // The samples are the ones that cannot wait: they are the only copy, they leave the
+    // spool once this is accepted, and a body the server refuses for its size would be
+    // rebuilt and refused on every flush from now on. The disks are a snapshot that is
+    // taken again in an hour, so they are what gets dropped. The member is dropped WHOLE
+    // rather than emptied: an empty member is the claim that this machine was asked and
+    // no drive answered, and a body that was merely too long has not made that claim.
+    log::warn!(
+        "[collector] Dropping {} disk reading(s) from a {} byte body over the {} byte bound",
+        disks.len(),
+        with_disks.len(),
+        MAX_BODY_BYTES
+    );
+    Ok(serde_json::json!({ "machine": machine, "batch": batch }).to_string())
+}
+
+/// One drive, as section 4.4's `disks` member carries it.
+///
+/// The field names are the `disk` and `disk_sample` columns in camel case and nothing
+/// else, so the ingest stores this without inventing a name for anything. Every counter
+/// the drive did not answer is `null` in place rather than absent or zero: `null` is
+/// stored as SQL NULL and rendered `--`, while a zero would be a measurement of a drive
+/// nobody could ask, which is the one thing this whole module exists to prevent.
+fn disk_member(disk: &DiskHealth) -> serde_json::Value {
+    serde_json::json!({
+        "serialHash": disk.serial_hash,
+        "deviceIndex": disk.device_index,
+        "devicePath": disk.device_path,
+        "model": disk.model,
+        "firmware": disk.firmware,
+        "bus": disk.bus,
+        "sizeBytes": disk.size_bytes,
+        "rotational": disk.rotational,
+        "verdict": disk.verdict.as_str(),
+        "healthSource": disk.source.as_str(),
+        "predictFailure": disk.predict_failure,
+        "tempC": disk.temp_c,
+        "powerOnHours": disk.power_on_hours,
+        "powerCycles": disk.power_cycles,
+        "reallocated": disk.reallocated,
+        "pending": disk.pending,
+        "uncorrectable": disk.uncorrectable,
+        "crcErrors": disk.crc_errors,
+        "percentUsed": disk.percent_used,
+        "sparePct": disk.spare_pct,
+        "spareThresholdPct": disk.spare_threshold_pct,
+        "criticalWarning": disk.critical_warning,
+        "unsafeShutdowns": disk.unsafe_shutdowns,
+        "mediaErrors": disk.media_errors,
+        "dataWrittenGb": disk.data_written_gb,
+    })
 }
 
 /// POST a signed body to an `/agent/*` path.
@@ -531,7 +639,7 @@ mod tests {
             "[1788480120,11,44,56,180,320]".to_owned(),
         ];
         let body: serde_json::Value =
-            serde_json::from_str(&batch_body(machine(), &lines, 60).unwrap()).unwrap();
+            serde_json::from_str(&batch_body(machine(), &lines, 60, None).unwrap()).unwrap();
 
         // Each figure by name, not merely "it parsed": `from` is the first sample's
         // timestamp and `to` the last, and neither may be a sample reading.
@@ -556,7 +664,7 @@ mod tests {
             "{\"cpu\":7}".to_owned(),
         ];
         let body: serde_json::Value =
-            serde_json::from_str(&batch_body(machine(), &lines, 60).unwrap()).unwrap();
+            serde_json::from_str(&batch_body(machine(), &lines, 60, None).unwrap()).unwrap();
         assert_eq!(body["batch"]["from"], 1788480060u64);
         assert_eq!(body["batch"]["to"], 1788480060u64);
         assert_eq!(
@@ -566,8 +674,8 @@ mod tests {
 
         // A window with nothing readable in it is an error rather than an empty batch, so
         // that the caller drops those lines instead of posting a batch of no samples.
-        assert!(batch_body(machine(), &["not json at all".to_owned()], 60).is_err());
-        assert!(batch_body(machine(), &[], 60).is_err());
+        assert!(batch_body(machine(), &["not json at all".to_owned()], 60, None).is_err());
+        assert!(batch_body(machine(), &[], 60, None).is_err());
     }
 
     #[test]
@@ -614,6 +722,7 @@ mod tests {
                     transmitted: 200,
                 })],
                 60,
+                None,
             )
             .unwrap(),
         )
@@ -639,6 +748,263 @@ mod tests {
             }),
             "[1788480000,7,null,null,100,200]"
         );
+    }
+
+
+    /// One drive, with every counter absent, so a test that fills a field in is the only
+    /// thing that can make that field non-null.
+    fn unread_disk(serial_hash: &str, verdict: disk::Verdict, source: disk::Source) -> DiskHealth {
+        DiskHealth {
+            serial_hash: serial_hash.to_owned(),
+            device_index: 0,
+            device_path: None,
+            model: None,
+            firmware: None,
+            bus: None,
+            size_bytes: None,
+            rotational: None,
+            verdict,
+            source,
+            predict_failure: None,
+            temp_c: None,
+            power_on_hours: None,
+            power_cycles: None,
+            reallocated: None,
+            pending: None,
+            uncorrectable: None,
+            crc_errors: None,
+            percent_used: None,
+            spare_pct: None,
+            spare_threshold_pct: None,
+            critical_warning: None,
+            unsafe_shutdowns: None,
+            media_errors: None,
+            data_written_gb: None,
+        }
+    }
+
+    #[test]
+    fn test_the_disks_member_carries_every_column_the_ingest_stores() {
+        // A drive that answered, with a different number in every counter so that no two
+        // fields can be swapped without moving a value an assertion reads.
+        let answered = DiskHealth {
+            serial_hash: "a".repeat(64),
+            device_index: 3,
+            device_path: Some("/dev/nvme0n1".to_owned()),
+            model: Some("ACME NVMe 1TB".to_owned()),
+            firmware: Some("FW1234".to_owned()),
+            bus: Some("nvme".to_owned()),
+            size_bytes: Some(1_000_204_886_016),
+            rotational: Some(false),
+            verdict: disk::Verdict::Warn,
+            source: disk::Source::NvmeLogPage,
+            predict_failure: Some(false),
+            temp_c: Some(41),
+            power_on_hours: Some(1234),
+            power_cycles: Some(56),
+            reallocated: Some(7),
+            pending: Some(8),
+            uncorrectable: Some(9),
+            crc_errors: Some(10),
+            percent_used: Some(11),
+            spare_pct: Some(97),
+            spare_threshold_pct: Some(10),
+            critical_warning: Some(1),
+            unsafe_shutdowns: Some(12),
+            media_errors: Some(13),
+            data_written_gb: Some(4096),
+        };
+        let body: serde_json::Value = serde_json::from_str(
+            &batch_body(
+                machine(),
+                &["[1788480000,7,42,55,100,200]".to_owned()],
+                60,
+                Some(&[answered, unread_disk(&"b".repeat(64), disk::Verdict::Unreadable, disk::Source::None)]),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        // Field by field and by name, because the ingest stores these into columns of the
+        // same name and a rename on either side is a column that silently stops arriving.
+        let one = &body["disks"][0];
+        assert_eq!(one["serialHash"], "a".repeat(64));
+        assert_eq!(one["deviceIndex"], 3u64);
+        assert_eq!(one["devicePath"], "/dev/nvme0n1");
+        assert_eq!(one["model"], "ACME NVMe 1TB");
+        assert_eq!(one["firmware"], "FW1234");
+        assert_eq!(one["bus"], "nvme");
+        assert_eq!(one["sizeBytes"], 1_000_204_886_016u64);
+        assert_eq!(one["rotational"], false);
+        assert_eq!(one["verdict"], "warn");
+        assert_eq!(one["healthSource"], "nvme_logpage");
+        assert_eq!(one["predictFailure"], false);
+        assert_eq!(one["tempC"], 41i64);
+        assert_eq!(one["powerOnHours"], 1234u64);
+        assert_eq!(one["powerCycles"], 56u64);
+        assert_eq!(one["reallocated"], 7u64);
+        assert_eq!(one["pending"], 8u64);
+        assert_eq!(one["uncorrectable"], 9u64);
+        assert_eq!(one["crcErrors"], 10u64);
+        assert_eq!(one["percentUsed"], 11u64);
+        assert_eq!(one["sparePct"], 97u64);
+        assert_eq!(one["spareThresholdPct"], 10u64);
+        assert_eq!(one["criticalWarning"], 1u64);
+        assert_eq!(one["unsafeShutdowns"], 12u64);
+        assert_eq!(one["mediaErrors"], 13u64);
+        assert_eq!(one["dataWrittenGb"], 4096u64);
+
+        // THE RULE THE WHOLE DISK MODULE EXISTS FOR, ON THE WIRE. A drive nobody could ask
+        // travels as `unreadable` with a source of `none`, and every counter it never
+        // answered is `null` IN PLACE -- not absent, not zero. A zero here would be stored
+        // as a measurement and rendered as a healthy figure for a drive we did not read.
+        let other = &body["disks"][1];
+        assert_eq!(other["verdict"], "unreadable");
+        assert_eq!(other["healthSource"], "none");
+        for field in [
+            "devicePath",
+            "model",
+            "firmware",
+            "bus",
+            "sizeBytes",
+            "rotational",
+            "predictFailure",
+            "tempC",
+            "powerOnHours",
+            "powerCycles",
+            "reallocated",
+            "pending",
+            "uncorrectable",
+            "crcErrors",
+            "percentUsed",
+            "sparePct",
+            "spareThresholdPct",
+            "criticalWarning",
+            "unsafeShutdowns",
+            "mediaErrors",
+            "dataWrittenGb",
+        ] {
+            assert_eq!(
+                other[field],
+                serde_json::Value::Null,
+                "{} must be null, never zero and never missing",
+                field
+            );
+        }
+
+        // And the samples still ride the same body, unmoved.
+        assert_eq!(
+            body["batch"]["samples"],
+            serde_json::json!([[7, 42, 55, 100, 200]])
+        );
+    }
+
+    #[test]
+    fn test_a_sweep_that_has_not_happened_and_one_that_found_nothing_are_different_bodies() {
+        let lines = ["[1788480000,7,42,55,100,200]".to_owned()];
+        // No sweep has finished since the last one the server took. The ingest leaves
+        // `machine_state.worst_disk` exactly as it was, which is what stops the eleven
+        // metrics-only flushes in every twelve from blanking a dying drive.
+        let body: serde_json::Value =
+            serde_json::from_str(&batch_body(machine(), &lines, 60, None).unwrap()).unwrap();
+        assert_eq!(body["disks"], serde_json::Value::Null);
+        assert!(body.as_object().unwrap().get("disks").is_none());
+
+        // A SWEEP THAT RAN AND FOUND NOTHING IS A READING, AND IT HAS TO REACH THE SERVER.
+        // Every macOS machine is in this state permanently, and so is a Linux agent that
+        // lost its privilege or a machine whose drives were pulled. Without a member the
+        // server would hold the last verdict it was ever told forever, and the console
+        // would show a failing drive that is no longer in the chassis.
+        let body: serde_json::Value =
+            serde_json::from_str(&batch_body(machine(), &lines, 60, Some(&[])).unwrap()).unwrap();
+        assert!(body.as_object().unwrap().get("disks").is_some());
+        assert_eq!(body["disks"], serde_json::json!([]));
+        // And the samples still ride the same body either way.
+        assert_eq!(
+            body["batch"]["samples"],
+            serde_json::json!([[7, 42, 55, 100, 200]])
+        );
+    }
+
+    #[test]
+    fn test_a_body_over_the_bound_drops_the_disks_and_never_the_samples() {
+        // A body the server refuses for its size is not a batch this machine can ever get
+        // rid of: the spool is truncated only on 2xx, so the same oversized body would be
+        // rebuilt and refused on every flush from now on. The disks are a snapshot taken
+        // again in an hour; the samples are the only copy there is.
+        //
+        // Five hundred drives is a backstop rather than a shape the collector can build:
+        // `disk::gather` caps every sweep at `disk::MAX_DISKS`. This is what happens if
+        // that cap is ever raised past what the body budget can carry.
+        let many: Vec<DiskHealth> = (0..500)
+            .map(|n| unread_disk(&format!("{:064}", n), disk::Verdict::Unreadable, disk::Source::None))
+            .collect();
+        let lines = vec!["[1788480000,7,42,55,100,200]".to_owned()];
+
+        let oversized = serde_json::json!({
+            "machine": machine(),
+            "batch": { "from": 1788480000, "to": 1788480000, "step": 60, "samples": [[7, 42, 55, 100, 200]] },
+            "disks": many.iter().map(disk_member).collect::<Vec<_>>(),
+        })
+        .to_string();
+        assert!(
+            oversized.len() > MAX_BODY_BYTES,
+            "the fixture has to actually exceed the bound to exercise the branch"
+        );
+
+        let body = batch_body(machine(), &lines, 60, Some(&many)).unwrap();
+        assert!(body.len() <= MAX_BODY_BYTES, "{} bytes", body.len());
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+        // Absent, and NOT an empty array: an empty member says this machine was asked and
+        // no drive answered, and a body that was merely too long has not said that.
+        assert!(body.as_object().unwrap().get("disks").is_none());
+        assert_ne!(body["disks"], serde_json::json!([]));
+        assert_eq!(
+            body["batch"]["samples"],
+            serde_json::json!([[7, 42, 55, 100, 200]])
+        );
+
+        // THE BOUND ITSELF, not merely "much too big". A guard that is a kilobyte loose
+        // builds a body the server answers 413 to, and the spool is truncated only on 2xx,
+        // so that machine would rebuild and re-send the same refused body forever. One
+        // drive, padded a byte at a time: the model is the only free-length field and each
+        // character it grows by is one more byte of JSON.
+        let padded = |pad: usize| {
+            let mut disk = unread_disk(&"c".repeat(64), disk::Verdict::Unreadable, disk::Source::None);
+            disk.model = Some("m".repeat(pad));
+            disk
+        };
+        let base = batch_body(machine(), &lines, 60, Some(&[padded(0)]))
+            .unwrap()
+            .len();
+        let pad = MAX_BODY_BYTES - base;
+
+        let exact = batch_body(machine(), &lines, 60, Some(&[padded(pad)])).unwrap();
+        assert_eq!(exact.len(), MAX_BODY_BYTES, "the fixture has to land ON the bound");
+        let exact: serde_json::Value = serde_json::from_str(&exact).unwrap();
+        assert_eq!(
+            exact["disks"].as_array().unwrap().len(),
+            1,
+            "a body of exactly MAX_BODY_BYTES is inside the bound and goes as it is"
+        );
+
+        let over = batch_body(machine(), &lines, 60, Some(&[padded(pad + 1)])).unwrap();
+        assert!(over.len() < MAX_BODY_BYTES, "{} bytes", over.len());
+        let over: serde_json::Value = serde_json::from_str(&over).unwrap();
+        assert!(
+            over.as_object().unwrap().get("disks").is_none(),
+            "one byte over the bound and the disks are what go"
+        );
+
+        // One drive still fits alongside a full batch of samples, so the branch above is a
+        // backstop and not the ordinary path.
+        let full: Vec<String> = (0..MAX_BATCH_LINES)
+            .map(|n| format!("[{},7,42,55,100,200]", 1788480000u64 + n as u64))
+            .collect();
+        let body = batch_body(machine(), &full, 60, Some(&many[..1])).unwrap();
+        assert!(body.len() <= MAX_BODY_BYTES, "{} bytes", body.len());
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["disks"].as_array().unwrap().len(), 1);
     }
 
     #[test]

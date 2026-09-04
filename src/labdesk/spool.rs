@@ -31,6 +31,16 @@ pub const MAX_BATCH_LINES: usize = 64;
 /// `volumes` and `disks` members the same body carries.
 pub const MAX_BATCH_BYTES: usize = 60 * 1024;
 
+/// The bound on the whole request body, section 4.4, enforced server side too
+/// (`src/worker/routes/agent-ingest.ts`, which answers 413 above it).
+///
+/// The agent has to know it as well as the server does. A body the server refuses for
+/// its size is not a batch this machine can ever get rid of: the spool is truncated
+/// only on 2xx, so the same oversized body would be rebuilt and refused on every flush
+/// forever. `collector::batch_body` drops the optional members rather than let that
+/// happen.
+pub const MAX_BODY_BYTES: usize = 64 * 1024;
+
 /// The ceiling the failure backoff doubles up to: one hour.
 pub const MAX_BACKOFF_SECONDS: u64 = 3600;
 
@@ -83,11 +93,12 @@ pub fn batch_window(lines: &[String], max_lines: usize, max_bytes: usize) -> Win
 pub enum Ack {
     /// 2xx. The server holds the batch; drop exactly what went out and reset the backoff.
     Accepted,
-    /// 403. This machine is revoked. Stop collecting and delete the spool: an org that has
-    /// revoked a machine has said it wants nothing more from it, and the history sitting on
-    /// that disk is inventory about a customer who is no longer a customer.
+    /// The server said, in words, that this machine is revoked. Stop collecting and
+    /// delete the spool: an org that has revoked a machine has said it wants nothing more
+    /// from it, and the history sitting on that disk is inventory about a customer who is
+    /// no longer a customer.
     Revoked,
-    /// Everything else, 401 included. Keep every line and back off.
+    /// Everything else, 401 and an unexplained 403 included. Keep every line and back off.
     ///
     /// 401 means the signature was refused, and the ordinary cause is a clock that has
     /// drifted outside the 120 s window rather than a key that is wrong. Deleting history
@@ -96,11 +107,37 @@ pub enum Ack {
     Retry,
 }
 
-/// Map an HTTP status onto what the spool does about it.
-pub fn ack_for(status: u16) -> Ack {
+/// The word the server's revocation carries. `src/worker/agent-auth.ts` answers a revoked
+/// machine `{"error":"This machine has been revoked."}`, and this matches on the word
+/// rather than on that whole sentence so that reworded copy costs a fleet nothing.
+const REVOKED: &str = "revoked";
+
+/// Whether an answer is the SERVER saying revoked, rather than merely a 403.
+///
+/// A 403 is not proof of anything on its own. Cloudflare Access, a corporate proxy, a
+/// captive portal, a WAF rule and a misrouted request all answer 403, and none of them
+/// is this org revoking this machine. Taking the status code as proof means one middlebox
+/// deletes the queued telemetry of every agent behind it, which is not recoverable: the
+/// samples only ever existed on those disks.
+///
+/// So the destructive branch needs the server's own words. A JSON object with an `error`
+/// naming revocation is something only the Worker sends; an edge answers HTML, and a proxy
+/// that does answer JSON says "Forbidden". When in doubt this returns false, and the
+/// uplink is retried instead: the cost of being wrong that way is one wasted flush.
+fn says_revoked(body: &str) -> bool {
+    let Ok(response) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    response["error"]
+        .as_str()
+        .map_or(false, |error| error.to_ascii_lowercase().contains(REVOKED))
+}
+
+/// Map an HTTP status and the body that came with it onto what the spool does about it.
+pub fn ack_for(status: u16, body: &str) -> Ack {
     match status {
         200..=299 => Ack::Accepted,
-        403 => Ack::Revoked,
+        403 if says_revoked(body) => Ack::Revoked,
         _ => Ack::Retry,
     }
 }
@@ -296,12 +333,12 @@ mod tests {
 
         // A failure, then a rejected signature: neither may cost a single sample.
         for status in [0u16, 401, 429, 500, 502] {
-            assert_eq!(ack_for(status), Ack::Retry);
+            assert_eq!(ack_for(status, REVOKED_BODY), Ack::Retry);
             assert_eq!(spool.read().unwrap(), lines);
         }
 
         // Only the acknowledgement moves the front, and it moves it by exactly what went.
-        assert_eq!(ack_for(200), Ack::Accepted);
+        assert_eq!(ack_for(200, ""), Ack::Accepted);
         spool.drop_front(window.consumed()).unwrap();
         assert_eq!(spool.read().unwrap(), vec![sample(4), sample(5)]);
         spool.clear().unwrap();
@@ -317,6 +354,10 @@ mod tests {
         assert_eq!(MAX_LINES, 4096);
         assert_eq!(MAX_BATCH_LINES, 64);
         assert_eq!(MAX_BATCH_BYTES, 61440);
+        // Section 4.4's bound on the whole body, which the server enforces as a 413. The
+        // sample budget has to leave room under it for the members that ride alongside.
+        assert_eq!(MAX_BODY_BYTES, 65536);
+        assert!(MAX_BATCH_BYTES < MAX_BODY_BYTES);
 
         // And the constructor the collector actually calls really carries `MAX_LINES`,
         // exactly, rather than a cap some other test supplied. Seeded with a full spool in
@@ -420,10 +461,52 @@ mod tests {
         assert_eq!(flush_jitter_seconds("m-1", 1), 0);
     }
 
+    /// The body `src/worker/agent-auth.ts` sends with its 403, verbatim.
+    const REVOKED_BODY: &str = r#"{"error":"This machine has been revoked."}"#;
+
+    #[test]
+    fn test_only_the_server_saying_revoked_destroys_a_spool() {
+        // The one answer that means it, and it still has to arrive with a 403.
+        assert_eq!(ack_for(403, REVOKED_BODY), Ack::Revoked);
+        assert_eq!(ack_for(200, REVOKED_BODY), Ack::Accepted);
+        assert_eq!(ack_for(401, REVOKED_BODY), Ack::Retry);
+        assert_eq!(ack_for(500, REVOKED_BODY), Ack::Retry);
+
+        // AUDIT FINDING 8. Every one of these is a 403 that is NOT this org revoking this
+        // machine, and every one of them used to delete the machine's queued telemetry.
+        // A middlebox in front of a fleet would have taken the lot, and the samples only
+        // ever existed on those disks.
+        for body in [
+            "",
+            "Forbidden",
+            "<!DOCTYPE html><title>403 Forbidden</title>",
+            r#"{"error":"Forbidden"}"#,
+            r#"{"error":"You do not have permission to access this site."}"#,
+            r#"{"success":false,"errors":[{"code":1020,"message":"Access denied"}]}"#,
+            // JSON, and the word is there, but not where the server puts it: a body
+            // matched by a bare substring search over the response text.
+            r#"{"error":"Forbidden","hint":"revoked machines are refused here"}"#,
+            r#"{"message":"This machine has been revoked."}"#,
+            // Not an object at all, and a null `error`.
+            r#"["revoked"]"#,
+            r#"{"error":null}"#,
+        ] {
+            assert_eq!(ack_for(403, body), Ack::Retry, "403 with body {:?}", body);
+        }
+
+        // The match is on the word, not on the punctuation around it, so the server may
+        // reword its copy without stranding a fleet that can no longer be told to stop.
+        assert_eq!(ack_for(403, r#"{"error":"REVOKED"}"#), Ack::Revoked);
+        assert_eq!(
+            ack_for(403, r#"{"error":"This machine was revoked by an administrator"}"#),
+            Ack::Revoked
+        );
+    }
+
     #[test]
     fn test_a_revoked_machine_loses_its_spool_and_a_rejected_signature_does_not() {
-        assert_eq!(ack_for(403), Ack::Revoked);
-        assert_eq!(ack_for(401), Ack::Retry);
+        assert_eq!(ack_for(403, REVOKED_BODY), Ack::Revoked);
+        assert_eq!(ack_for(401, REVOKED_BODY), Ack::Retry);
 
         let spool = scratch_spool("revoked", 64);
         spool.append(&sample(1)).unwrap();

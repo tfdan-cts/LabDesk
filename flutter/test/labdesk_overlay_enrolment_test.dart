@@ -20,7 +20,7 @@ class _World {
   String? elevatedReply;
   final options = <String, String>{};
 
-  /// The body of the last POST to /api/overlay/self, so what this machine told
+  /// The body of the last POST to /agent/overlay/self, so what this machine told
   /// lab-desk.net about itself can be read back.
   String? selfBody;
 
@@ -32,7 +32,7 @@ class _World {
 
   Future<(int, String)> http(String method, Uri url, Map<String, String> h, String? body) async {
     log.add('broker $method ${url.path}');
-    if (url.path == '/api/overlay/self') selfBody = body;
+    if (url.path == '/agent/overlay/self') selfBody = body;
     return (brokerStatus, '{"setupKey":"SK","managementUrl":"https://nb.lab-desk.net","ok":true}');
   }
 
@@ -48,7 +48,16 @@ class _World {
 
   OverlayEnrolment enrolment() => OverlayEnrolment(
         daemon: OverlayDaemon(binary: 'netbird', stateDir: '/tmp/state', daemonAddr: 'unix:///tmp/d.sock', run: run),
-        broker: OverlayBroker(baseUrl: 'https://lab-desk.net', token: () => 't', http: http),
+        // The enrolment sequence speaks the machine plane, so the broker is
+        // given a machine credential; the signature itself is the Rust
+        // core's (src/flutter_ffi.rs), and what it covers is asserted in
+        // labdesk_overlay_broker_test.dart.
+        broker: OverlayBroker(
+            baseUrl: 'https://lab-desk.net',
+            token: () => 't',
+            sign: (m, p, b) async =>
+                const MachineSignature(machine: 'm-1', ts: '1788480000', sig: 'sig='),
+            http: http),
         elevated: elevated,
         setOption: setOption,
         hostname: 'zenbook',
@@ -88,13 +97,13 @@ void main() {
     expect(end.ip, '100.64.0.3');
     expect(w.log, [
       'daemon status',
-      'broker POST /api/overlay/enrol',
+      'broker POST /agent/overlay/enrol',
       'elevated service install',
       'elevated service start',
       'daemon up',
       'daemon status',
       'daemon status',
-      'broker POST /api/overlay/self',
+      'broker POST /agent/overlay/self',
       'option labdesk-direct-bind=100.64.0.3',
       'option direct-server=Y',
     ]);
@@ -123,7 +132,7 @@ void main() {
     final w = _World()..daemonReply = ProcessResult(0, 0, _connected, '');
     final end = await w.enrolment().enable();
     expect(end.phase, LabnetPhase.on);
-    expect(w.log, ['daemon status', 'broker POST /api/overlay/self', 'option labdesk-direct-bind=100.64.0.3', 'option direct-server=Y']);
+    expect(w.log, ['daemon status', 'broker POST /agent/overlay/self', 'option labdesk-direct-bind=100.64.0.3', 'option direct-server=Y']);
   });
 
   test('the machine reports the id key and the direct port the client read, not a placeholder', () async {
@@ -142,7 +151,7 @@ void main() {
     final w = _World();
     final end = await w.enrolment().disable();
     expect(end.phase, LabnetPhase.off);
-    expect(w.log, ['option direct-server=N', 'option labdesk-direct-bind=', 'daemon down', 'broker DELETE /api/overlay/enrol']);
+    expect(w.log, ['option direct-server=N', 'option labdesk-direct-bind=', 'daemon down', 'broker DELETE /agent/overlay/enrol']);
     expect(w.options, {'direct-server': 'N', 'labdesk-direct-bind': ''});
   });
 
