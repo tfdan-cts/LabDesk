@@ -237,3 +237,38 @@ survives until the next restart is not a rule.
 `enabled=0` in `/etc/default/apport`, `fs.suid_dumpable` reads 0 live, and `kernel.core_pattern`
 is back to `core` instead of a pipe into apport. Read every hardening value back from the running
 kernel, never from the file that was written.
+
+### The Docker socket, and why Traefik no longer has one
+
+A blind critic put the strongest finding plainly: Traefik ran as root with a **writable** Docker
+socket. The `:ro` on the bind mount freezes the mount point, not the socket inode, so the process
+inside could still write to the Docker API, and write access to the Docker API is host root. One
+remote-code-execution bug in the most exposed process on the box would have defeated every other
+control at once: no-new-privileges, the digest pinning, the capability drops and the firewall
+policy are all bypassed by an attacker who can ask the daemon for a container that mounts `/`.
+
+The answer was to delete the requirement rather than to wrap it. This deployment is three fixed
+containers; the Docker provider was discovering nothing that was not already known. Routing moved
+to a Traefik file provider at `/home/ubuntu/netbird/traefik-dynamic.yml`, mounted read-only, and
+the socket mount is gone. The compose labels that used to carry the routing were deleted, because
+configuration that nothing reads is worse than no configuration at all.
+
+Each router, service and middleware in that file is the exact equivalent of the label it replaced,
+including the `labnet-admin` IP allow list on the dashboard and on `/api` and `/oauth2`, the
+priority 1 catch-all for the dashboard, priority 100 for the peer and admin paths, and the `h2c`
+scheme on the gRPC backend. Verified after the change: the dashboard answers 200 from an
+allowlisted position and 403 from elsewhere, `/api/peers` and `/api/policies` answer 200 with the
+service token from the box and 403 from the workstation, `/relay` answers 426, and a real gRPC
+POST to `/management.ManagementService/GetServerKey` answers 200 over HTTP/2. A path with no
+router is answered by the dashboard's nginx, and a gRPC path is answered by the Go server, which
+is how the two were told apart: on this host a 404 alone proves nothing, because the dashboard
+catches unmatched paths and its nginx returns 404 too.
+
+The containers also gave up every Linux capability they do not use. `no-new-privileges` stops a
+process gaining more than it started with and says nothing about what root inside a container
+already holds. All three now run `cap_drop: ALL`: Traefik and the server keep only
+`NET_BIND_SERVICE`, and the dashboard keeps `NET_BIND_SERVICE`, `CHOWN`, `SETUID`, `SETGID` and
+`DAC_OVERRIDE`, which is what nginx uses to bind port 80 and drop to its own user.
+
+Both changes were confirmed to survive a second deliberate reboot, along with the firewall
+policy, the disabled apport and `fs.suid_dumpable` reading 0.
