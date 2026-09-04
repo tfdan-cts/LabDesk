@@ -994,13 +994,19 @@ async fn direct_server(server: ServerPtr) {
                     .local_addr()
                     .unwrap_or(Config::get_any_listen_addr(true));
                 let server = server.clone();
+                // labnet: a listener bound to the overlay address signs its id
+                // first, which is what the overlay client waits for; an unsigned
+                // first message left every overlay connect falling back to the
+                // relay. The plain direct listener stays unsigned, as upstream's
+                // direct IP clients expect.
+                let secure = direct_bind_ip(&bind).is_some();
                 tokio::spawn(async move {
                     allow_err!(
                         crate::server::create_tcp_connection(
                             server,
                             hbb_common::Stream::from(stream, local_addr),
                             addr,
-                            false,
+                            secure,
                             ConnectionMeta::default(), // Direct connections don't have server-side user context.
                         )
                         .await

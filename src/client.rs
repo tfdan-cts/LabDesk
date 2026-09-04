@@ -204,11 +204,13 @@ fn parse_overlay_hint(hint: &str) -> Option<SocketAddr> {
 
 /// labnet: the one condition on the overlay path that names a machine rather
 /// than a route. `signed_other_id` comes back from the exchange only when the
-/// far end signed an identity of its own and that identity did not answer to
-/// the key the broker gave us for the peer, so it is another machine sitting on
-/// the peer's address. Every other way the exchange can end, including the far
-/// end never offering a signed identity at all, proves nothing about who holds
-/// the address and is a fallback condition, not an impersonation.
+/// far end signed, under the very key the broker gave us for the peer, an id
+/// that is not the peer's: the peer's key on a machine answering as someone
+/// else. Every other way the exchange can end proves nothing about who holds
+/// the address and is a fallback condition, not an impersonation. That
+/// includes a signature the key does not verify, because a peer that
+/// reinstalled holds a new key and the broker's copy is stale until it
+/// enrols again; the rendezvous path proves the peer's identity on its own.
 fn overlay_is_impersonation(secured: bool, signed_other_id: bool) -> bool {
     !secured && signed_other_id
 }
@@ -443,13 +445,15 @@ impl Client {
                                         }
                                         signed_other_id = signed_other;
                                         if signed_other {
-                                            "signed an id the peer's key does not answer for"
+                                            "signed another machine's id with the peer's key"
                                                 .to_owned()
                                         } else {
-                                            // What an unsecured direct listener
-                                            // answers with: it sends its hash
-                                            // first and never offers a key.
-                                            "offered no signed id".to_owned()
+                                            // A signature the peer's key does
+                                            // not verify, a reinstalled peer
+                                            // above all, or no signed id at
+                                            // all, which is what an unsigned
+                                            // direct listener answers with.
+                                            "did not prove it holds the peer's key".to_owned()
                                         }
                                     }
                                     Ok(Err(err)) => err.to_string(),
@@ -1020,15 +1024,15 @@ impl Client {
         Self::secure_with_sign_pk(peer_id, sign_pk, option_pk, conn).await
     }
 
-    /// labnet: the flag returned beside the key says the far end signed an
-    /// identity of its own and that identity did not answer to `sign_pk`,
-    /// either because the signature does not verify under it or because the id
-    /// inside is another machine's. Every other way out of here leaves it
-    /// false, an unreadable message and a first message that is not a signed id
-    /// above all, because those say the far end never offered an identity, not
-    /// that it offered the wrong one. Only the overlay path reads the flag,
-    /// where the key came from the broker beside the address and no other
-    /// machine may answer there; the rendezvous path drops it.
+    /// labnet: the flag returned beside the key says the far end signed, under
+    /// `sign_pk` itself, an id that is not `peer_id`. Every other way out of
+    /// here leaves it false: a signature `sign_pk` does not verify says only
+    /// that the far end does not hold that key, which is what a reinstalled
+    /// peer looks like until the broker learns its new key, and an unreadable
+    /// message or a first message that is not a signed id says the far end
+    /// never offered an identity. Only the overlay path reads the flag, where
+    /// the key came from the broker beside the address; the rendezvous path
+    /// drops it.
     async fn secure_with_sign_pk(
         peer_id: &str,
         sign_pk: Option<sign::PublicKey>,
@@ -1069,7 +1073,6 @@ impl Client {
                         } else {
                             // fall back to non-secure connection in case pk mismatch
                             log::info!("pk mismatch, fall back to non-secure");
-                            signed_other_id = true;
                             let mut msg_out = Message::new();
                             msg_out.set_public_key(PublicKey::new());
                             conn.send(&msg_out).await?;
