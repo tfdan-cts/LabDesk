@@ -693,7 +693,7 @@ fn published_sha256(
 /// It is fetched from lab-desk.net like every other asset, because that is the
 /// only host this updater will talk to, so the site has to resolve the name
 /// `SHA256SUMS` under the published version. It did not until labdesk-site
-/// `964542c`: the download route answered 404 for any name outside the channel
+/// `758d7ba`: the download route answered 404 for any name outside the channel
 /// row's asset map, which made every update stop at its first request while the
 /// manifest sat on the release. Measured against production, not assumed.
 ///
@@ -1500,15 +1500,31 @@ mod tests {
         .is_err());
         assert!(asked.take().is_empty());
 
-        // No key pinned, which is what ships today: the per-asset digest route
-        // the client already used, and no manifest asked for at all.
+        // No key pinned, which is what ships today: the manifest is read
+        // unsigned, and nothing else is asked for when it answers.
         let found = published_sha256(url, None, &|asked_url: &str, _max: u64| {
             record(asked_url);
-            Ok(format!("{digest}\n").into_bytes())
+            match asked_url {
+                u if u == manifest_url => Ok(manifest.as_bytes().to_vec()),
+                other => not_found(other),
+            }
+        })
+        .expect("the digest the release's own manifest carries");
+        assert_eq!(found, digest);
+        assert_eq!(asked.take(), [manifest_url]);
+
+        // A release with no manifest falls back to the per-asset route, and
+        // only after the manifest was asked for first.
+        let found = published_sha256(url, None, &|asked_url: &str, _max: u64| {
+            record(asked_url);
+            match asked_url {
+                u if u == checksum_url => Ok(format!("{digest}\n").into_bytes()),
+                other => not_found(other),
+            }
         })
         .expect("the digest the site publishes");
         assert_eq!(found, digest);
-        assert_eq!(asked.take(), [checksum_url]);
+        assert_eq!(asked.take(), [manifest_url, checksum_url]);
     }
 
     #[test]

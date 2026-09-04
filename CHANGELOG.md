@@ -5,24 +5,25 @@ Rules: `docs/VERSIONING.md`.
 
 ## 1.2.4 (2026-09-04)
 
-- No change to the product. This release exists so that an installed 1.2.3 can be watched
-  updating itself through the verified path on a real machine: the digest is read out of the
-  release's `SHA256SUMS` and the download is hashed against it before the installer runs.
+- No change to the product. This release exists so that an installed client carrying the
+  updater below can be watched updating itself through the verified path on a real machine:
+  the digest is read out of the release's `SHA256SUMS` and the download is hashed against it
+  before the installer runs.
 
 ## 1.2.3 (2026-09-04)
 
 Security fixes.
 
 - An update is verified before it installs, on every path that installs one. LabDesk refuses to
-  install a download whose bytes do not hash to a published SHA-256. The digest is read out of the release's own `SHA256SUMS`, which the build workflow now
-  publishes beside the assets of every release it makes, so a client built from this commit
-  can install an update; a release that carries no manifest is refused rather than installed
-  unverified. The old check compared the size of any file left
+  install a download whose bytes do not hash to a published SHA-256. The digest is read out of the release's own `SHA256SUMS`, which the manual build workflow
+  publishes beside the assets of every release it makes from this commit on, so a client
+  built from this commit can install an update; a release that carries no manifest, which is
+  every release before this one, is refused rather than installed unverified. The old check compared the size of any file left
   behind in the temporary directory, which every local user can write, so a file of the right
   size was reused and handed to an elevated installer unverified. A release that publishes no
-  digest, the upstream GitHub releases included, no longer installs at all. Release manifests
-  are signed as well, but nothing is checking those signatures yet: the pinned key in
-  `src/updater.rs` is an empty placeholder and the key ceremony has not been performed.
+  digest, the upstream GitHub releases included, no longer installs at all. Nothing signs the
+  manifest yet: the pinned key in `src/updater.rs` is an empty placeholder and the key
+  ceremony has not been performed, so a manifest proves the bytes, not who published them.
   `docs/SIGNING.md` says what it takes to switch enforcement on.
 - The heartbeat and inventory posts to lab-desk.net carry the signed-in account's token. They
   were sent with no authorization header at all, so every one of them was refused by a server

@@ -90,7 +90,7 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -427,7 +427,7 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -582,7 +582,7 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -925,7 +925,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -970,7 +970,7 @@ jobs:
       - name: Publish unsigned app
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: labdesk-${{ env.VERSION }}-unsigned.tar.gz
@@ -1255,7 +1255,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -1265,7 +1265,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY == null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -1443,7 +1443,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -1453,7 +1453,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY == null && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -1757,7 +1757,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -1794,7 +1794,7 @@ jobs:
         if: matrix.job.arch == 'x86_64' && env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -2056,7 +2056,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -2286,7 +2286,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -2345,7 +2345,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -2431,7 +2431,7 @@ jobs:
       - name: Publish flatpak package
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
@@ -2448,16 +2448,21 @@ jobs:
   # assets for the platforms that succeeded, and those have to be checksummable
   # or the platforms that did build are locked out of updating too.
   release-manifest:
+    # After every job that publishes an asset, or the manifest misses what the
+    # late ones upload. No permissions block: see generate-sbom above.
     needs:
       - build-for-windows-flutter
       - build-for-windows-sciter
+      - build-for-macOS
       - build-rustdesk-linux
+      - build-rustdesk-linux-drm
       - build-rustdesk-linux-sciter
       - build-rustdesk-android
+      - build-rustdesk-android-universal
+      - build-appimage
+      - build-flatpak
     if: always() && inputs.upload-artifact
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Compute and publish SHA256SUMS
         env:
@@ -2466,8 +2471,8 @@ jobs:
         run: |
           set -euo pipefail
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "No release for '$TAG'; nothing to checksum."
-            exit 0
+            echo "No release for '$TAG': every publish step failed, so there is nothing to checksum." >&2
+            exit 1
           fi
           mkdir assets
           cd assets
@@ -2488,6 +2493,10 @@ jobs:
           cd ..
           cat SHA256SUMS
           gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          # A signature from an earlier run would be over the old manifest, and
+          # a key-pinned client refuses a release whose signature does not
+          # verify, so it must not outlive the manifest it signed.
+          gh release delete-asset "$TAG" SHA256SUMS.sig --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
 
   build-rustdesk-web:
     if: False
@@ -2568,7 +2577,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') }}
+          prerelease: ${{ !startsWith(env.TAG_NAME, 'v') || contains(env.TAG_NAME, '-') }}
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
           files: |
