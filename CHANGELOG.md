@@ -3,6 +3,12 @@
 LabDesk's own versions. The RustDesk core underneath is stated in the README, not versioned here.
 Rules: `docs/VERSIONING.md`.
 
+## 1.2.4 (2026-09-04)
+
+- No change to the product. This release exists so that an installed 1.2.3 can be watched
+  updating itself through the verified path on a real machine: the digest is read out of the
+  release's `SHA256SUMS` and the download is hashed against it before the installer runs.
+
 ## 1.2.3 (2026-09-04)
 
 Security fixes.
