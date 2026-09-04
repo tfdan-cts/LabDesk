@@ -98,9 +98,10 @@ The server exists. What follows is what was done, so the next person does not re
   50 GB boot volume. Public address `64.181.204.25`, private `10.30.20.160`. This VM bills
   (the tenancy's free A1 hours are used by other instances): $0.01 per OCPU-hour plus
   $0.0015 per GB-hour, about $14 a month.
-- Its own network security group, `labnet-netbird`: ingress 80/tcp, 443/tcp, 3478/udp from
-  anywhere; the VCN's shared security list was left alone. The host firewall carries the same
-  three ports, persisted in `/etc/iptables/rules.v4` (Oracle's images reject by default).
+- Its own network security group, `labnet-netbird`: ingress 443/tcp and 3478/udp from anywhere
+  (80/tcp was removed the same night, see the exposure table below); the VCN's shared security
+  list was left alone. The host firewall carries the same two ports, persisted in
+  `/etc/iptables/rules.v4` (Oracle's images reject by default).
 - SSH from the workstation goes through the Safe Sight backend as a jump host:
   `ssh -J ubuntu@100.111.222.91 ubuntu@10.30.20.160`. Port 22 is reachable only from inside
   the subnet.
@@ -148,3 +149,91 @@ entry for the same reason.
 What the design does not do: expose the network. A machine that enrols becomes reachable to
 nobody until a session rule or a labnet names it, and the data path between two machines is
 WireGuard between those two machines. The control plane coordinates; it does not carry.
+
+## Hardened, 2026-09-04
+
+The owner asked for one thing: that this VM not be a way in. Seven checks were set as the bar,
+and each one below is answered by a measurement taken after the change, not by the config that
+was written. Every measurement was repeated after a deliberate reboot, because a rule that only
+survives until the next restart is not a rule.
+
+| # | The bar | Measured result |
+|---|---|---|
+| 1 | From the internet, only 443/tcp and 3478/udp answer | A connect scan of 47 common TCP ports from the workstation returns exactly one open port, 443. Twelve UDP ports are silent to a garbage payload, and 3478 answers a real RFC 5389 binding request with the caller's reflexive address. |
+| 2 | SSH key-only, no root, subnet only | `sshd -T` reads back `passwordauthentication no`, `permitrootlogin no`, `pubkeyauthentication yes`, `allowusers ubuntu`, `maxauthtries 3`, `x11forwarding no`, `loglevel VERBOSE`. The host firewall now accepts 22 only from `10.30.20.0/24`, so the security list is no longer the only thing holding that line. |
+| 3 | Default drop on INPUT, and the Docker forwarding path closed | `iptables -S INPUT` starts with `-P INPUT DROP`, and the trailing REJECT was kept so a probe still gets an answer rather than a hang. `ip6tables` drops INPUT and FORWARD, which is safe because the VM has no global IPv6 address. `DOCKER-USER` is no longer empty. |
+| 4 | Automatic security updates with reboot | `unattended-upgrades` is enabled and active, `Automatic-Reboot "true"` at 04:30. Twenty pending updates were applied by hand first, including `openssl`, `openssh-server`, `libssh` and `zlib`, and `apt list --upgradable` is now empty. |
+| 5 | Containers pinned by digest, unprivileged, no new privileges | All three run from a digest, all three report `privileged=false` and `[no-new-privileges:true]` under `docker inspect`. |
+| 6 | Kernel network hardening applied and readable back | `/etc/sysctl.d/90-labnet.conf` survives the reboot and reads back live. |
+| 7 | A Lynis audit whose remaining findings are defensible | The hardening index moved from 64 to 76. The vulnerable-package warning is gone. The findings that remain are listed below with the reason each was left. |
+
+### What changed
+
+- The host firewall now default-drops. Port 80 was still accepted here even though Traefik had
+  stopped serving it and the security group had closed it, so the rule was removed. Port 22 was
+  narrowed from anywhere to the subnet. `ip6tables` was given a loopback and established rule and
+  then set to drop.
+- `DOCKER-USER` was empty, which matters because Docker's forwarding path bypasses INPUT for
+  published ports. It now carries an explicit default: established traffic returns, anything not
+  arriving on the public interface returns, 443/tcp and 3478/udp return, and everything else from
+  the public interface is dropped. A future `-p` on a container cannot open itself to the internet.
+- Traefik was running v3.6, which reached end of life on 2026-08-16 and no longer receives
+  security patches. It now runs v3.7.12. The one breaking change in that range that touches this
+  configuration is that Traefik no longer forwards `Upgrade: h2c` headers to backends, and this
+  compose file already declares the gRPC backend with `loadbalancer.server.scheme=h2c`, which is
+  the supported form.
+- All three containers are pinned by digest rather than by a moving tag: `traefik:v3.7.12`,
+  `netbirdio/dashboard:v2.92.0`, `netbirdio/netbird-server:0.78.0`. The server digest matches the
+  v0.78.0 source vendored in this repository. Each also carries `no-new-privileges:true`.
+- `fail2ban` guards sshd. Its bans land in the nftables table `inet f2b-table` on the input hook
+  at priority `filter - 1`, not in iptables, which is worth knowing before concluding it does
+  nothing. A test ban was placed and removed to prove the action writes a real rule.
+- `auditd` was enabled with an empty ruleset, which watches nothing. It now watches the identity
+  files, the sudoers tree, the sshd configuration, the saved firewall rules, the compose file and
+  the Docker socket.
+- Core dumps are off, `UMASK` is 027, and `/etc/issue` and `/etc/issue.net` carry a banner.
+- An Oracle boot-volume backup policy, `labnet-weekly-keep3`, is assigned to the boot volume:
+  incremental, Sundays at 04:00 UTC, kept 21 days. A full backup named `labnet-netbird-initial`
+  exists and reached `AVAILABLE`, so a restore point exists today rather than next Sunday. The
+  earlier attempt failed with "You must specify the offset for offsetType null"; the schedule
+  needs `offset_type="STRUCTURED"` alongside `day_of_week` and `hour_of_day`.
+
+### Findings left open, and why
+
+- **Lynis PKGS-7388, "can't find any security repository".** False. `noble-security` is
+  configured in `/etc/apt/sources.list.d/ubuntu.sources`, and twenty packages were installed from
+  it. Lynis does not parse the deb822 format that Ubuntu 24.04 uses.
+- **STUN on 3478/udp served by this box.** Owner decision, recorded above. The relay is TCP and
+  cannot reflect the UDP mapping WireGuard needs, public STUN would hand peer addresses to a third
+  party, and relay-only forfeits the direct path.
+- **Traefik mounts the Docker socket read-only.** Its Docker provider requires it. Read-only
+  limits it to reading container labels, and the container cannot gain privileges.
+- **`AllowTcpForwarding` stays on.** An SSH tunnel is the operator's only ad-hoc route to the
+  dashboard, which is fenced to Cloudflare's ranges and the box itself. SSH is key-only, subnet
+  only and watched by fail2ban, so the pivot this would open is already behind three doors.
+- **No GRUB password.** Reaching the serial console requires Oracle tenancy credentials, which is
+  already a larger compromise than anything a boot password would prevent.
+- **Read-only container roots not set.** Traefik writes `acme.json`, the server writes
+  `/var/lib/netbird`, and the dashboard's nginx writes its cache and run directories. Each would
+  need its own tmpfs mounts for a gain that `no-new-privileges` and an unprivileged user already
+  cover. Left as a deliberate choice rather than an oversight.
+- **Separate partitions for /home, /tmp and /var, a malware scanner, process accounting, remote
+  log shipping, password ageing and PAM strength modules.** This host has no password logins and
+  one service. These raise the Lynis score without reducing the ways in.
+- **The subnet's shared security list is wider than this VM's own security group.** The group
+  `labnet-netbird` allows only 443/tcp and 3478/udp, but Oracle evaluates a security group and a
+  security list as a union, and the subnet's default list (shared with the Safe Sight instances)
+  also allows 444/tcp and 41641/udp from anywhere. Nothing on this VM listens on either, and the
+  host firewall drops both, which the external scan confirms. The list was left alone because it
+  is shared: narrowing it would change the other instances on that subnet. Worth knowing that the
+  host firewall, not the cloud edge, is what closes those two ports here.
+
+### One claim that was false
+
+`fs.suid_dumpable` was recorded as hardened to 0 the night before. The file
+`/etc/sysctl.d/90-labnet.conf` did say 0, but the running kernel said 2, because Ubuntu's
+`apport` sets it back to 2 when it starts. A sysctl written to a file is not a sysctl applied.
+`apport` is a desktop crash reporter with nothing to do on this server; it is now disabled and
+`enabled=0` in `/etc/default/apport`, `fs.suid_dumpable` reads 0 live, and `kernel.core_pattern`
+is back to `core` instead of a pipe into apport. Read every hardening value back from the running
+kernel, never from the file that was written.
