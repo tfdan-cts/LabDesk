@@ -687,8 +687,15 @@ fn published_sha256(
 
 /// The asset's digest read out of the release's own `SHA256SUMS`, with no
 /// signature over it. This is the path that works today, because the manifest
-/// is published as an asset of the same release the download came from and
-/// needs nothing deployed on the site to serve it.
+/// is an asset of the same release the download came from, so one release
+/// describes its own bytes.
+///
+/// It is fetched from lab-desk.net like every other asset, because that is the
+/// only host this updater will talk to, so the site has to resolve the name
+/// `SHA256SUMS` under the published version. It did not until labdesk-site
+/// `964542c`: the download route answered 404 for any name outside the channel
+/// row's asset map, which made every update stop at its first request while the
+/// manifest sat on the release. Measured against production, not assumed.
 ///
 /// What it closes: a corrupted or truncated download, a poisoned cache, and a
 /// file of the right size left in the temporary directory by another local
