@@ -84,7 +84,9 @@ class OverlayEnrolment {
 
   void _emit(LabnetCardState s) {
     current = s;
-    _state.add(s);
+    // The console can be closed while a prompt is still open; the answer
+    // then arrives after dispose and must not throw into a dead controller.
+    if (!_state.isClosed) _state.add(s);
   }
 
   void _working(String detail) =>
@@ -171,7 +173,10 @@ class OverlayEnrolment {
     try {
       await broker.revoke();
     } on OverlayBrokerException catch (e) {
-      if (!e.signInAgain) return _fail(e.message);
+      // Nothing to revoke from here is not a failed turn-off: the console
+      // holds no agent key, so the machine plane always refuses locally, and
+      // a sign-in that lapsed is the account surface's to report.
+      if (!e.signInAgain && !e.refusedHere) return _fail(e.message);
     }
     if (err != null) return _fail(err);
     _emit(LabnetCardState.off);

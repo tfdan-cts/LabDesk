@@ -35,6 +35,12 @@ class OverlaySession {
   /// Granted sessions by peer id, and whether the console has seen each open.
   final _grants = <String, ({SessionGrant grant, bool seenOpen})>{};
 
+  /// Polls a grant may sit unseen before it is treated as a connect that
+  /// never happened and released. The console polls sessions every second
+  /// or so, and a connect that has not opened in this many is not opening.
+  static const unseenPollLimit = 30;
+  final _unseenPolls = <String, int>{};
+
   /// True when the client was handed the overlay address for [peerId].
   Future<bool> prepare(String peerId) async {
     final SessionGrant grant;
@@ -58,6 +64,7 @@ class OverlaySession {
     await setOption('$kOverlayAddrOption$peerId', grant.targetAddr);
     await setOption('$kOverlayPkOption$peerId', grant.targetIdPk);
     _grants[peerId] = (grant: grant, seenOpen: false);
+    _unseenPolls[peerId] = 0;
     return true;
   }
 
@@ -68,7 +75,14 @@ class OverlaySession {
       final g = _grants[id]!;
       if (openSet.contains(id)) {
         _grants[id] = (grant: g.grant, seenOpen: true);
+        _unseenPolls.remove(id);
       } else if (g.seenOpen) {
+        await release(id);
+      } else if ((_unseenPolls[id] = (_unseenPolls[id] ?? 0) + 1) >=
+          unseenPollLimit) {
+        // Never seen open: the connect failed or the operator gave up. Left
+        // alone, its hint would make every later connect to this peer dial a
+        // dead address first, and nothing else would ever clear it.
         await release(id);
       }
     }
@@ -77,6 +91,7 @@ class OverlaySession {
   /// Ends the grant for [peerId] whether or not the session ever opened.
   Future<void> release(String peerId) async {
     final g = _grants.remove(peerId);
+    _unseenPolls.remove(peerId);
     if (g == null) return;
     await setOption('$kOverlayAddrOption$peerId', '');
     await setOption('$kOverlayPkOption$peerId', '');

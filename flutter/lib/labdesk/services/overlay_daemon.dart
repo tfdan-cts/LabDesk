@@ -86,14 +86,28 @@ class OverlayDaemon {
     required String setupKey,
     required String managementUrl,
     required String hostname,
-  }) =>
-      _call([
+  }) async {
+    // The key is a one-off credential, and argv is readable by every local
+    // user for as long as the process runs. It goes through a file in this
+    // user's own temp directory instead, which the daemon can read and no
+    // other user can, and it is gone before the answer is returned.
+    final dir = await Directory.systemTemp.createTemp('labdesk-enrol-');
+    final keyFile = File('${dir.path}${Platform.pathSeparator}setup-key');
+    try {
+      await keyFile.writeAsString(setupKey, flush: true);
+      return await _call([
         'up',
-        '--setup-key', setupKey,
+        '--setup-key-file', keyFile.path,
         '--management-url', managementUrl,
         '--hostname', hostname,
         ..._addr,
       ]);
+    } finally {
+      try {
+        await dir.delete(recursive: true);
+      } catch (_) {}
+    }
+  }
 
   Future<String?> down() => _call(['down', ..._addr]);
 

@@ -63,6 +63,10 @@ class OverlayBrokerException implements Exception {
   final int status;
   final String message;
 
+  /// The call never left this machine: the console holds no agent key, so a
+  /// machine-plane request was refused before any network was touched.
+  bool get refusedHere => status == OverlayBroker._refusedHere;
+
   /// Whether the refusal came from the machine plane, where 401 means the
   /// signature was refused and has nothing to do with an account.
   final bool machinePlane;

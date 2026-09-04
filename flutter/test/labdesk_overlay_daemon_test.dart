@@ -29,8 +29,19 @@ const _statusJson = '''
 class _Fake {
   final calls = <List<String>>[];
   ProcessResult next = ProcessResult(0, 0, '', '');
+
+  /// What the setup key file held while the daemon was being run; it must
+  /// be gone again by the time the call returns.
+  String? keyFileContents;
+  String? keyFilePath;
+
   Future<ProcessResult> call(String exe, List<String> args) async {
     calls.add([exe, ...args]);
+    final at = args.indexOf('--setup-key-file');
+    if (at >= 0) {
+      keyFilePath = args[at + 1];
+      keyFileContents = await File(keyFilePath!).readAsString();
+    }
     return next;
   }
 }
@@ -127,7 +138,7 @@ void main() {
   });
 
   group('OverlayDaemon commands', () {
-    test('up passes the key, server and name as flags, addressed to this daemon',
+    test('up passes the key through a file that lives only for the call, never on the command line',
         () async {
       final f = _Fake();
       final err = await _daemon(f).up(
@@ -135,14 +146,19 @@ void main() {
           managementUrl: 'https://nb.lab-desk.net',
           hostname: 'zenbook');
       expect(err, isNull);
-      expect(f.calls.single.skip(1), [
-        'up',
-        '--setup-key', 'SK-1',
+      final args = f.calls.single.skip(1).toList();
+      expect(args.sublist(0, 2), ['up', '--setup-key-file']);
+      expect(args.sublist(3), [
         '--management-url', 'https://nb.lab-desk.net',
         '--hostname', 'zenbook',
         '--daemon-addr', 'npipe://labdesk-netbird',
       ]);
-      expect(f.calls.single.join(' '), isNot(contains('allow-server-ssh')));
+      expect(f.keyFileContents, 'SK-1');
+      expect(args.join(' '), isNot(contains('SK-1')),
+          reason: 'argv is readable by every local user');
+      expect(File(f.keyFilePath!).existsSync(), isFalse,
+          reason: 'the key file is gone once the daemon has answered');
+      expect(args.join(' '), isNot(contains('allow-server-ssh')));
     });
 
     test('a failed up returns the daemon\'s own words', () async {

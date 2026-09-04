@@ -168,6 +168,7 @@ class NetworkScreen extends StatelessWidget {
         ],
       ),
     );
+    controller.dispose();
     final trimmed = name?.trim() ?? '';
     if (trimmed.isNotEmpty) onCreate?.call(trimmed);
   }
@@ -201,7 +202,11 @@ class _LabnetCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final me = labnet.members.where((m) => m.deviceId == thisMachineId);
-    final iAmMember = me.isNotEmpty && me.first.approved;
+    // Until this machine is known, no row can be told apart from it, so
+    // neither Leave nor Remove is offered: Remove on the wrong row would
+    // remove this machine from its own labnet.
+    final iAmMember =
+        thisMachineId.isNotEmpty && me.isNotEmpty && me.first.approved;
     final approved = labnet.members.where((m) => m.approved).length;
     return _Card(
       title: labnet.name,
@@ -238,6 +243,7 @@ class _LabnetCard extends StatelessWidget {
                   ),
                   if (labnet.owner &&
                       onRemove != null &&
+                      thisMachineId.isNotEmpty &&
                       m.deviceId != thisMachineId) ...[
                     const SizedBox(width: 16),
                     _TextAction(

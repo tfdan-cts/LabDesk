@@ -1257,7 +1257,11 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   /// client's own heartbeat. The account is what both halves of the read are
   /// scoped by, so a console with nobody signed in polls nothing.
   Future<void> _pollInbox() async {
-    if (!mounted || !_signedIn) return;
+    if (!mounted) return;
+    if (!_signedIn) {
+      _forgetAccountData();
+      return;
+    }
     try {
       // First, because it is the map every labnet call names a machine
       // through and the inbox is rendered against it.
@@ -1271,9 +1275,27 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
       });
       await _maybeAskConsent(inbox);
     } on OverlayBrokerException catch (e) {
-      // A sign-in that no longer holds is the account surface's to report.
-      if (!e.signInAgain && mounted) setState(() => _labnetError = e.message);
+      // A sign-in that no longer holds is the account surface's to report,
+      // and the previous account's machines must not stay on screen.
+      if (e.signInAgain) {
+        _forgetAccountData();
+      } else if (mounted) {
+        setState(() => _labnetError = e.message);
+      }
     } catch (_) {}
+  }
+
+  /// Drops everything read under an account that no longer holds, so a
+  /// revoked session or a sign-out never leaves another account's labnets,
+  /// member addresses or machine names on screen or in the peer map.
+  void _forgetAccountData() {
+    if (!mounted) return;
+    if (_orgMachines.isEmpty && _inbox == LabnetInbox.empty) return;
+    setState(() {
+      _orgMachines = const <OrgMachine>[];
+      _inbox = LabnetInbox.empty;
+      _labnetError = '';
+    });
   }
 
   /// The one prompt: asked once per machine, only while signed in, never
@@ -1286,7 +1308,6 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         enrolled: inbox.enrolled || _labnet.phase == LabnetPhase.on)) {
       return;
     }
-    await bind.mainSetLocalOption(key: _kConsentKey, value: 'asked');
     if (!mounted) return;
     final yes = await showDialog<bool>(
       context: context,
@@ -1310,7 +1331,11 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
         ],
       ),
     );
-    if (yes == true) _enableLabnet();
+    // Recorded once the person has actually answered, so a console closed
+    // while the first poll was in flight does not spend the only prompt.
+    if (yes == null) return;
+    await bind.mainSetLocalOption(key: _kConsentKey, value: 'asked');
+    if (yes) _enableLabnet();
   }
 
   Widget _dialogAction(String label, VoidCallback onTap) => MouseRegion(
@@ -1339,6 +1364,14 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   Future<void> _disableLabnet() async {
     if (_labnet.phase == LabnetPhase.working) return;
     await _enrolment.disable();
+    // Every per-peer hint the session service wrote goes with the labnet, or
+    // the next connect to each of those peers dials a dead address first.
+    final opts = jsonDecode(bind.mainGetOptionsSync()) as Map<String, dynamic>;
+    for (final k in opts.keys) {
+      if (k.startsWith(kOverlayAddrOption) || k.startsWith(kOverlayPkOption)) {
+        await bind.mainSetOption(key: k, value: '');
+      }
+    }
     await _pollInbox();
   }
 

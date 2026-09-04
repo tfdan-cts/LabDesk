@@ -90,4 +90,18 @@ void main() {
     expect(s.hasGrants, isTrue);
     expect(w.log.where((l) => l.startsWith('broker DELETE')), isEmpty);
   });
+
+  test('a session never seen open is released once the window has passed, and its hints cleared', () async {
+    final w = _World();
+    final s = w.session();
+    await s.prepare('1');
+    for (var i = 0; i < OverlaySession.unseenPollLimit - 1; i++) {
+      await s.noteOpenSessions([]);
+    }
+    expect(s.hasGrants, isTrue, reason: 'one poll short of the window it is still waiting');
+    await s.noteOpenSessions([]);
+    expect(s.hasGrants, isFalse);
+    expect(w.options, {'labdesk-overlay-addr-1': '', 'labdesk-overlay-pk-1': ''});
+    expect(w.log.where((l) => l == 'broker DELETE /api/overlay/session/s1'), hasLength(1));
+  });
 }
