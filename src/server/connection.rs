@@ -100,6 +100,7 @@ const SWITCH_SIDES_UUID_TTL: Duration = Duration::from_secs(10);
 lazy_static::lazy_static! {
     static ref SWITCH_SIDES_UUID: Arc::<Mutex<HashMap<String, (Instant, uuid::Uuid)>>> = Default::default();
     static ref PENDING_SWITCH_SIDES_UUID: Arc::<Mutex<HashMap<String, (Instant, uuid::Uuid, bool)>>> = Default::default();
+    static ref PENDING_TICKETS: Arc::<Mutex<Vec<PendingTicket>>> = Default::default();
 }
 
 #[cfg(target_os = "windows")]
@@ -272,6 +273,9 @@ enum ConnAuditPrimaryAuth {
     TemporaryPassword = 2,
     PermanentPassword = 3,
     SwitchSides = 4,
+    /// A connect ticket minted by lab-desk.net with the session and claimed
+    /// once here (src/labdesk/ticket.rs). LabDesk's own value.
+    ConnectTicket = 5,
 }
 
 impl ConnAuditPrimaryAuth {
@@ -2477,6 +2481,14 @@ impl Connection {
     }
 
     fn validate_password(&mut self, allow_permanent_password: bool) -> bool {
+        // A connect ticket, before any stored password: the presented value is
+        // sha256(H || salt) for a ticket issued to this connection's peer id,
+        // and a second use of the same ticket is refused like a wrong password.
+        if claim_pending_ticket(&self.lr.my_id, |h| self.validate_password_plain(h)) {
+            log::info!("Connect ticket claimed by {}", self.lr.my_id);
+            self.set_conn_audit_primary_auth(ConnAuditPrimaryAuth::ConnectTicket);
+            return true;
+        }
         if password::temporary_enabled() {
             let password = password::temporary_password();
             if self.validate_password_plain(&password) {
@@ -6180,6 +6192,63 @@ pub fn claim_pending_switch_sides_uuid(id: &str, uuid: &uuid::Uuid) -> bool {
     false
 }
 
+/// A connect ticket the daemon delivered over IPC (src/labdesk/ticket.rs):
+/// the controller peer id it was issued to and `H`, the SHA-256 hex of the
+/// secret the controller was handed once. Built on the same shape as
+/// `PENDING_SWITCH_SIDES_UUID`: inserted once per ticket id, claimed once,
+/// never for another peer id, and kept until `expires_at` so a replay cannot
+/// claim it a second time.
+#[derive(Debug, Clone)]
+struct PendingTicket {
+    id: String,
+    controller_peer_id: String,
+    secret_hash: String,
+    expires_at: i64,
+    claimed: bool,
+}
+
+fn retain_live_tickets(tickets: &mut Vec<PendingTicket>) {
+    let now = hbb_common::get_time() / 1000;
+    tickets.retain(|t| t.expires_at > now);
+}
+
+/// Insert once per ticket id. `false` when that id is already held.
+pub fn insert_pending_ticket(
+    id: String,
+    controller_peer_id: String,
+    secret_hash: String,
+    expires_at: i64,
+) -> bool {
+    let mut tickets = PENDING_TICKETS.lock().unwrap();
+    retain_live_tickets(&mut tickets);
+    if tickets.iter().any(|t| t.id == id) {
+        return false;
+    }
+    tickets.push(PendingTicket {
+        id,
+        controller_peer_id,
+        secret_hash,
+        expires_at,
+        claimed: false,
+    });
+    true
+}
+
+/// Claim the first unclaimed, unexpired ticket issued to `controller_peer_id`
+/// whose `H` satisfies `matches` (the login's own password check). Never for
+/// another peer id, never twice.
+pub fn claim_pending_ticket(controller_peer_id: &str, matches: impl Fn(&str) -> bool) -> bool {
+    let mut tickets = PENDING_TICKETS.lock().unwrap();
+    retain_live_tickets(&mut tickets);
+    for t in tickets.iter_mut() {
+        if t.controller_peer_id == controller_peer_id && !t.claimed && matches(&t.secret_hash) {
+            t.claimed = true;
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 // IPC bootstrap summary:
 // - Resolve target CM socket (headless/non-headless, optional UID-scoped path on Linux).
@@ -7134,6 +7203,45 @@ mod test {
         assert!(!has_pending_switch_sides_uuid(&id, &uuid));
         assert!(!claim_pending_switch_sides_uuid(&id, &uuid));
         assert!(!insert_pending_switch_sides_uuid(id, uuid));
+    }
+
+    /// `cargo test claim_once`: the ticket map behaves like the switch-sides
+    /// map above, keyed by the controller's peer id.
+    #[test]
+    fn test_pending_ticket_claim_once_per_ticket_never_for_another_peer() {
+        let peer = uuid::Uuid::new_v4().to_string();
+        let tid = |n: u8| format!("{}-{}", peer, n);
+        let live = hbb_common::get_time() / 1000 + 120;
+        assert!(insert_pending_ticket(tid(1), peer.clone(), "h1".into(), live));
+        assert!(
+            !insert_pending_ticket(tid(1), peer.clone(), "h1".into(), live),
+            "once per ticket id"
+        );
+        assert!(
+            !claim_pending_ticket("other-peer", |h| h == "h1"),
+            "never for another peer id"
+        );
+        assert!(
+            !claim_pending_ticket(&peer, |h| h == "wrong"),
+            "the presented password has to match H"
+        );
+        assert!(claim_pending_ticket(&peer, |h| h == "h1"));
+        assert!(!claim_pending_ticket(&peer, |h| h == "h1"), "claimed once");
+        assert!(
+            !insert_pending_ticket(tid(1), peer.clone(), "h1".into(), live),
+            "a claimed id stays known until it expires, so a replay mints nothing"
+        );
+        // A ticket past its expiry is never claimed.
+        let expired = hbb_common::get_time() / 1000 - 1;
+        assert!(insert_pending_ticket(tid(2), peer.clone(), "h2".into(), expired));
+        assert!(!claim_pending_ticket(&peer, |h| h == "h2"));
+        // Two live tickets for one peer: each claimed once, in either order.
+        assert!(insert_pending_ticket(tid(3), peer.clone(), "h3".into(), live));
+        assert!(insert_pending_ticket(tid(4), peer.clone(), "h4".into(), live));
+        assert!(claim_pending_ticket(&peer, |h| h == "h4"));
+        assert!(!claim_pending_ticket(&peer, |h| h == "h4"));
+        assert!(claim_pending_ticket(&peer, |h| h == "h3"));
+        assert!(!claim_pending_ticket(&peer, |h| h == "h3"));
     }
 
     #[test]

@@ -39,6 +39,37 @@ wrong, the correction is recorded here rather than left to be rediscovered.
 3. WP1's migration number (section 9). 0003 was already taken by the organization migration, so the
    indexes ship as 0008. drizzle-kit reports no pending schema changes, and wrangler lists 0002
    through 0008 as pending on the remote.
+
+4. A fleet book's guid is its fleet id (section 1.2, recorded from the phase 1 contracts, section
+   4). `ab_book.kind = 'fleet'` rows are not written; `book()` in `src/worker/routes/ab.ts` decides
+   the kind from the guid, and `ab_book` holds personal books only.
+
+5. The Windows daemon did not re-read its config (phase 1 contracts, section 7). `CONFIG2` is a
+   lazy_static loaded once per process, and on Windows `--server` and `--service` are two
+   LocalSystem processes with nothing syncing them, so the `labdesk-selfheal` switch flipped from
+   the console never reached a running daemon. As built: `selfheal::enabled()` parses the daemon's
+   own config file on every tick on every platform, and `start()` spawns the thread whether or not
+   the switch is on, so a daemon started with it off still honours a later flip.
+
+6. ATA power-on hours (section 5.4). Measured on a Seagate ST1000VX008 on homebox, 2026-09-05: the
+   raw 48 bit value of attribute 9 carries a second counter in its upper two bytes (they moved
+   between two reads seconds apart) and reads as 71 trillion hours. `ata::summarize` takes the low
+   24 bits. The capture is `src/labdesk/disk/fixtures/ata_attrs_st1000vx008.bin`.
+
+7. The NVMe hwmon path (section 5.2). The plan names `/sys/class/nvme/nvmeN/device/hwmon*`; on
+   kernel 7.0 the hwmon device is registered on the controller itself,
+   `/sys/class/nvme/nvme0/hwmon1`, and `device/hwmon*` does not exist. Both are searched now. Read
+   from sysfs that the plan did not list: `firmware_rev` on the controller and `device/rev` on a
+   SCSI disk, both of which had been arriving at the server as null. The Micron 3400 log page from
+   the same machine is `fixtures/nvme_health_micron3400.bin`; both platform calls answered on real
+   hardware, and both refused without root, as `Unreadable` and never `Ok`.
+
+8. Linux `active_user` tools (phase 1 contracts, section 1). The two entries are `loginctl`
+   commands aimed at another user's sessions, which polkit refuses to anyone but root, so on Linux
+   the daemon runs them itself with the seat0 user filled into the `{active_user}` token from
+   `get_active_username()`. `run_as_user` serves Windows and macOS through `labdesk --labdesk-tool
+   <id>`; on Windows the exit status of that launch is not observed (`LaunchProcessWin` hands back
+   no handle) and the job result says so in its output.
 -->
 
 <!--

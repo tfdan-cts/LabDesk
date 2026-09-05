@@ -376,6 +376,15 @@ pub enum Data {
     Labnet(crate::labdesk::labnet::LabnetRequest),
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     LabnetResult(Result<String, String>),
+    /// connect ticket: handed by the daemon to the `--server` that answers
+    /// logins (src/labdesk/ticket.rs) over the main channel, and claimed once
+    /// in src/server/connection.rs. Answered with `Empty`.
+    ConnectTicket {
+        id: String,
+        controller_peer_id: String,
+        secret_hash: String,
+        expires_at: i64,
+    },
     #[cfg(target_os = "windows")]
     ClipboardFile(ClipboardFile),
     ClipboardFileEnabled(bool),
@@ -1031,6 +1040,17 @@ async fn handle(data: Data, stream: &mut Connection) {
                 .await
                 .unwrap_or_else(|_| Err("The labnet request was dropped".to_owned()));
             allow_err!(stream.send(&Data::LabnetResult(answer)).await);
+        }
+        Data::ConnectTicket {
+            id,
+            controller_peer_id,
+            secret_hash,
+            expires_at,
+        } => {
+            if !crate::server::insert_pending_ticket(id, controller_peer_id, secret_hash, expires_at) {
+                log::warn!("A connect ticket was delivered twice; keeping the first");
+            }
+            allow_err!(stream.send(&Data::Empty).await);
         }
         Data::SyncConfig(Some(configs)) => {
             let (config, config2) = *configs;

@@ -1,0 +1,422 @@
+// The per-adapter network view: the `net.adapters` attribute.
+//
+// The sampler's sysinfo fork (`rustdesk-org/sysinfo`, branch `rlim_max`)
+// offers a name, a MAC and the two byte counters per interface and nothing
+// else, so link state and addresses come from the operating system here:
+// `getifaddrs` on Linux and macOS through the `libc` that `hbb_common`
+// re-exports, `operstate` from sysfs on Linux. Windows needs
+// `GetAdaptersAddresses`, which needs `Win32_NetworkManagement_IpHelper` in
+// the `windows` crate's features; that feature lands as its own commit first
+// (section 6 of the phase 1 contracts, the way WP10 landed its two), and until
+// the call is written against it the Windows daemon sends no `net.adapters`
+// at all rather than an empty list that would read as "no adapters".
+//
+// The walk is the only unsafe code; `collect` is the pure fold over what it
+// found and is what the tests drive.
+
+use hbb_common::sysinfo::Networks;
+use std::collections::BTreeMap;
+
+/// `machine_attr.value` is at most 4 KiB.
+pub const VALUE_LIMIT: usize = 4096;
+/// The netbird interface `src/labdesk/labnet.rs::netbird_args` names.
+const OVERLAY_INTERFACE: &str = "labdesk-netbird";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Address {
+    pub addr: String,
+    pub prefix: u8,
+    pub family: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Adapter {
+    pub name: String,
+    pub up: bool,
+    pub mac: String,
+    pub addresses: Vec<Address>,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    pub kind: &'static str,
+}
+
+/// One `getifaddrs` entry, reduced to what the fold needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawEntry {
+    pub name: String,
+    pub loopback: bool,
+    /// Link state as the platform reports it for this entry.
+    pub up: bool,
+    pub physical: bool,
+    pub address: Option<Address>,
+}
+
+/// Fold the entries (one per address, several per interface) into one
+/// adapter per interface, loopback dropped, sorted by name, with the counters
+/// and MAC from the sampler's `Networks`.
+pub fn collect(entries: Vec<RawEntry>, counters: &BTreeMap<String, (String, u64, u64)>) -> Vec<Adapter> {
+    let mut by_name: BTreeMap<String, Adapter> = BTreeMap::new();
+    for entry in entries {
+        if entry.loopback {
+            continue;
+        }
+        let (mac, rx, tx) = counters
+            .get(&entry.name)
+            .cloned()
+            .unwrap_or_else(|| (String::new(), 0, 0));
+        let kind = if entry.name == OVERLAY_INTERFACE {
+            "overlay"
+        } else if entry.physical {
+            "physical"
+        } else {
+            "other"
+        };
+        let adapter = by_name.entry(entry.name.clone()).or_insert_with(|| Adapter {
+            name: entry.name.clone(),
+            up: entry.up,
+            mac,
+            addresses: Vec::new(),
+            rx_bytes: rx,
+            tx_bytes: tx,
+            kind,
+        });
+        if let Some(address) = entry.address {
+            if !adapter.addresses.contains(&address) {
+                adapter.addresses.push(address);
+            }
+        }
+    }
+    by_name.into_values().collect()
+}
+
+/// The attribute value: compact JSON, at most `VALUE_LIMIT` bytes. Over the
+/// bound, adapters are dropped from the end of the (name-sorted) list until it
+/// fits, so a machine with hundreds of veth interfaces still reports its first
+/// ones rather than nothing.
+pub fn to_value(adapters: &[Adapter]) -> String {
+    let json = |list: &[Adapter]| {
+        serde_json::Value::Array(
+            list.iter()
+                .map(|a| {
+                    serde_json::json!({
+                        "name": a.name,
+                        "up": a.up,
+                        "mac": a.mac,
+                        "addresses": a.addresses.iter().map(|x| serde_json::json!({
+                            "addr": x.addr, "prefix": x.prefix, "family": x.family,
+                        })).collect::<Vec<_>>(),
+                        "rxBytes": a.rx_bytes,
+                        "txBytes": a.tx_bytes,
+                        "kind": a.kind,
+                    })
+                })
+                .collect(),
+        )
+        .to_string()
+    };
+    let mut keep = adapters.len();
+    loop {
+        let text = json(&adapters[..keep]);
+        if text.len() <= VALUE_LIMIT || keep == 0 {
+            return text;
+        }
+        keep -= 1;
+    }
+}
+
+/// `value` with its byte counters zeroed: what "changed" means for the
+/// attribute, since the counters move on every sample and would otherwise
+/// make every flush a change. Computed from the value rather than the
+/// adapters so that a list `to_value` cut at the bound compares against what
+/// was actually sent.
+pub fn shape_of_value(value: &str) -> String {
+    let Ok(mut list) = serde_json::from_str::<serde_json::Value>(value) else {
+        return value.to_owned();
+    };
+    if let Some(entries) = list.as_array_mut() {
+        for entry in entries {
+            entry["rxBytes"] = 0.into();
+            entry["txBytes"] = 0.into();
+        }
+    }
+    list.to_string()
+}
+
+/// The counters the sampler holds, keyed by interface name:
+/// `(mac, rx_bytes, tx_bytes)`.
+pub fn counters(networks: &Networks) -> BTreeMap<String, (String, u64, u64)> {
+    networks
+        .list()
+        .iter()
+        .map(|(name, data)| {
+            (
+                name.clone(),
+                (
+                    data.mac_address().to_string(),
+                    data.total_received(),
+                    data.total_transmitted(),
+                ),
+            )
+        })
+        .collect()
+}
+
+/// Every adapter, or `None` where this build cannot enumerate them.
+pub fn adapters(networks: &Networks) -> Option<Vec<Adapter>> {
+    let entries = walk()?;
+    Some(collect(entries, &counters(networks)))
+}
+
+pub fn prefix_v4(mask: u32) -> u8 {
+    mask.count_ones() as u8
+}
+
+pub fn prefix_v6(mask: [u8; 16]) -> u8 {
+    mask.iter().map(|b| b.count_ones() as u8).sum()
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn walk() -> Option<Vec<RawEntry>> {
+    use hbb_common::libc;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
+    if unsafe { libc::getifaddrs(&mut head) } != 0 {
+        return None;
+    }
+    let mut entries = Vec::new();
+    let mut cursor = head;
+    while !cursor.is_null() {
+        let entry = unsafe { &*cursor };
+        cursor = entry.ifa_next;
+        if entry.ifa_name.is_null() {
+            continue;
+        }
+        let name = unsafe { std::ffi::CStr::from_ptr(entry.ifa_name) }
+            .to_string_lossy()
+            .into_owned();
+        let flags = entry.ifa_flags as i32;
+        let address = if entry.ifa_addr.is_null() {
+            None
+        } else {
+            let family = unsafe { (*entry.ifa_addr).sa_family } as i32;
+            if family == libc::AF_INET {
+                let sa = unsafe { &*(entry.ifa_addr as *const libc::sockaddr_in) };
+                let mask = if entry.ifa_netmask.is_null() {
+                    0
+                } else {
+                    unsafe { (*(entry.ifa_netmask as *const libc::sockaddr_in)).sin_addr.s_addr }
+                };
+                Some(Address {
+                    addr: Ipv4Addr::from(u32::from_be(sa.sin_addr.s_addr)).to_string(),
+                    prefix: prefix_v4(u32::from_be(mask)),
+                    family: "inet",
+                })
+            } else if family == libc::AF_INET6 {
+                let sa = unsafe { &*(entry.ifa_addr as *const libc::sockaddr_in6) };
+                let mask = if entry.ifa_netmask.is_null() {
+                    [0u8; 16]
+                } else {
+                    unsafe { (*(entry.ifa_netmask as *const libc::sockaddr_in6)).sin6_addr.s6_addr }
+                };
+                Some(Address {
+                    addr: Ipv6Addr::from(sa.sin6_addr.s6_addr).to_string(),
+                    prefix: prefix_v6(mask),
+                    family: "inet6",
+                })
+            } else {
+                None
+            }
+        };
+        entries.push(RawEntry {
+            loopback: flags & libc::IFF_LOOPBACK != 0,
+            up: link_up(&name, flags),
+            physical: is_physical(&name),
+            name,
+            address,
+        });
+    }
+    unsafe { libc::freeifaddrs(head) };
+    Some(entries)
+}
+
+/// Linux: `operstate`, the kernel's own word on the link. The `IFF_UP` flag
+/// is administrative and stays set on an unplugged cable.
+#[cfg(target_os = "linux")]
+fn link_up(name: &str, _flags: i32) -> bool {
+    std::fs::read_to_string(format!("/sys/class/net/{}/operstate", name))
+        .map(|s| s.trim() == "up")
+        .unwrap_or(false)
+}
+
+/// macOS: administratively up and with a carrier.
+#[cfg(target_os = "macos")]
+fn link_up(_name: &str, flags: i32) -> bool {
+    use hbb_common::libc;
+    flags & libc::IFF_UP != 0 && flags & libc::IFF_RUNNING != 0
+}
+
+/// Linux: an interface with a `device` link has hardware behind it.
+#[cfg(target_os = "linux")]
+fn is_physical(name: &str) -> bool {
+    std::path::Path::new(&format!("/sys/class/net/{}/device", name)).exists()
+}
+
+/// macOS: `en*` is the hardware family; `utun*`, `bridge*`, `awdl*` are not.
+#[cfg(target_os = "macos")]
+fn is_physical(name: &str) -> bool {
+    name.starts_with("en")
+}
+
+/// Windows: not enumerated yet, see the note at the top of the file.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn walk() -> Option<Vec<RawEntry>> {
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(name: &str, up: bool, physical: bool, address: Option<Address>) -> RawEntry {
+        RawEntry {
+            name: name.to_owned(),
+            loopback: name == "lo" || name == "lo0",
+            up,
+            physical,
+            address,
+        }
+    }
+
+    fn v4(addr: &str, prefix: u8) -> Address {
+        Address { addr: addr.into(), prefix, family: "inet" }
+    }
+
+    fn v6(addr: &str, prefix: u8) -> Address {
+        Address { addr: addr.into(), prefix, family: "inet6" }
+    }
+
+    #[test]
+    fn entries_fold_into_one_adapter_per_interface_without_loopback() {
+        let mut counters = BTreeMap::new();
+        counters.insert("eno2".to_owned(), ("3c:ec:ef:d9:cc:ad".to_owned(), 156_122_012u64, 9_000u64));
+        counters.insert("tailscale0".to_owned(), ("".to_owned(), 5u64, 6u64));
+        counters.insert("lo".to_owned(), ("00:00:00:00:00:00".to_owned(), 1u64, 1u64));
+        let adapters = collect(
+            vec![
+                // getifaddrs yields the AF_PACKET entry first, with no address.
+                entry("tailscale0", false, false, None),
+                entry("lo", true, false, Some(v4("127.0.0.1", 8))),
+                entry("eno2", true, true, None),
+                entry("eno2", true, true, Some(v4("10.1.10.110", 24))),
+                entry("eno2", true, true, Some(v6("fe80::ab85:c576:989e:198b", 64))),
+                entry("eno2", true, true, Some(v4("10.1.10.110", 24))),
+                entry("tailscale0", false, false, Some(v4("100.89.139.104", 32))),
+                entry("labdesk-netbird", true, false, Some(v4("100.64.0.7", 16))),
+            ],
+            &counters,
+        );
+        assert_eq!(adapters.len(), 3, "loopback is dropped");
+        assert_eq!(adapters[0].name, "eno2");
+        assert_eq!(adapters[0].mac, "3c:ec:ef:d9:cc:ad");
+        assert_eq!(adapters[0].rx_bytes, 156_122_012);
+        assert_eq!(adapters[0].tx_bytes, 9_000);
+        assert_eq!(adapters[0].kind, "physical");
+        assert!(adapters[0].up);
+        assert_eq!(
+            adapters[0].addresses,
+            vec![v4("10.1.10.110", 24), v6("fe80::ab85:c576:989e:198b", 64)],
+            "a repeated address is listed once"
+        );
+        assert_eq!(adapters[1].name, "labdesk-netbird");
+        assert_eq!(adapters[1].kind, "overlay");
+        assert_eq!(adapters[2].name, "tailscale0");
+        assert_eq!(adapters[2].kind, "other");
+        assert!(!adapters[2].up);
+        assert_eq!(adapters[2].mac, "", "an interface the sampler has no MAC for");
+    }
+
+    #[test]
+    fn the_value_is_the_contract_shape_and_stays_inside_the_column() {
+        let adapters = vec![Adapter {
+            name: "eth0".into(),
+            up: true,
+            mac: "aa:bb:cc:dd:ee:ff".into(),
+            addresses: vec![v4("192.168.1.20", 24), v6("fe80::1", 64)],
+            rx_bytes: 123456789,
+            tx_bytes: 23456789,
+            kind: "physical",
+        }];
+        let value: serde_json::Value = serde_json::from_str(&to_value(&adapters)).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!([{
+                "name": "eth0", "up": true, "mac": "aa:bb:cc:dd:ee:ff",
+                "addresses": [
+                    { "addr": "192.168.1.20", "prefix": 24, "family": "inet" },
+                    { "addr": "fe80::1", "prefix": 64, "family": "inet6" }
+                ],
+                "rxBytes": 123456789, "txBytes": 23456789, "kind": "physical"
+            }])
+        );
+        // Hundreds of veth interfaces: the value is cut at the column bound
+        // by whole adapters from the end, and the first ones survive.
+        let many: Vec<Adapter> = (0..400)
+            .map(|n| Adapter {
+                name: format!("veth{:04}", n),
+                up: true,
+                mac: "aa:bb:cc:dd:ee:ff".into(),
+                addresses: vec![],
+                rx_bytes: 0,
+                tx_bytes: 0,
+                kind: "other",
+            })
+            .collect();
+        let value = to_value(&many);
+        assert!(value.len() <= VALUE_LIMIT, "{}", value.len());
+        let kept: Vec<serde_json::Value> = serde_json::from_str(&value).unwrap();
+        assert!(kept.len() > 20 && kept.len() < 400);
+        assert_eq!(kept[0]["name"], "veth0000");
+        assert_eq!(to_value(&[]), "[]");
+    }
+
+    #[test]
+    fn the_shape_ignores_the_counters_and_nothing_else() {
+        let a = |rx: u64, up: bool| {
+            vec![Adapter {
+                name: "eth0".into(),
+                up,
+                mac: "aa".into(),
+                addresses: vec![v4("10.0.0.1", 24)],
+                rx_bytes: rx,
+                tx_bytes: rx * 2,
+                kind: "physical",
+            }]
+        };
+        assert_eq!(shape_of_value(&to_value(&a(1, true))), shape_of_value(&to_value(&a(999, true))));
+        assert_ne!(shape_of_value(&to_value(&a(1, true))), shape_of_value(&to_value(&a(1, false))));
+        assert_eq!(shape_of_value("not json"), "not json");
+    }
+
+    #[test]
+    fn prefixes_are_counted_from_the_masks() {
+        assert_eq!(prefix_v4(0xFFFF_FF00), 24);
+        assert_eq!(prefix_v4(0xFFFF_FFFF), 32);
+        assert_eq!(prefix_v4(0), 0);
+        let mut m = [0u8; 16];
+        m[..8].fill(0xFF);
+        assert_eq!(prefix_v6(m), 64);
+        assert_eq!(prefix_v6([0xFF; 16]), 128);
+    }
+
+    /// The walk itself, on the CI runner: it must not fail, must drop
+    /// loopback, and must find at least the runner's own interface.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn the_walk_finds_this_machines_interfaces() {
+        let entries = walk().expect("getifaddrs answers");
+        assert!(entries.iter().any(|e| e.loopback), "every host has a loopback");
+        let adapters = collect(entries, &BTreeMap::new());
+        assert!(adapters.iter().all(|a| a.name != "lo" && a.name != "lo0"));
+        assert!(!adapters.is_empty());
+    }
+}

@@ -276,6 +276,52 @@ the daemon is NetBird; `overlay_broker.dart` speaks the lab-desk.net routes;
 wires. On the Rust side `_start` in `src/client.rs` tries the address hint, and
 `direct_server` in `src/rendezvous_mediator.rs` honours `labdesk-direct-bind`.
 
+## What the service does on its own
+
+Three things run in the privileged service (`--service`) with no console open, and the console
+only reads their results.
+
+**Jobs.** A job is one entry of the compiled tool catalog, `src/labdesk/tools.json`, run with the
+parameters the entry lists and nothing else: `service_start`, `service_stop`, `service_restart`
+(a unit name), `process_kill` (a pid), `power_restart`, `power_shutdown`, `power_logoff`,
+`power_lock` and `flush_dns`. The same file sits in the Worker, byte for byte, so what the server
+can ask for and what the agent will run is one list. The service picks jobs up in the answer to
+its telemetry uplink, runs each entry's argv directly (never through a shell; a parameter is a
+whole argument or the job is refused as `bad_params`, and a value beginning with `-` is refused
+whatever the entry says), and reports the exit code and the first 16 KiB of output on the next
+uplink. A job the service already ran is refused `already_ran` from a ledger beside the identity
+file, and one past its expiry is refused `expired`. Seven of the nine entries run as the service;
+a technician's request for one of those waits for an owner's approval on lab-desk.net. The two
+that run as the logged-in user (`power_logoff`, `power_lock`) go through `labdesk --labdesk-tool
+<id>` in that user's session on Windows and macOS, and on Linux run in the service against the
+seat0 user, because `loginctl` accepts that from root only.
+
+**Disk health.** `labdesk --disk-health`, run as an administrator or root, prints the drives as
+the service would report them, verdict and source included. `unreadable` with source `none` or
+`sysfs` means no call answered, which is what an unprivileged run, a USB bridge or a virtual
+disk produces; it is never rendered as healthy.
+
+**Self-healing.** The switch is the option `labdesk-selfheal` (`Y` or absent), set from the
+console like any other option, plus `labdesk-selfheal-probe-seconds`,
+`labdesk-selfheal-fail-threshold` and `labdesk-selfheal-max-restarts-per-day`. The service reads
+the switch from its config file on every tick, so a flip takes effect within one probe interval
+on every platform, Windows included, and a service started with it off still honours it. What
+the service is actually doing travels as the machine attribute `net.reachability`
+(`{"internet":"online","at":...,"probe":"tcp443","selfheal":"watching"}`; `selfheal` is `off`,
+`watching`, `cycling`, `restarting` or `holdoff`), and the console renders that value beside the
+switch rather than the option. While the switch is off the service still probes the internet
+once an hour so the verdict exists on every machine. The per-adapter view comes from the
+attribute `net.adapters` (name, link state, MAC, addresses, byte counters, `physical`, `overlay`
+or `other`), sent when anything but the counters changes and once an hour otherwise; the
+Windows service does not send it yet.
+
+**Connect tickets.** When the console opens a session over labnet, lab-desk.net mints a
+one-time ticket with it. The console stores the secret as `labdesk-ticket-<peer id>` beside the
+overlay address and the client spends it on the connect; the target's service receives the
+ticket's hash on its next uplink and hands it to the login process, which accepts it once for
+that controller and refuses a second use like a wrong password. Nothing about a ticket is stored
+on disk on either side, and it expires in two minutes.
+
 ## What the console does not show
 
 The console is a client-side interface. At HEAD the only things under `flutter/lib/` that speak

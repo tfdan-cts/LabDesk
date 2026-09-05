@@ -17,10 +17,13 @@
 
 use super::disk::{self, DiskHealth};
 use super::identity::{uplink_signed_msg, AgentIdentity};
+use super::selfheal::{self, Reachability};
 use super::spool::{
     ack_for, backoff_seconds, batch_window, flush_jitter_seconds, Ack, Spool, MAX_BATCH_BYTES,
     MAX_BATCH_LINES, MAX_BODY_BYTES,
 };
+use super::tools::{self, JobResult};
+use super::{netview, ticket};
 use hbb_common::{
     bail,
     config::Config,
@@ -29,6 +32,8 @@ use hbb_common::{
     tokio::time::{sleep, Instant},
     ResultType,
 };
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const SPOOL_FILE: &str = "agent-spool.jsonl";
@@ -102,6 +107,14 @@ async fn run() {
     // ingest stores it as `unreadable`, so it clears a verdict that would otherwise stand
     // forever behind a drive nobody can see any more.
     let mut disks: Option<Vec<DiskHealth>> = None;
+    // Results of jobs the server handed this machine, waiting for a batch to
+    // ride on. Filled by the job thread (`run_jobs`), drained here only once
+    // a batch that carried them is accepted.
+    let results: Arc<Mutex<Vec<JobResult>>> = Default::default();
+    // The two network attributes and what the server last acknowledged.
+    let mut attrs = Attrs::default();
+    // The collector's own probe, used only while self-healing is off.
+    let mut own_probe = Reachability::default();
     let mut failures = 0u32;
     log::info!(
         "[collector] Started: sampling every {}s, flushing every {}s offset by {}s",
@@ -135,18 +148,66 @@ async fn run() {
             let read = disk::gather();
             log::info!("[collector] Read health for {} disk(s)", read.len());
             disks = Some(read);
+            // Section 6 of the phase 1 contracts: while self-healing is off the
+            // collector probes on this cadence so the verdict exists on every
+            // machine; while it is on, the healer's tick is the source.
+            if selfheal::status().step.is_none() {
+                own_probe = Reachability {
+                    internet: Some(selfheal::probe_internet()),
+                    at: hbb_common::get_time() / 1000,
+                    step: None,
+                };
+            }
         }
 
         if now >= next_flush {
-            match flush(&mut identity, &spool, &sampler, sample_seconds, disks.as_deref()).await {
+            let reach = match selfheal::status() {
+                on if on.step.is_some() => on,
+                _ => own_probe,
+            };
+            let pending = attrs.pending(
+                hbb_common::get_time() / 1000,
+                netview::adapters(&sampler.networks).as_deref(),
+                reach,
+            );
+            let mut collect_now = false;
+            match flush(
+                &mut identity,
+                &spool,
+                &sampler,
+                sample_seconds,
+                disks.as_deref(),
+                &results,
+                &pending,
+            )
+            .await
+            {
                 // Only an accepted batch carried the disks away with it. `Ok(None)` is
                 // "nothing was owed", which means no request was made at all.
-                Ok(Some(Ack::Accepted)) => {
+                Ok(Some(Flushed { ack: Ack::Accepted, text, included })) => {
                     failures = 0;
                     disks = None;
+                    results.lock().unwrap().drain(..included.results);
+                    if included.attrs {
+                        attrs.sent(&pending, reach, hbb_common::get_time() / 1000);
+                    }
+                    let (jobs, now_please) = tools::jobs_in(&text);
+                    if !jobs.is_empty() {
+                        log::info!("[collector] The server handed this machine {} job(s)", jobs.len());
+                        run_jobs(jobs, results.clone());
+                    }
+                    collect_now = now_please;
+                    for t in ticket::tickets_in(&text) {
+                        match ticket::deliver(&t).await {
+                            Ok(()) => log::info!("[collector] Delivered connect ticket {}", t.id),
+                            Err(err) => {
+                                log::warn!("[collector] Ticket {} not delivered: {}", t.id, err)
+                            }
+                        }
+                    }
                 }
                 Ok(None) => failures = 0,
-                Ok(Some(Ack::Revoked)) => {
+                Ok(Some(Flushed { ack: Ack::Revoked, .. })) => {
                     // The org has revoked this machine. Stop collecting and take the
                     // history with us: what is on that disk is inventory about a customer
                     // who has said they are no longer a customer.
@@ -156,7 +217,7 @@ async fn run() {
                     }
                     return;
                 }
-                Ok(Some(Ack::Retry)) => failures = failures.saturating_add(1),
+                Ok(Some(Flushed { ack: Ack::Retry, .. })) => failures = failures.saturating_add(1),
                 Err(err) => {
                     log::warn!("[collector] Uplink failed: {}", err);
                     failures = failures.saturating_add(1);
@@ -178,8 +239,121 @@ async fn run() {
             }
             let wait = backoff_seconds(identity.flush_seconds(), failures);
             next_flush = Instant::now() + Duration::from_secs(wait);
+            // An answer carrying an urgent job asks for the result sooner than
+            // the cadence (section 2 of the phase 1 contracts).
+            if collect_now {
+                next_flush = Instant::now() + Duration::from_secs(tools::COLLECT_NOW_SECONDS);
+            }
         }
     }
+}
+
+lazy_static::lazy_static! {
+    /// One job thread at a time, so two answers arriving back to back cannot
+    /// race each other on the ledger.
+    static ref JOB_LOCK: Mutex<()> = Mutex::new(());
+}
+
+/// Run the jobs an answer carried, on a thread of their own so a job that
+/// takes its whole timeout does not stop the sampler.
+fn run_jobs(jobs: Vec<tools::Job>, results: Arc<Mutex<Vec<JobResult>>>) {
+    let spawned = std::thread::Builder::new()
+        .name("labdesk-jobs".to_owned())
+        .spawn(move || {
+            let _one_at_a_time = JOB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let mut ledger = tools::Ledger::open();
+            for job in jobs {
+                let now = hbb_common::get_time() / 1000;
+                let result = tools::execute(&job, &mut ledger, now);
+                match result.refused {
+                    Some(why) => log::info!("[collector] Job {} refused: {}", job.id, why),
+                    None => log::info!(
+                        "[collector] Job {} ({}) exited {:?}",
+                        job.id,
+                        job.tool_id,
+                        result.exit_code
+                    ),
+                }
+                results.lock().unwrap().push(result);
+            }
+        });
+    if let Err(err) = spawned {
+        log::warn!("[collector] Failed to spawn the job thread: {}", err);
+    }
+}
+
+/// The `attrs` member: what this machine last had acknowledged, and the rule
+/// for what goes into the next batch.
+///
+/// `net.adapters` goes when anything but its byte counters changed, and once
+/// an hour otherwise so the counters are refreshed; `net.reachability` goes on
+/// every change of verdict or ladder step and once an hour otherwise. Both
+/// rules keep the per-uplink attribute write, the single largest uncosted
+/// writer in the architecture's arithmetic (section 4.5), to about one row an
+/// hour per machine.
+#[derive(Default)]
+struct Attrs {
+    adapters_shape: Option<String>,
+    adapters_at: i64,
+    reach: Option<(Option<selfheal::Connectivity>, Option<selfheal::Step>)>,
+    reach_at: i64,
+}
+
+const ATTR_REFRESH: i64 = 3600;
+
+impl Attrs {
+    fn pending(
+        &self,
+        now: i64,
+        adapters: Option<&[netview::Adapter]>,
+        reach: Reachability,
+    ) -> BTreeMap<String, String> {
+        let mut out = BTreeMap::new();
+        if let Some(adapters) = adapters {
+            let value = netview::to_value(adapters);
+            let shape = netview::shape_of_value(&value);
+            if self.adapters_shape.as_deref() != Some(shape.as_str())
+                || now - self.adapters_at >= ATTR_REFRESH
+            {
+                out.insert("net.adapters".to_owned(), value);
+            }
+        }
+        if self.reach != Some((reach.internet, reach.step)) || now - self.reach_at >= ATTR_REFRESH {
+            out.insert("net.reachability".to_owned(), reach.to_value());
+        }
+        out
+    }
+
+    /// The server took `sent`; remember what it now holds.
+    fn sent(&mut self, sent: &BTreeMap<String, String>, reach: Reachability, now: i64) {
+        if let Some(value) = sent.get("net.adapters") {
+            // The shape of what was sent, recomputed from the value so the
+            // comparison in `pending` is against the same derivation.
+            self.adapters_shape = Some(netview::shape_of_value(value));
+            self.adapters_at = now;
+        }
+        if sent.contains_key("net.reachability") {
+            self.reach = Some((reach.internet, reach.step));
+            self.reach_at = now;
+        }
+    }
+}
+
+/// What one flush came to, beyond the acknowledgement: the answer text the
+/// jobs and tickets are read out of, and which optional members the body
+/// actually carried so the caller clears exactly those.
+struct Flushed {
+    ack: Ack,
+    text: String,
+    included: Included,
+}
+
+/// Which optional members `batch_body_with` fitted into the bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct Included {
+    disks: bool,
+    results: usize,
+    attrs: bool,
 }
 
 /// Load the agent identity, waiting for an administrator to run `--enrol` if need be.
@@ -209,7 +383,9 @@ async fn flush(
     sampler: &Sampler,
     sample_seconds: u64,
     disks: Option<&[DiskHealth]>,
-) -> ResultType<Option<Ack>> {
+    results: &Arc<Mutex<Vec<JobResult>>>,
+    attrs: &BTreeMap<String, String>,
+) -> ResultType<Option<Flushed>> {
     let lines = spool.read()?;
     let window = batch_window(&lines, MAX_BATCH_LINES, MAX_BATCH_BYTES);
     if window.dropped > 0 {
@@ -224,8 +400,18 @@ async fn flush(
     }
 
     let sent = &lines[window.dropped..window.consumed()];
-    let body = match batch_body(sampler.machine(), sent, sample_seconds, disks) {
-        Ok(body) => body,
+    // At most four results a batch, oldest first, so results never displace
+    // samples; the rest wait for the next one.
+    let owed: Vec<JobResult> = results
+        .lock()
+        .unwrap()
+        .iter()
+        .take(tools::RESULTS_PER_BATCH)
+        .cloned()
+        .collect();
+    let (body, included) =
+        match batch_body_with(sampler.machine(), sent, sample_seconds, disks, &owed, attrs) {
+            Ok(body) => body,
         Err(err) => {
             // Nothing in this window can be turned into a batch. Drop it for the same
             // reason an oversized line is dropped: left at the front it would wedge every
@@ -254,7 +440,11 @@ async fn flush(
             log::warn!("[collector] The server refused the batch: {} {}", status, text);
         }
     }
-    Ok(Some(ack))
+    Ok(Some(Flushed {
+        ack,
+        text,
+        included,
+    }))
 }
 
 /// The cadences the server named, as `(sampleSeconds, flushSeconds)`.
@@ -350,6 +540,22 @@ fn batch_body(
     step: u64,
     disks: Option<&[DiskHealth]>,
 ) -> ResultType<String> {
+    Ok(batch_body_with(machine, lines, step, disks, &[], &BTreeMap::new())?.0)
+}
+
+/// `batch_body` with the two members phase 1 added, `jobResults` and `attrs`,
+/// and the order things give way in when the body is over the bound: the
+/// disks first (a snapshot taken again in an hour), then the attrs (sent
+/// again next flush), then results from the newest down (they wait). The
+/// samples never give way.
+fn batch_body_with(
+    machine: serde_json::Value,
+    lines: &[String],
+    step: u64,
+    disks: Option<&[DiskHealth]>,
+    results: &[JobResult],
+    attrs: &BTreeMap<String, String>,
+) -> ResultType<(String, Included)> {
     // `Option` rather than a zero sentinel: the batch window is what the server
     // de-duplicates on, so a machine whose clock reads the epoch must report the epoch
     // rather than silently take the timestamp of a later sample.
@@ -375,31 +581,62 @@ fn batch_body(
         bail!("No readable samples in the batch");
     }
     let batch = serde_json::json!({ "from": from, "to": to, "step": step, "samples": samples });
-    let Some(disks) = disks else {
-        return Ok(serde_json::json!({ "machine": machine, "batch": batch }).to_string());
+    let build = |with: Included| {
+        let mut body = serde_json::json!({ "machine": machine, "batch": batch });
+        if with.disks {
+            if let Some(disks) = disks {
+                body["disks"] = disks.iter().map(disk_member).collect::<Vec<_>>().into();
+            }
+        }
+        if with.results > 0 {
+            body["jobResults"] = results[..with.results]
+                .iter()
+                .map(JobResult::to_json)
+                .collect::<Vec<_>>()
+                .into();
+        }
+        if with.attrs && !attrs.is_empty() {
+            body["attrs"] = serde_json::json!(attrs);
+        }
+        body.to_string()
     };
-    let with_disks = serde_json::json!({
-        "machine": machine,
-        "batch": batch,
-        "disks": disks.iter().map(disk_member).collect::<Vec<_>>(),
-    })
-    .to_string();
-    if with_disks.len() <= MAX_BODY_BYTES {
-        return Ok(with_disks);
+    let full = Included {
+        disks: disks.is_some(),
+        results: results.len(),
+        attrs: !attrs.is_empty(),
+    };
+    let text = build(full);
+    if text.len() <= MAX_BODY_BYTES {
+        return Ok((text, full));
     }
     // The samples are the ones that cannot wait: they are the only copy, they leave the
     // spool once this is accepted, and a body the server refuses for its size would be
     // rebuilt and refused on every flush from now on. The disks are a snapshot that is
-    // taken again in an hour, so they are what gets dropped. The member is dropped WHOLE
-    // rather than emptied: an empty member is the claim that this machine was asked and
-    // no drive answered, and a body that was merely too long has not made that claim.
+    // taken again in an hour, so they are what gets dropped first. The member is dropped
+    // WHOLE rather than emptied: an empty member is the claim that this machine was
+    // asked and no drive answered, and a body that was merely too long has not made
+    // that claim.
     log::warn!(
-        "[collector] Dropping {} disk reading(s) from a {} byte body over the {} byte bound",
-        disks.len(),
-        with_disks.len(),
+        "[collector] A {} byte body is over the {} byte bound; dropping the optional members",
+        text.len(),
         MAX_BODY_BYTES
     );
-    Ok(serde_json::json!({ "machine": machine, "batch": batch }).to_string())
+    let mut with = Included { disks: false, ..full };
+    loop {
+        let text = build(with);
+        if text.len() <= MAX_BODY_BYTES {
+            return Ok((text, with));
+        }
+        if with.attrs {
+            with.attrs = false;
+        } else if with.results > 0 {
+            with.results -= 1;
+        } else {
+            // Samples alone. The window is bounded at MAX_BATCH_BYTES, well
+            // under the body bound, so this is the floor and it fits.
+            return Ok((text, with));
+        }
+    }
 }
 
 /// One drive, as section 4.4's `disks` member carries it.
@@ -409,7 +646,7 @@ fn batch_body(
 /// the drive did not answer is `null` in place rather than absent or zero: `null` is
 /// stored as SQL NULL and rendered `--`, while a zero would be a measurement of a drive
 /// nobody could ask, which is the one thing this whole module exists to prevent.
-fn disk_member(disk: &DiskHealth) -> serde_json::Value {
+pub(crate) fn disk_member(disk: &DiskHealth) -> serde_json::Value {
     serde_json::json!({
         "serialHash": disk.serial_hash,
         "deviceIndex": disk.device_index,
@@ -1003,6 +1240,135 @@ mod tests {
         assert!(body.len() <= MAX_BODY_BYTES, "{} bytes", body.len());
         let body: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(body["disks"].as_array().unwrap().len(), 1);
+    }
+
+    fn result(id: &str, output: &str) -> JobResult {
+        JobResult {
+            id: id.to_owned(),
+            started_at: 1788480123,
+            finished_at: 1788480125,
+            exit_code: Some(0),
+            output: output.to_owned(),
+            refused: None,
+        }
+    }
+
+    #[test]
+    fn test_job_results_and_attrs_ride_the_batch_by_name() {
+        let lines = ["[1788480000,7,42,55,100,200]".to_owned()];
+        let mut attrs = BTreeMap::new();
+        attrs.insert("net.reachability".to_owned(), r#"{"internet":"online"}"#.to_owned());
+        let (text, included) = batch_body_with(
+            machine(),
+            &lines,
+            60,
+            None,
+            &[result("2f1c", "ok\n")],
+            &attrs,
+        )
+        .unwrap();
+        assert_eq!(included, Included { disks: false, results: 1, attrs: true });
+        let body: serde_json::Value = serde_json::from_str(&text).unwrap();
+        // Section 2 of the phase 1 contracts, member by member.
+        let r = &body["jobResults"][0];
+        assert_eq!(r["id"], "2f1c");
+        assert_eq!(r["startedAt"], 1788480123);
+        assert_eq!(r["finishedAt"], 1788480125);
+        assert_eq!(r["exitCode"], 0);
+        assert_eq!(r["output"], "ok\n");
+        assert_eq!(r["refused"], serde_json::Value::Null);
+        assert_eq!(r["outputSha256"].as_str().unwrap().len(), 64);
+        // Section 6: a string value per key, not a nested object.
+        assert_eq!(body["attrs"]["net.reachability"], r#"{"internet":"online"}"#);
+        assert_eq!(body["batch"]["samples"], serde_json::json!([[7, 42, 55, 100, 200]]));
+        // Neither member is present when there is nothing to carry.
+        let (text, included) = batch_body_with(machine(), &lines, 60, None, &[], &BTreeMap::new()).unwrap();
+        assert_eq!(included, Included::default());
+        let body: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(body.get("jobResults").is_none());
+        assert!(body.get("attrs").is_none());
+    }
+
+    #[test]
+    fn test_over_the_bound_the_disks_go_first_then_attrs_then_results_never_samples() {
+        let lines = ["[1788480000,7,42,55,100,200]".to_owned()];
+        let disks = [unread_disk(&"c".repeat(64), disk::Verdict::Unreadable, disk::Source::None)];
+        let mut attrs = BTreeMap::new();
+        attrs.insert("net.adapters".to_owned(), "x".repeat(4000));
+        // Four results at the output bound: 64 KiB of output alone, which is
+        // the whole body budget.
+        let big: Vec<JobResult> = (0..4)
+            .map(|n| result(&format!("r{}", n), &"o".repeat(tools::OUTPUT_LIMIT)))
+            .collect();
+        let (text, included) = batch_body_with(machine(), &lines, 60, Some(&disks), &big, &attrs).unwrap();
+        assert!(text.len() <= MAX_BODY_BYTES, "{}", text.len());
+        assert!(!included.disks, "the disks give way first");
+        assert!(!included.attrs, "then the attrs");
+        assert!(included.results < 4 && included.results >= 2, "then results, newest down: {}", included.results);
+        let body: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(body["jobResults"].as_array().unwrap().len(), included.results);
+        assert_eq!(body["jobResults"][0]["id"], "r0", "oldest first survives");
+        assert_eq!(body["batch"]["samples"], serde_json::json!([[7, 42, 55, 100, 200]]));
+        // Small extras fit beside the disks and nothing is dropped.
+        let (_, included) = batch_body_with(machine(), &lines, 60, Some(&disks), &big[..1], &attrs).unwrap();
+        assert_eq!(included, Included { disks: true, results: 1, attrs: true });
+    }
+
+    #[test]
+    fn test_attrs_go_on_change_and_hourly_and_the_counters_are_not_a_change() {
+        use super::super::netview::{Adapter, Address};
+        let adapters = |rx: u64, up: bool| {
+            vec![Adapter {
+                name: "eth0".into(),
+                up,
+                mac: "aa".into(),
+                addresses: vec![Address { addr: "10.0.0.1".into(), prefix: 24, family: "inet" }],
+                rx_bytes: rx,
+                tx_bytes: 0,
+                kind: "physical",
+            }]
+        };
+        let online = Reachability {
+            internet: Some(selfheal::Connectivity::Online),
+            at: 1_000,
+            step: None,
+        };
+        let mut attrs = Attrs::default();
+        // First flush: both go.
+        let first = attrs.pending(1_000, Some(&adapters(1, true)), online);
+        assert_eq!(first.keys().collect::<Vec<_>>(), ["net.adapters", "net.reachability"]);
+        attrs.sent(&first, online, 1_000);
+        // Five minutes on, counters moved, same verdict: nothing goes.
+        let later = Reachability { at: 1_300, ..online };
+        assert!(attrs.pending(1_300, Some(&adapters(50_000, true)), later).is_empty());
+        // The link went down: adapters go, reachability does not.
+        let down = attrs.pending(1_600, Some(&adapters(60_000, false)), later);
+        assert_eq!(down.keys().collect::<Vec<_>>(), ["net.adapters"]);
+        // A refused batch means nothing was sent, so it goes again next time.
+        assert_eq!(attrs.pending(1_900, Some(&adapters(70_000, false)), later).len(), 1);
+        attrs.sent(&down, later, 1_900);
+        // The verdict changed: reachability goes.
+        let offline = Reachability {
+            internet: Some(selfheal::Connectivity::Offline),
+            at: 2_200,
+            step: None,
+        };
+        let changed = attrs.pending(2_200, Some(&adapters(80_000, false)), offline);
+        assert_eq!(changed.keys().collect::<Vec<_>>(), ["net.reachability"]);
+        attrs.sent(&changed, offline, 2_200);
+        // The healer turning on is a change of `selfheal` even with the same verdict.
+        let watching = Reachability { step: Some(selfheal::Step::Wait), ..offline };
+        assert_eq!(attrs.pending(2_500, Some(&adapters(80_000, false)), watching).len(), 1);
+        // An hour on with nothing changed: both go again, counters refreshed.
+        let hour = Reachability { at: 6_000, ..offline };
+        let refreshed = attrs.pending(6_000, Some(&adapters(90_000, false)), hour);
+        assert_eq!(refreshed.len(), 2);
+        assert!(refreshed["net.adapters"].contains("90000"));
+        // Windows today: no adapter list at all, and no `net.adapters` member.
+        let mut fresh = Attrs::default();
+        assert_eq!(fresh.pending(1, None, online).keys().collect::<Vec<_>>(), ["net.reachability"]);
+        fresh.sent(&fresh.pending(1, None, online), online, 1);
+        assert!(fresh.pending(2, None, online).is_empty());
     }
 
     #[test]

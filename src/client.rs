@@ -1963,6 +1963,9 @@ impl VideoHandler {
 enum PasswordSource {
     PersonalAb(Vec<u8>),
     SharedAb(String),
+    /// A connect ticket from lab-desk.net, spent on this connect
+    /// (src/labdesk/ticket.rs). Never saved as the peer's password.
+    Ticket,
     Undefined,
 }
 
@@ -3846,6 +3849,26 @@ pub async fn handle_hash(
             msg.set_misc(misc);
             allow_err!(peer.send(&msg).await);
             return false;
+        }
+    }
+    // connect ticket (src/labdesk/ticket.rs): minted with the overlay session,
+    // stored by the console as `labdesk-ticket-<peer id>` beside the overlay
+    // address, spent here once. The target holds H = sha256Hex(secret) and
+    // checks sha256(H || salt), the way it checks a shared password.
+    {
+        let id = lc.read().unwrap().id.clone();
+        let key = format!("labdesk-ticket-{}", id);
+        let ticket = Config::get_option(&key);
+        if !ticket.is_empty() {
+            crate::ipc::set_option_async(&key, "").await;
+            let h = crate::labdesk::ticket::secret_hash(&ticket);
+            let mut hasher = Sha256::new();
+            hasher.update(h.as_bytes());
+            hasher.update(&hash.salt);
+            let res = hasher.finalize();
+            let mut lc = lc.write().unwrap();
+            lc.password = res[..].into();
+            lc.password_source = PasswordSource::Ticket;
         }
     }
     // last password

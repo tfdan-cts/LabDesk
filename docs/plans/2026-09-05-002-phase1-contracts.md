@@ -713,3 +713,50 @@ Web, `src/app/pages/org.tsx`: machines, fleets, enrolment token. No labnet surfa
   commit as the change they describe; the architecture plan's corrections block gains an entry
   for the two corrections recorded here (a fleet book's guid is its fleet id, section 4; the
   Windows daemon does not re-read its config, section 7).
+
+## 11. Corrections from the client lane, round 1
+
+Read from the code as built in `src/labdesk/{tools,ticket,netview,selfheal}.rs`; each is a
+place the contract above left something open or the code had to diverge, and the site lane
+builds against these.
+
+1. Section 1, `pattern`. The agent carries no regex engine (`regex` is not a dependency of the
+   crate and `--locked` CI cannot take one). The one shape a `pattern` may have is
+   `^[class]{min,max}$`, the class being single characters, `a-z` ranges and `\-` escapes;
+   `Catalog::parse` refuses any other pattern, so a catalog author learns at test time.
+2. Section 1, values. A parameter value that begins with `-` is refused `bad_params` whatever
+   its type, because every step hands the value to a program's option parser and the contract's
+   class admits `--force` as a unit name. The Worker may accept such a job; the agent's result
+   then says `bad_params`.
+3. Section 1, `power_logoff` on Linux. The entry's argv is `["loginctl", "terminate-user",
+   "{active_user}"]`. `{active_user}` is the one template token that is not a parameter: the
+   agent fills it from `get_active_username()`, a parameter of that name is refused, and a
+   `system` entry may not use it. The token is in `tools.json`, so the Worker's copy carries it
+   too and passes it through untouched.
+4. Section 2, `active_user` on Linux. `loginctl terminate-user` and `loginctl lock-sessions`
+   are refused by polkit to anyone but root, so on Linux the daemon runs both entries itself
+   with the seat0 user filled in; `run_as_user` serves Windows and macOS, as `labdesk
+   --labdesk-tool <id>`, which is why an `active_user` entry takes no parameters (the command
+   line carries the id only). On Windows that launch hands back no handle, so the result is
+   `exitCode 0` with an output line saying the exit status was not observed.
+5. Section 2, results. `jobResults` carries at most four results a batch, oldest first, and
+   when the body is over 64 KiB the optional members give way in this order: `disks`, then
+   `attrs`, then results from the newest down; samples never.
+6. Section 3, delivery. The daemon computes `H` from the delivered `secret` as follows: a value
+   that is already 64 hex characters is `H`; anything else is hashed (`sha256Hex` over the
+   string's bytes). So the Worker may deliver either the hash or the plaintext and the target
+   holds `H` either way. The console stores the plaintext it was handed at mint time, and
+   `handle_hash` hashes it once and clears the option `labdesk-ticket-<peer id>` so the ticket
+   is tried exactly once.
+7. Section 6, `net.adapters`. Sent when anything but `rxBytes` and `txBytes` changed, and once
+   an hour otherwise, so the counters refresh hourly and the attribute write stays near one row
+   an hour per machine (section 4.5 of the architecture). The console differences throughput
+   from the batch samples, not from this attribute. The Windows daemon sends no `net.adapters`
+   yet: `Win32_NetworkManagement_IpHelper` landed as its own commit, and the
+   `GetAdaptersAddresses` call is written against it once CI has proved the feature.
+8. Section 6, `net.reachability`. Sent on a change of `internet` or `selfheal` and once an hour
+   otherwise; `at` alone is not a change.
+9. Section 7. `selfheal::enabled()` parses the daemon's config file on every tick;
+   `net.reachability.selfheal` is the running step and `off` while the switch is off.
+10. `labdesk --disk-health` (root or administrator) prints the `disks` member the daemon would
+    send, for field checks on any machine.

@@ -675,6 +675,32 @@ pub fn core_main() -> Option<Vec<String>> {
                 println!("Installation and administrative privileges required!");
             }
             return None;
+        } else if args[0] == "--labdesk-tool" {
+            // One `active_user` catalog entry, run in this session and as this
+            // user (src/labdesk/tools.rs, `run_here`). The daemon launches it
+            // through `run_as_user` for a job whose entry says `active_user`.
+            let code = args
+                .get(1)
+                .map(|id| crate::labdesk::tools::run_here(id))
+                .unwrap_or(2);
+            std::process::exit(code);
+        } else if args[0] == "--disk-health" {
+            // The disk read path against this machine's drives, printed as the
+            // daemon's `disks` member: the field check for src/labdesk/disk/.
+            if is_root() {
+                let disks: Vec<serde_json::Value> = crate::labdesk::disk::gather()
+                    .iter()
+                    .map(crate::labdesk::collector::disk_member)
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({ "disks": disks }))
+                        .unwrap_or_default()
+                );
+            } else {
+                println!("Administrative privileges required!");
+            }
+            return None;
         } else if args[0] == "--deploy" {
             if config::Config::no_register_device() {
                 println!("Cannot deploy an unregistrable device!");

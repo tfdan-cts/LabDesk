@@ -16,7 +16,12 @@
 //! decision at each tick is a pure function of the last state and the latest
 //! probe, so it is tested without a network, an adapter or a reboot.
 
-use hbb_common::{config::Config, log};
+use hbb_common::{
+    config::{load_path, Config, Config2},
+    log,
+};
+use std::path::Path;
+use std::sync::Mutex;
 use std::time::Duration;
 
 /// The option that turns self-healing on. Absent or anything but `Y` is off,
@@ -177,12 +182,82 @@ impl HealState {
     }
 }
 
+/// What the console renders beside the switch: the last probe and the step
+/// the ladder last took, `step` being `None` while the switch is off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Reachability {
+    pub internet: Option<Connectivity>,
+    /// Unix seconds of the probe `internet` came from; 0 before the first.
+    pub at: i64,
+    pub step: Option<Step>,
+}
+
+impl Reachability {
+    /// The `net.reachability` attribute, section 6 of the phase 1 contracts.
+    pub fn to_value(&self) -> String {
+        serde_json::json!({
+            "internet": match self.internet {
+                Some(Connectivity::Online) => "online",
+                Some(Connectivity::Offline) => "offline",
+                None => "unprobed",
+            },
+            "at": self.at,
+            "probe": "tcp443",
+            "selfheal": match self.step {
+                None => "off",
+                Some(Step::Wait) => "watching",
+                Some(Step::CycleAdapters) => "cycling",
+                Some(Step::Restart) => "restarting",
+                Some(Step::HoldOff) => "holdoff",
+            },
+        })
+        .to_string()
+    }
+}
+
+lazy_static::lazy_static! {
+    static ref STATUS: Mutex<Reachability> = Mutex::new(Reachability::default());
+}
+
+/// The running value, for the collector to report. Not the file: what the
+/// daemon is actually doing.
+pub fn status() -> Reachability {
+    *STATUS.lock().unwrap()
+}
+
+fn publish(status: Reachability) {
+    *STATUS.lock().unwrap() = status;
+}
+
+/// Whether the switch is on, read from the daemon's own config FILE and not
+/// from this process's memory.
+///
+/// `CONFIG2` is a `lazy_static` loaded once per process
+/// (`libs/hbb_common/src/config.rs`, `Config2::load`). On Linux and macOS the
+/// `--server` process syncs its copy to this daemon over `_service`, so
+/// `Config::get_option` follows a flip from the console there; on Windows
+/// `--server` and `--service` are two LocalSystem processes reading the same
+/// file, nothing syncs them, and a flip never reached a running daemon. This
+/// is the verified gap section 7 of the phase 1 contracts records, closed by
+/// parsing the file on every tick.
+pub fn enabled() -> bool {
+    enabled_in(&Config2::file())
+}
+
+fn enabled_in(file: &Path) -> bool {
+    load_path::<Config2>(file.to_path_buf())
+        .options
+        .get(OPTION_ENABLE)
+        .map(|v| v == "Y")
+        .unwrap_or(false)
+}
+
 /// Proves the machine can reach the public internet by opening a TCP
 /// connection to well-known anycast resolvers on 443. A link that is up but
 /// has no route to the internet, a captive portal, or a dead upstream all fail
 /// this, which is the point: it measures the internet, not the cable. Any one
 /// success is enough, so a single blocked address does not read as an outage.
-fn probe_internet() -> Connectivity {
+pub(crate) fn probe_internet() -> Connectivity {
     use std::net::{SocketAddr, TcpStream};
     const TARGETS: [&str; 3] = ["1.1.1.1:443", "8.8.8.8:443", "9.9.9.9:443"];
     const TIMEOUT: Duration = Duration::from_secs(4);
@@ -362,13 +437,11 @@ fn today() -> i64 {
     hbb_common::get_time() / 1000 / 86_400
 }
 
-/// Starts the self-healing thread if the option is on. Called from the service
-/// start hook next to the collector. Safe to call when the feature is off: it
-/// returns immediately.
+/// Starts the self-healing thread. Called from the service start hook next to
+/// the collector. The thread is spawned whether or not the switch is on: it
+/// idles on `enabled()` while the option is off, so a daemon started with the
+/// switch off still honours a later flip.
 pub fn start() {
-    if Config::get_option(OPTION_ENABLE) != "Y" {
-        return;
-    }
     if let Err(err) = std::thread::Builder::new()
         .name("labdesk-selfheal".to_owned())
         .spawn(run)
@@ -377,16 +450,30 @@ pub fn start() {
     }
 }
 
+/// How often the idle thread looks at the file while the switch is off.
+const OFF_POLL: Duration = Duration::from_secs(30);
+
 fn run() {
-    log::info!("[selfheal] watching connectivity");
     let mut state = HealState::new();
     let mut day = today();
+    let mut on = false;
     loop {
-        // Re-read the tuning each tick so a change from the console takes
-        // effect without a restart, and honour a mid-run turn-off.
-        if Config::get_option(OPTION_ENABLE) != "Y" {
-            log::info!("[selfheal] turned off");
-            return;
+        // The FILE, each tick, so a flip from the console takes effect within
+        // one interval on every platform (see `enabled`).
+        if !enabled() {
+            if on {
+                log::info!("[selfheal] turned off");
+                on = false;
+                state = HealState::new();
+                let last = status();
+                publish(Reachability { step: None, ..last });
+            }
+            std::thread::sleep(OFF_POLL);
+            continue;
+        }
+        if !on {
+            log::info!("[selfheal] watching connectivity");
+            on = true;
         }
         let cfg = HealConfig::from_options();
         if today() != day {
@@ -396,6 +483,11 @@ fn run() {
         let probe = probe_internet();
         let (next, step) = state.advance(probe, &cfg);
         state = next;
+        publish(Reachability {
+            internet: Some(probe),
+            at: hbb_common::get_time() / 1000,
+            step: Some(step),
+        });
         match step {
             Step::Wait => {}
             Step::CycleAdapters => {
@@ -527,6 +619,58 @@ mod tests {
         // After the reset, offline again eventually reaches another reboot.
         let (_s, steps) = drive(state, Connectivity::Offline, 200, &c);
         assert!(steps.contains(&Step::Restart), "the budget returns the next day");
+    }
+
+    /// The switch is read from the file, so a value written by ANOTHER handle
+    /// (the console's `--server`, on Windows a different process) is seen
+    /// without this process ever reloading its `CONFIG2`.
+    #[test]
+    fn the_gate_reads_a_value_another_handle_wrote_to_the_file() {
+        let dir = std::env::temp_dir().join(format!("labdesk-selfheal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("LabDesk2.toml");
+        assert!(!enabled_in(&file), "no file is off");
+        std::fs::write(&file, "[options]\nlabdesk-selfheal = \"Y\"\n").unwrap();
+        assert!(enabled_in(&file));
+        std::fs::write(&file, "[options]\nlabdesk-selfheal = \"N\"\n").unwrap();
+        assert!(!enabled_in(&file), "anything but Y is off");
+        std::fs::write(&file, "[options]\nother = \"Y\"\n").unwrap();
+        assert!(!enabled_in(&file));
+        std::fs::write(&file, "not toml at all [[[").unwrap();
+        assert!(!enabled_in(&file), "an unreadable file is off, not a panic");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The running value the console renders, in the contract's words.
+    #[test]
+    fn the_reachability_value_is_the_contract_shape() {
+        let v = |r: Reachability| serde_json::from_str::<serde_json::Value>(&r.to_value()).unwrap();
+        let unprobed = v(Reachability::default());
+        assert_eq!(unprobed["internet"], "unprobed");
+        assert_eq!(unprobed["selfheal"], "off");
+        assert_eq!(unprobed["probe"], "tcp443");
+        assert_eq!(unprobed["at"], 0);
+        let watching = v(Reachability {
+            internet: Some(Connectivity::Online),
+            at: 1788480300,
+            step: Some(Step::Wait),
+        });
+        assert_eq!(watching["internet"], "online");
+        assert_eq!(watching["selfheal"], "watching");
+        assert_eq!(watching["at"], 1788480300);
+        for (step, word) in [
+            (Step::CycleAdapters, "cycling"),
+            (Step::Restart, "restarting"),
+            (Step::HoldOff, "holdoff"),
+        ] {
+            let r = v(Reachability { internet: Some(Connectivity::Offline), at: 1, step: Some(step) });
+            assert_eq!(r["internet"], "offline");
+            assert_eq!(r["selfheal"], word);
+        }
+        // The ladder itself is untouched: `advance` is pure and the tests
+        // above drive it without a probe, an adapter or a reboot.
+        let (_s, step) = HealState::new().advance(Connectivity::Online, &cfg());
+        assert_eq!(step, Step::Wait);
     }
 
     #[test]

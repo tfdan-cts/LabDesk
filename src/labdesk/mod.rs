@@ -2,5 +2,8 @@ pub mod collector;
 pub mod disk;
 pub mod identity;
 pub mod labnet;
+pub mod netview;
 pub mod selfheal;
 pub mod spool;
+pub mod ticket;
+pub mod tools;
