@@ -3,6 +3,41 @@
 LabDesk's own versions. The RustDesk core underneath is stated in the README, not versioned here.
 Rules: `docs/VERSIONING.md`.
 
+## Unreleased (`feat/labnet`, built as `labnet-ready` from `d9d9b23dc` on 2026-09-05)
+
+The version number has not moved; the `labnet-ready` build reports 1.2.4. What is on the branch
+past that release:
+
+- labnet is turned on from the console with no elevation prompt. The privileged LabDesk process,
+  which is always on, installs and starts the bundled NetBird daemon as the `labdesk-netbird`
+  service, brings it up with the one-off setup key passed through a file only it can read, and
+  signs the machine-plane requests, all over IPC; the console asks and shows the daemon's own
+  words when something fails. The setup key never appears on a command line.
+- This machine gains an Organization card: paste an enrolment token an owner minted on
+  lab-desk.net's organization page and press Enrol; the privileged process spends it and the card
+  shows the machine id, or the refusal verbatim.
+- The console's human-plane calls to lab-desk.net (session grants, labnets, the organization's
+  machines) go to `/console/...`, where the app token reaches a handler while the site is behind
+  its private-phase wall. The machine plane stays on `/agent/...`. No console call targets
+  `/api/...` any more, and a test holds it.
+- The direct listener signs its identity when bound to the overlay address, so a direct session
+  completes instead of falling back to the relay every time, and a peer whose key the broker has
+  not yet learned is reported as unproven and falls through rather than being called an
+  impersonation. Proven between two real machines on 2026-09-04.
+- A machine restores its own internet from the privileged service: off unless
+  `labdesk-selfheal=Y`, it proves reachability with a real connection, cycles adapters, cycles
+  again, then reboots with a per-day cap.
+- The update banner renders in the console; the unattended updater downloads into a fresh private
+  directory and logs the verify-then-launch at info; a labnet session grant never seen open is
+  aged out and its per-peer hints cleared.
+- Full Flutter CI runs again: the manifest job inherited a permissions block that failed the
+  workflow at startup since it was added, previews with a suffix stay prereleases, and the
+  dispatch workflow builds one at a time.
+
+Known open at this commit: no session has been opened over a labnet address from the product;
+the field test is the owner's. The aarch64 Windows and iOS jobs of the `labnet-ready` dispatch
+failed, so no ARM64 Windows or iOS build of this commit exists.
+
 ## 1.2.4 (2026-09-04)
 
 - No change to the product. This release exists so that an installed client carrying the

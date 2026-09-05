@@ -245,9 +245,16 @@ distinguishable from healthy all the way to the database.
 
 ### Must close before any machine is enrolled
 
-**1. The desktop client cannot authenticate on either plane.** The broker now
-addresses the right routes, six machine side calls to `/agent/overlay/*` and the
-rest to `/api/overlay/*`, but neither half authenticates.
+**1. The desktop client cannot authenticate on either plane.** CLOSED 2026-09-05,
+kept for the record. The machine plane is signed by the privileged process over
+IPC (`b3fe22bc5`, `src/labdesk/labnet.rs`, `main_agent_sign`), and the human
+plane moved to `/console/overlay/*` and `/console/org/*` (`d9d9b23dc`), where the
+Worker mounts the same handlers a second time and `actor()` resolves the app
+bearer (site `a73fa72`, `9728be6`). `lab-desk.net/console` is on the Access bypass
+beside `/agent`; `/api` is not and must never be. What was true when written:
+the broker addressed the right routes, six machine side calls to
+`/agent/overlay/*` and the rest to `/api/overlay/*`, but neither half
+authenticated.
 
 The machine plane wants an Ed25519 signature from the agent key. That key lives
 in the privileged service and deliberately never crosses IPC, which is correct,
@@ -276,10 +283,12 @@ neither a tag push nor a manual dispatch runs it; no published release carries
 is correct and it currently gates nothing because there is nothing to verify
 against. Section 4 and `docs/SIGNING.md` carry the ceremony that ends this.
 
-**4. Nothing is deployed.** Migrations `0002` through `0009` are pending on
-production D1, and `0002` creates the labnet tables themselves. No route on the
-organization, machine or labnet planes can work against production until they are
-applied.
+**4. Nothing is deployed.** CLOSED 2026-09-05, kept for the record. Migrations
+`0002` through `0009` were applied to production D1 that day, and lab-desk.net
+serves the Worker at site commit `35389e2` with `/agent/*` and `/console/*`
+answering JSON. What was true when written: the migrations were pending, and
+`0002` creates the labnet tables themselves, so no route on the organization,
+machine or labnet planes could work against production.
 
 ### Can follow
 

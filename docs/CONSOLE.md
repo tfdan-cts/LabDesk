@@ -41,7 +41,7 @@ they belong with.
 | Tools | Ctrl+5 | `screens/tools_screen.dart` | The same shell path, running the commands in `services/tool_catalog.dart`. |
 | Automation | Ctrl+6 | `screens/automation_screen.dart` | Rules evaluated in this process, once a second, only while the console is open. |
 | Actions | Ctrl+7 | `screens/actions_screen.dart` | Five actions. Three open a session; two need one already open. |
-| Network | Ctrl+8 | `screens/network_screen.dart` | labnets from lab-desk.net. None of its calls reach a handler yet. See *labnet* below. |
+| Network | Ctrl+8 | `screens/network_screen.dart` | labnets from lab-desk.net, over the two planes described under *labnet* below. Nothing in it has yet been exercised from a signed-in console against production. |
 | This machine | Ctrl+9 | `screens/this_machine_screen.dart` | The client's `ServerModel`. Live. |
 | Settings | none | `settingsPageBody` from `desktop_setting_page.dart`, one page at a time | The client's own settings. Live. |
 
@@ -191,35 +191,46 @@ session window raises no second dialog.
 
 ## labnet: the encrypted direct path
 
-labnet is an optional direct path between machines on the same LabDesk account, built on the
+labnet is an optional direct path between machines in the same organization, built on the
 NetBird client that ships in the `netbird` directory beside the LabDesk executable
-(`docs/THIRD-PARTY.md`). A machine that has it on can be reached directly by the account's
+(`docs/THIRD-PARTY.md`). A machine that has it on can be reached directly by the organization's
 other machines over an encrypted tunnel, with no ID or relay server in the way. Nothing else
 can reach it there: every machine sits in a group of its own on LabDesk's own control plane
 (`docs/LABNET-SERVER.md`), and no rule lets one group reach another until a session or a
 labnet says so.
 
+**Enrolment.** Before either plane answers for a machine, the machine belongs to an
+organization. This machine carries an *Organization* card (`screens/enrol_card.dart`): paste an
+enrolment token an owner minted on lab-desk.net's `/org` page into the *Enrolment token* field
+and press Enrol. The privileged LabDesk process spends it at `POST /agent/enrol`
+(`main_agent_enrol`, served over IPC by `src/labdesk/labnet.rs`) and the card reads *Enrolled as
+machine* followed by the machine id, or the server's refusal verbatim. The token is held in the
+field only, never logged and never persisted.
+
 **The switch.** This machine carries a card, *Encrypted direct connections*, with one
 action: Turn on, Turn off, or Try again. The first time an account is signed in on a machine
 that has never turned it on, the console asks once (the local option
-`labdesk-overlay-consent` records that it asked) and never again. Turning it on: the daemon is
-asked for a one-off setup key first, the daemon is then installed as LabDesk's own service
-(`labdesk-netbird`) and started, which raises two elevation prompts rather than one because the
-install and the start are two elevated calls, the daemon is brought up with the key, the console
-waits for it to
-report Connected, tells lab-desk.net the address it got, and opens the client's direct listener
-on that address only (options `direct-server=Y` and `labdesk-direct-bind=<address>`). Turning it
-off undoes each in the other order and sets `direct-server=N`.
+`labdesk-overlay-consent` records that it asked) and never again. Turning it on raises no
+elevation prompt: the privileged process, which is always on, does the privileged part over
+IPC (`main_overlay_daemon`, one request served as LocalSystem on Windows and by the root
+service on Linux and macOS). The sequence in `services/overlay_enrolment.dart`: the daemon's
+status is read; if no service answers, lab-desk.net is asked for a one-off setup key, then the
+daemon is installed as LabDesk's own service (`labdesk-netbird`) and started through that
+process; the daemon is brought up with the key, its management URL held to `nb.lab-desk.net`;
+the console waits for it to report Connected, tells lab-desk.net the address it got together
+with this machine's id key and direct port, and opens the client's direct listener on that
+address only (options `direct-server=Y` and `labdesk-direct-bind=<address>`). Turning it off
+undoes each in the other order and sets `direct-server=N`.
 
 **A session.** Every way the console opens a session goes through `_connectVia`. With the switch
-on, lab-desk.net is asked for a grant (`POST /api/overlay/session`), which creates a one-way
+on, lab-desk.net is asked for a grant (`POST /console/overlay/session`), which creates a one-way
 rule from this machine's group to the target's on the target's direct port. The console waits
 for the target peer to read Connected in the daemon's status (the rule has to be signalled and
 the tunnel's handshake completed first, up to ten seconds), then hands the client two options,
 `labdesk-overlay-addr-<id>` and `labdesk-overlay-pk-<id>`, and connects as always. The client
 tries that address before any server, with the target's own id public key, so the session
 still runs LabDesk's key exchange and is never the insecure kind a bare IP connection is.
-When the session window is gone the grant is released (`DELETE /api/overlay/session/<id>`)
+When the session window is gone the grant is released (`DELETE /console/overlay/session/<id>`)
 and the two options cleared. If anything short of that happens, the session simply goes the
 way it always has.
 
@@ -230,23 +241,33 @@ Adding a machine only creates an invitation; the machine joins when a person app
 that machine's own Network section, and may leave the same way. The section is refreshed every
 15 s, and only while an account is signed in.
 
-**Known broken at HEAD, and be precise about it.** The broker now addresses the right routes:
-the six machine-side calls (`enrol`, `self`, the `DELETE` that revokes enrolment, `inbox`,
-`invites/<id>/decide` and `labnets/<id>/leave`) go to the machine plane at `/agent/overlay/...`,
-and the rest to `/api/overlay/...`. Neither half authenticates yet, so nothing in this section
-works on a real machine.
+**The two planes.** The broker (`services/overlay_broker.dart`) speaks two planes of
+lab-desk.net, and the split is deliberate. The six machine-side calls (`enrol`, `self`, the
+`DELETE` that revokes enrolment, `inbox`, `invites/<id>/decide` and `labnets/<id>/leave`) go to
+`/agent/overlay/...`, authenticated by an Ed25519 signature from the agent's own key. That key
+lives in the privileged service and never crosses IPC, so the console does not sign: it asks
+the service to (`main_agent_sign`, served by `src/labdesk/labnet.rs`), and `serve()` there
+refuses from any process that is not the privileged one. The human-side calls (a session grant,
+the labnet list and lifecycle, invitations, the organization's machines) go to
+`/console/overlay/...` and `/console/org/...` with the app token `/api/login` minted. They
+never target `/api/`: while lab-desk.net is private, `/api/*` sits behind the Cloudflare Access
+wall and answers the desktop's bearer with a 302, and the bypass that lets the desktop through
+carries `/agent` and `/console` and must never gain `/api`. The Worker mounts its
+`/api/overlay/*` and `/api/org/*` handlers a second time under `/console`, and `actor()` there
+resolves the bearer to the same person with the same role as in the browser.
+`test/labdesk_overlay_broker_test.dart` asserts that no human-plane call targets `/api/`.
 
-The machine plane wants an Ed25519 signature from the agent's own key. That key lives in the
-privileged service and deliberately never crosses IPC, so the console process cannot read it and
-cannot sign; the six calls are refused before they reach the wire. Closing this means the console
-asking the service to sign, rather than holding the key.
-
-The account plane resolves the caller through `actor()`, which reads a Better Auth session. The
-console holds an `app_token` bearer, and no bearer plugin is registered, so that credential is
-invisible to the worker and those calls are refused too.
-
-Nothing here is deployed in any case: the migrations that create the labnet tables have never
-been applied to production. `docs/SECURITY-POSTURE.md` carries both gaps and their consequences.
+**What is proven, and what is not (2026-09-05).** Production serves the Worker that mounts
+`/console`; `lab-desk.net/agent` and `lab-desk.net/console` are on the Access bypass; the labnet
+tables exist, migrations 0002 through 0009 having been applied that day; and probed with no
+bearer and with a junk one, every `/console` route answers JSON 401 rather than a redirect. The
+build at `d9d9b23dc` (release `labnet-ready`) is installed on trapLab-Foundry. What has not
+happened: no signed-in console has reached those routes, no machine has been enrolled from the
+card, labnet has not been turned on from the card, and no session has been opened over an
+overlay address. The direct path itself, the listener signing its id, the key check and the
+fall-through, was proven on 2026-09-04 between Foundry and homebox with hints written by hand
+over Tailscale addresses, which sit in the same 100.64.0.0/10 range the hint validator accepts.
+`docs/SECURITY-POSTURE.md` records which of its findings this closed.
 
 **Where the code is.** `lib/labdesk/services/overlay_daemon.dart` is the only file that knows
 the daemon is NetBird; `overlay_broker.dart` speaks the lab-desk.net routes;
@@ -257,15 +278,17 @@ wires. On the Rust side `_start` in `src/client.rs` tries the address hint, and
 
 ## What the console does not show
 
-The console is a client-side interface. At HEAD nothing under `flutter/lib/` mentions an
-organization, a role, or a fleet in the server's sense. The labnet broker described above is not
-the only lab-desk.net API this client calls: `models/user_model.dart` posts to `/api/login` and
+The console is a client-side interface. At HEAD the only things under `flutter/lib/` that speak
+of an organization in the server's sense are the enrolment card on This machine and the broker's
+read of the organization's machines. The labnet broker described above is not the only
+lab-desk.net API this client calls: `models/user_model.dart` posts to `/api/login` and
 `/api/currentUser` and reads `/api/login-options`, and `models/ab_model.dart` speaks the address
-book routes. What the console has no surface for is the organization plane. Concretely:
+book routes. What the console has no surface for is managing the organization. Concretely:
 
-* **The organization plane has no console surface.** Owner, technician and viewer roles, and
-  fleets as groups inside an organization, exist in `src/worker/org.ts` and in the database in the
-  `labdesk-site` repository. There is no page in this client that manages them. The console's
+* **The organization is managed on lab-desk.net, not here.** Owner, technician and viewer roles,
+  fleets as groups inside an organization, and enrolment tokens live in `src/worker/org.ts` and
+  on the `/org` page of the `labdesk-site` repository. This client spends a token and lists the
+  organization's machines; it has no page that creates a fleet or changes a role. The console's
   **Fleet** section is a different thing wearing the same word: this client's own machine list and
   its reachability, held locally.
 * **Nothing here reads server-computed health.** The health engine on the worker produces nothing
