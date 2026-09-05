@@ -205,6 +205,29 @@ stops when it is not.
 The tab is gated to iOS. Android would benefit from it too, but that client
 belongs to another lane and this change does not reach into it.
 
+### The session controls, and what can honestly be said about them
+
+Item 6 lists what the session itself must offer: touch and mouse modes, the
+gesture sheet, the virtual mouse, soft and hardware keyboards, monitor
+switching, quality and codec, and the clipboard. All of it is inherited rather
+than built here, so the work is to establish that it is reachable on iOS and
+then to verify it, and those are two different things.
+
+Reachable: yes, checked by reading the platform gates rather than assuming.
+`flutter/lib/common/widgets/toolbar.dart` gates its mobile entries on `isMobile`,
+which covers iOS as much as Android. `flutter/lib/mobile/widgets/gesture_help.dart`
+and `flutter/lib/mobile/widgets/floating_mouse.dart` carry no platform gate at
+all. The mobile session screen has iOS-specific handling rather than iOS
+exclusions: a dedicated soft keyboard input path and a workaround for physical
+keyboard focus after the virtual keyboard hides. The one thing gated to Android
+in that screen is the voice call button, which is not in item 6.
+
+Verified: no, and not by this harness. Every one of those controls acts on a
+live session to a real peer, and a simulator in CI has no peer to connect to.
+No amount of driving the interface changes that. So item 6 is reachable and
+unverified, and it stays that way until somebody runs a build against a real
+machine. Saying a green CI job covered it would be false.
+
 ### Leaving a session in a pocket
 
 Item 7 is built. A phone must not hold a remote session open while it is in a
