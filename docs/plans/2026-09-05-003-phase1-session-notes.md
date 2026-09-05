@@ -52,10 +52,9 @@ What landed, all on `feat/labnet`:
   `src/labdesk/ticket.rs` reading `tickets` from the batch answer and delivering them.
 - The self-heal switch: `selfheal::enabled()` parses the daemon's config file on every tick,
   `start()` spawns always, and the running step is published as `net.reachability`.
-- The network view: `src/labdesk/netview.rs` walks `getifaddrs` on Linux and macOS, the
-  collector sends `net.adapters` and `net.reachability` in the `attrs` member with the change
-  rules in section 11 of the contracts. Windows sends no `net.adapters` until the
-  `GetAdaptersAddresses` call is written against the feature above.
+- The network view: `src/labdesk/netview.rs` walks `getifaddrs` on Linux and macOS and
+  `GetAdaptersAddresses` on Windows, the collector sends `net.adapters` and `net.reachability`
+  in the `attrs` member with the change rules in section 11 of the contracts.
 
 How it was checked before CI: the pure parts (`tools.rs`, `netview.rs`, `ticket.rs`,
 `selfheal.rs`) were compiled and their 25 tests run on homebox in a shim harness
@@ -67,9 +66,25 @@ CI then found two build gates the harness could not: `PENDING_TICKETS` sat behin
 referenced `crate::labdesk` on Android, where `lib.rs` does not compile the module; both are
 `cfg` fixes, no logic changed.
 
+The Windows network walk, added after that round: CI builds Linux only
+(`.github/workflows/ci.yml` has one uncommented matrix row), so it compiles nothing behind
+`#[cfg(target_os = "windows")]` and cannot be the proof for this arm. What CI does assert is
+`netview::windows_kind`, which is free of `cfg` and carries the whole `IfType` classification.
+The call itself was compiled and run on this Windows workstation against the real
+`src/labdesk/netview.rs` bytes, in a harness that supplies only the sampler's `Networks`
+(`gauntlet-evidence/p1-rust-core/round-4/`): 34 raw entries folded to 10 adapters, loopback
+dropped, prefixes 8, 16, 20, 24, 32, 64 and 128 read straight off `OnLinkPrefixLength`, and
+`cargo test` green on all 7 tests in the module including `the_walk_finds_this_machines_interfaces`
+and `the_if_type_numbers_are_the_crates`, which asserts the three `IfType` numbers against the
+`windows` crate's own constants.
+
 Open after this round:
 
-- Windows `net.adapters` (the `GetAdaptersAddresses` call).
+- The site repository's copy of the contracts, `docs/phase1-contracts.md`, needs the same edit
+  to item 7 of section 11 that this round made to
+  `docs/plans/2026-09-05-002-phase1-contracts.md` (the two `windows` features the call really
+  needs, and `FriendlyName` as the adapter name). The two copies are byte identical by that
+  document's own rule and only the site lane can land its half.
 - The exit status of an `active_user` launch on Windows.
 - Field checks that need a built binary: `labdesk --disk-health` on homebox from the branch's
   own Linux build (the harness proved the module, not the shipped binary) and on Foundry, where

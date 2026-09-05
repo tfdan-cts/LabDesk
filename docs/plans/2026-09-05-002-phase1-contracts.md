@@ -752,9 +752,17 @@ builds against these.
 7. Section 6, `net.adapters`. Sent when anything but `rxBytes` and `txBytes` changed, and once
    an hour otherwise, so the counters refresh hourly and the attribute write stays near one row
    an hour per machine (section 4.5 of the architecture). The console differences throughput
-   from the batch samples, not from this attribute. The Windows daemon sends no `net.adapters`
-   yet: `Win32_NetworkManagement_IpHelper` landed as its own commit, and the
-   `GetAdaptersAddresses` call is written against it once CI has proved the feature.
+   from the batch samples, not from this attribute. Windows sends the attribute from
+   `GetAdaptersAddresses`. Two corrections to section 6, both read from windows-0.61.1 rather
+   than recalled: the call and `IP_ADAPTER_ADDRESSES_LH` are both written
+   `#[cfg(all(feature = "Win32_NetworkManagement_Ndis", feature = "Win32_Networking_WinSock"))]`
+   (`IpHelper/mod.rs` lines 286 and 1796), so `Win32_NetworkManagement_IpHelper` alone compiles
+   to nothing callable and all three features are declared; and the adapter's `name` on Windows
+   is its `FriendlyName`, not its `AdapterName`, because the sampler's `Networks` is keyed by
+   `MIB_IF_ROW2.Alias` (the sysinfo fork's `src/windows/network.rs`) and the GUID would key
+   every adapter away from its byte counters. `kind` on Windows is read from `IfType`, which is
+   what an adapter presents as rather than what is behind it, so a Hyper-V or WSL virtual switch
+   reads `physical`; the console shows `kind` beside the name, which says which it is.
 8. Section 6, `net.reachability`. Sent on a change of `internet` or `selfheal` and once an hour
    otherwise; `at` alone is not a change.
 9. Section 7. `selfheal::enabled()` parses the daemon's config file on every tick;

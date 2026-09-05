@@ -4,15 +4,18 @@
 // offers a name, a MAC and the two byte counters per interface and nothing
 // else, so link state and addresses come from the operating system here:
 // `getifaddrs` on Linux and macOS through the `libc` that `hbb_common`
-// re-exports, `operstate` from sysfs on Linux. Windows needs
-// `GetAdaptersAddresses`, which needs `Win32_NetworkManagement_IpHelper` in
-// the `windows` crate's features; that feature lands as its own commit first
-// (section 6 of the phase 1 contracts, the way WP10 landed its two), and until
-// the call is written against it the Windows daemon sends no `net.adapters`
-// at all rather than an empty list that would read as "no adapters".
+// re-exports, `operstate` from sysfs on Linux, `GetAdaptersAddresses` on
+// Windows.
 //
 // The walk is the only unsafe code; `collect` is the pure fold over what it
 // found and is what the tests drive.
+//
+// CI builds Linux only (`.github/workflows/ci.yml`, the one uncommented matrix
+// row), so nothing here that is behind `#[cfg(target_os = "windows")]` is
+// compiled by the gate that passes a round. What the Windows arm can prove on
+// the Linux runner it proves through `windows_kind`, which is free of `cfg`
+// and carries the whole classification; the call itself is proven by building
+// and running it on a Windows machine and by the dispatch build.
 
 use hbb_common::sysinfo::Networks;
 use std::collections::BTreeMap;
@@ -175,6 +178,31 @@ pub fn prefix_v6(mask: [u8; 16]) -> u8 {
     mask.iter().map(|b| b.count_ones() as u8).sum()
 }
 
+/// The `IfType` values the Windows walk classifies on, copied from
+/// windows-0.61.1/src/Windows/Win32/NetworkManagement/IpHelper/mod.rs
+/// (`IF_TYPE_ETHERNET_CSMACD` 6, `IF_TYPE_SOFTWARE_LOOPBACK` 24,
+/// `IF_TYPE_IEEE80211` 71). The Windows walk asserts they are still the
+/// crate's own values in `the_if_type_numbers_are_the_crates`.
+pub const IF_TYPE_ETHERNET: u32 = 6;
+pub const IF_TYPE_LOOPBACK: u32 = 24;
+pub const IF_TYPE_WIFI: u32 = 71;
+
+/// Windows: an adapter's `IfType` reduced to the two flags `RawEntry` carries,
+/// `(loopback, physical)`. Written without `cfg` so the Linux-only CI asserts
+/// the mapping even though it never compiles the call that feeds it.
+///
+/// `IfType` is what an adapter presents as, not what is behind it: a Hyper-V or
+/// WSL virtual switch reports `IF_TYPE_ETHERNET_CSMACD` and reads `physical`
+/// here, the same way a virtio interface does on Linux, where the test is a
+/// `device` link in sysfs. `kind` is a hint the console shows beside the name,
+/// and the name says which it is.
+pub fn windows_kind(if_type: u32) -> (bool, bool) {
+    (
+        if_type == IF_TYPE_LOOPBACK,
+        if_type == IF_TYPE_ETHERNET || if_type == IF_TYPE_WIFI,
+    )
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn walk() -> Option<Vec<RawEntry>> {
     use hbb_common::libc;
@@ -267,8 +295,120 @@ fn is_physical(name: &str) -> bool {
     name.starts_with("en")
 }
 
-/// Windows: not enumerated yet, see the note at the top of the file.
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// Windows: `GetAdaptersAddresses`, the one call that carries link state, the
+/// addresses and their prefix lengths together, so nothing here reconstructs a
+/// mask the way the `getifaddrs` arm does.
+///
+/// The name is the adapter's `FriendlyName` and not its `AdapterName`, because
+/// `FriendlyName` is the string the sampler's `Networks` is keyed by on
+/// Windows: the vendored sysinfo fork builds its map from `MIB_IF_ROW2.Alias`
+/// (`src/windows/network.rs` of the checkout under
+/// `~/.cargo/git/checkouts/sysinfo-7cea62a9ad7b4e33`), which is the same
+/// interface alias. `AdapterName` is the adapter GUID and would key every
+/// adapter away from its byte counters.
+#[cfg(target_os = "windows")]
+fn walk() -> Option<Vec<RawEntry>> {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    use windows::Win32::Foundation::ERROR_BUFFER_OVERFLOW;
+    use windows::Win32::NetworkManagement::IpHelper::{
+        GetAdaptersAddresses, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER,
+        GAA_FLAG_SKIP_MULTICAST, IP_ADAPTER_ADDRESSES_LH,
+    };
+    use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
+    use windows::Win32::Networking::WinSock::{
+        AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6,
+    };
+
+    unsafe fn address_of(sockaddr: *const SOCKADDR, prefix: u8) -> Option<Address> {
+        if sockaddr.is_null() {
+            return None;
+        }
+        let family = (*sockaddr).sa_family;
+        if family == AF_INET {
+            let sa = &*(sockaddr as *const SOCKADDR_IN);
+            Some(Address {
+                addr: Ipv4Addr::from(u32::from_be(sa.sin_addr.S_un.S_addr)).to_string(),
+                prefix,
+                family: "inet",
+            })
+        } else if family == AF_INET6 {
+            let sa = &*(sockaddr as *const SOCKADDR_IN6);
+            Some(Address {
+                addr: Ipv6Addr::from(sa.sin6_addr.u.Byte).to_string(),
+                prefix,
+                family: "inet6",
+            })
+        } else {
+            None
+        }
+    }
+
+    // Anycast, multicast and DNS server lists are three chains this view never
+    // reads; the friendly name is kept because it IS the name here.
+    let flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    // The call writes the length it wanted back into `size` when the buffer was
+    // short. Three attempts, because an adapter can appear between the sizing
+    // and the read. `Vec<u64>` and not `Vec<u8>` because what the call writes
+    // is a chain of structs that must land on an 8 byte boundary.
+    let mut size: u32 = 16 * 1024;
+    for _ in 0..3 {
+        let mut buffer: Vec<u64> = vec![0; (size as usize + 7) / 8];
+        let head = buffer.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH;
+        let code =
+            unsafe { GetAdaptersAddresses(AF_UNSPEC.0 as u32, flags, None, Some(head), &mut size) };
+        if code == ERROR_BUFFER_OVERFLOW.0 {
+            continue;
+        }
+        if code != 0 {
+            return None;
+        }
+        let mut entries = Vec::new();
+        let mut cursor = head;
+        while !cursor.is_null() {
+            let adapter = unsafe { &*cursor };
+            cursor = adapter.Next;
+            if adapter.FriendlyName.is_null() {
+                continue;
+            }
+            let Ok(name) = (unsafe { adapter.FriendlyName.to_string() }) else {
+                continue;
+            };
+            let (loopback, physical) = windows_kind(adapter.IfType);
+            let up = adapter.OperStatus == IfOperStatusUp;
+            // The adapter itself first, so one holding no address is still
+            // listed, the way the AF_PACKET entry lists it on Linux.
+            entries.push(RawEntry {
+                name: name.clone(),
+                loopback,
+                up,
+                physical,
+                address: None,
+            });
+            let mut unicast = adapter.FirstUnicastAddress;
+            while !unicast.is_null() {
+                let one = unsafe { &*unicast };
+                unicast = one.Next;
+                if let Some(address) =
+                    unsafe { address_of(one.Address.lpSockaddr, one.OnLinkPrefixLength) }
+                {
+                    entries.push(RawEntry {
+                        name: name.clone(),
+                        loopback,
+                        up,
+                        physical,
+                        address: Some(address),
+                    });
+                }
+            }
+        }
+        return Some(entries);
+    }
+    None
+}
+
+/// Everything else: no enumeration, so the collector sends no `net.adapters`
+/// at all rather than an empty list that would read as "no adapters".
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 fn walk() -> Option<Vec<RawEntry>> {
     None
 }
@@ -408,9 +548,36 @@ mod tests {
         assert_eq!(prefix_v6([0xFF; 16]), 128);
     }
 
+    /// The Windows classification, asserted on every platform because CI
+    /// builds Linux only and would otherwise assert none of it.
+    #[test]
+    fn an_if_type_says_loopback_and_hardware() {
+        assert_eq!(windows_kind(IF_TYPE_LOOPBACK), (true, false));
+        assert_eq!(windows_kind(IF_TYPE_ETHERNET), (false, true), "an ethernet port");
+        assert_eq!(windows_kind(IF_TYPE_WIFI), (false, true), "a wifi radio");
+        // 53 is IF_TYPE_PROP_VIRTUAL, what a wintun overlay adapter reports:
+        // neither loopback nor hardware, so `collect` calls it overlay or
+        // other by its name.
+        assert_eq!(windows_kind(53), (false, false));
+        assert_eq!(windows_kind(0), (false, false));
+    }
+
+    /// The numbers above are the `windows` crate's own, checked where the
+    /// crate is actually compiled.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_if_type_numbers_are_the_crates() {
+        use windows::Win32::NetworkManagement::IpHelper::{
+            IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211, IF_TYPE_SOFTWARE_LOOPBACK,
+        };
+        assert_eq!(IF_TYPE_ETHERNET, IF_TYPE_ETHERNET_CSMACD);
+        assert_eq!(IF_TYPE_LOOPBACK, IF_TYPE_SOFTWARE_LOOPBACK);
+        assert_eq!(IF_TYPE_WIFI, IF_TYPE_IEEE80211);
+    }
+
     /// The walk itself, on the CI runner: it must not fail, must drop
     /// loopback, and must find at least the runner's own interface.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
     #[test]
     fn the_walk_finds_this_machines_interfaces() {
         let entries = walk().expect("getifaddrs answers");

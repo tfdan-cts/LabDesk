@@ -313,8 +313,9 @@ the service is actually doing travels as the machine attribute `net.reachability
 switch rather than the option. While the switch is off the service still probes the internet
 once an hour so the verdict exists on every machine. The per-adapter view comes from the
 attribute `net.adapters` (name, link state, MAC, addresses, byte counters, `physical`, `overlay`
-or `other`), sent when anything but the counters changes and once an hour otherwise; the
-Windows service does not send it yet.
+or `other`), sent when anything but the counters changes and once an hour otherwise. Linux
+and macOS read it from `getifaddrs`, Windows from `GetAdaptersAddresses`, where the adapter is
+named the way Windows names it in Network Connections (`Ethernet 2`, `Wi-Fi`).
 
 **Connect tickets.** When the console opens a session over labnet, lab-desk.net mints a
 one-time ticket with it. The console stores the secret as `labdesk-ticket-<peer id>` beside the

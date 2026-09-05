@@ -139,6 +139,17 @@ windows = { version = "0.61", features = [
     # state and addresses. Landed alone first, the way the two above were, so
     # CI proves the feature string before code is written against it.
     "Win32_NetworkManagement_IpHelper",
+    # The other two thirds of that call. In windows-0.61.1 both
+    # `GetAdaptersAddresses` and `IP_ADAPTER_ADDRESSES_LH` are written
+    # `#[cfg(all(feature = "Win32_NetworkManagement_Ndis", feature =
+    # "Win32_Networking_WinSock"))]` (IpHelper/mod.rs lines 286 and 1796), so
+    # the IpHelper feature alone compiles to nothing callable: Ndis carries
+    # IF_OPER_STATUS and NET_LUID_LH, WinSock carries SOCKET_ADDRESS and the
+    # two sockaddr shapes the addresses are read out of. Both are features of
+    # the `windows` crate that is already here and neither pulls a new package
+    # in, so Cargo.lock is unchanged.
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
     "Win32_System",
     "Win32_System_Com",
     "Win32_System_Diagnostics",
