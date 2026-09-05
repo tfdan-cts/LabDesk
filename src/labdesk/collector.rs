@@ -53,6 +53,10 @@ const DISK_INTERVAL: Duration = Duration::from_secs(3600);
 /// first hour. A machine that has just been enrolled reports its drives while the
 /// administrator who enrolled it is still looking at the console.
 const DISK_FIRST: Duration = Duration::from_secs(60);
+/// How often the daemon asks `--server` whether a delivered connect ticket was
+/// claimed, and only while one is live. A ticket lives 120 s, so the answer has
+/// to be asked for in seconds rather than on the flush cadence.
+const TICKET_POLL: Duration = Duration::from_secs(5);
 
 /// Start the collector on its own thread with its own runtime.
 ///
@@ -115,6 +119,12 @@ async fn run() {
     let mut attrs = Attrs::default();
     // The collector's own probe, used only while self-healing is off.
     let mut own_probe = Reachability::default();
+    // While a ticket this daemon delivered is still live, ask `--server` every
+    // TICKET_POLL whether it was claimed and report the claim before the row
+    // expires. A ticket lives 120 s and the flush cadence is 300 s by default,
+    // so a claim reported on the next flush would always arrive too late.
+    // `None` is "no live ticket", and the loop is quiet.
+    let mut ticket_watch_until: Option<Instant> = None;
     let mut failures = 0u32;
     log::info!(
         "[collector] Started: sampling every {}s, flushing every {}s offset by {}s",
@@ -124,7 +134,10 @@ async fn run() {
     );
 
     loop {
-        let deadline = next_sample.min(next_flush).min(next_disks);
+        let mut deadline = next_sample.min(next_flush).min(next_disks);
+        if ticket_watch_until.is_some() {
+            deadline = deadline.min(Instant::now() + TICKET_POLL);
+        }
         let now = Instant::now();
         if deadline > now {
             sleep(deadline - now).await;
@@ -199,7 +212,11 @@ async fn run() {
                     collect_now = now_please;
                     for t in ticket::tickets_in(&text) {
                         match ticket::deliver(&t).await {
-                            Ok(()) => log::info!("[collector] Delivered connect ticket {}", t.id),
+                            Ok(()) => {
+                                log::info!("[collector] Delivered connect ticket {}", t.id);
+                                ticket_watch_until =
+                                    Some(watch_until(ticket_watch_until, t.expires_at));
+                            }
                             Err(err) => {
                                 log::warn!("[collector] Ticket {} not delivered: {}", t.id, err)
                             }
@@ -244,6 +261,58 @@ async fn run() {
             if collect_now {
                 next_flush = Instant::now() + Duration::from_secs(tools::COLLECT_NOW_SECONDS);
             }
+        }
+
+        if let Some(until) = ticket_watch_until {
+            report_claimed_tickets(&identity).await;
+            if Instant::now() >= until {
+                ticket_watch_until = None;
+            }
+        }
+    }
+}
+
+/// How long to keep asking after a delivery: until the newest live ticket
+/// expires, and never more than a couple of minutes past now whatever clock
+/// the answer carried.
+fn watch_until(held: Option<Instant>, expires_at: i64) -> Instant {
+    let left = (expires_at - hbb_common::get_time() / 1000).clamp(0, 300) as u64;
+    let until = Instant::now() + Duration::from_secs(left);
+    match held {
+        Some(held) if held > until => held,
+        _ => until,
+    }
+}
+
+/// Report the tickets `--server` has claimed since the last ask, so the row
+/// records that the one-time credential was spent (section 3 of the phase 1
+/// contracts). A ticket claimed but never reported would be re-delivered for
+/// the rest of its two minutes and would leave the console with no sign that
+/// the session used it.
+async fn report_claimed_tickets(identity: &AgentIdentity) {
+    let ids = match ticket::claimed().await {
+        Ok(ids) => ids,
+        // `--server` is not answering: nobody is logged in, or it is
+        // restarting. There is nothing to report and nothing to say about it
+        // every few seconds.
+        Err(err) => {
+            log::debug!("[collector] No claim answer from --server: {}", err);
+            return;
+        }
+    };
+    for id in ids {
+        let path = format!("/agent/ticket/{}/claimed", id);
+        match post_signed(identity, &path, "{}").await {
+            Ok((status, _)) if (200..300).contains(&status) => {
+                log::info!("[collector] Reported connect ticket {} claimed", id)
+            }
+            Ok((status, body)) => log::warn!(
+                "[collector] Ticket {} claim not recorded: HTTP {} {}",
+                id,
+                status,
+                body
+            ),
+            Err(err) => log::warn!("[collector] Ticket {} claim not sent: {}", id, err),
         }
     }
 }

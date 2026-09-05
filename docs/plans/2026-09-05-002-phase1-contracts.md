@@ -781,6 +781,15 @@ builds against these.
    `net.reachability.selfheal` is the running step and `off` while the switch is off.
 10. `labdesk --disk-health` (root or administrator) prints the `disks` member the daemon would
     send, for field checks on any machine.
+11. Section 3, the report. `POST /agent/ticket/:id/claimed` is sent by the daemon and never by
+    `--server`: the claim happens in the process that answers logins, and that process holds no
+    agent key. `--server` keeps the claimed ids and the daemon asks for them over the main
+    channel (`Data::ClaimedTickets`, answered from `crate::server::take_claimed_tickets`, which
+    hands each id over exactly once). The daemon asks every 5 s while a ticket it delivered is
+    still live rather than on the flush cadence, because a ticket lives 120 s, the default flush
+    is 300 s and the route answers 410 past `expiresAt`. An id that comes back is checked against
+    `ticket::is_ticket_id` before it reaches a URL path: on Linux and macOS it crosses from a
+    process running as the logged-in user.
 
 ## 12. Built and not built, at client `d572566815` and site `fb3c14e`
 
@@ -794,7 +803,7 @@ out and the code wins.
 |---|---|---|
 | 1, the catalog | `src/labdesk/tools.json` compiled by `src/labdesk/tools.rs` (`Catalog::parse`, `Tool`, `CharClass`, `argv_for`, `run_steps`, `execute`, `Ledger`, `run_here`, `platform`) | `src/worker/tools.json` read by `src/worker/tool-catalog.ts` (`checkCatalog`, `TOOLS`, `checkParams`, `initialState`, `PARAMS_MAX_BYTES`, `JOB_TTL_SECONDS`), asserted by `test/jobs.test.ts` |
 | 2, jobs and results | `tools.rs::jobs_in`, `JobResult::to_json`, `Ledger` (the executed ids on disk), driven from `src/labdesk/collector.rs` | `src/worker/routes/jobs.ts` (request, approve, refuse, list, one row), the `jobs`, `tickets` and `collectNow` members of the `/agent/batch` answer and the `jobResults` and `attrs` readers in `src/worker/routes/agent-ingest.ts`, `drizzle/0011_job_urgent.sql`, the `runTool` firing and the expiry sweep in `src/worker/scheduled.ts` (`minuteTick`) |
-| 3, connect ticket | `src/labdesk/ticket.rs` (`Ticket`, `tickets_in`, `secret_hash`), `Data::ConnectTicket` in `src/ipc.rs` handed to `crate::server::insert_pending_ticket`, the claim-once store `PENDING_TICKETS` in `src/server/connection.rs` (`PendingTicket`, `insert_pending_ticket`, `claim_pending_ticket`, `retain_live_tickets`), claimed at the login check by `claim_pending_ticket(&self.lr.my_id, |h| self.validate_password_plain(h))`, and the `handle_hash` branch in `src/client.rs` behind `PasswordSource::Ticket`, fed by the console writer `kOverlayTicketOption` in `flutter/lib/labdesk/services/overlay_session.dart`, which sets `labdesk-ticket-<peer id>` from `grant.ticket` beside the two overlay options and clears all three on close (`flutter/test/labdesk_overlay_session_test.dart`) | the mint in `src/worker/routes/overlay.ts`, the delivery select in `agent-ingest.ts`, `POST /agent/ticket/:id/claimed` in `src/worker/routes/ticket.ts`, `test/ticket.test.ts` |
+| 3, connect ticket | `src/labdesk/ticket.rs` (`Ticket`, `tickets_in`, `secret_hash`), `Data::ConnectTicket` in `src/ipc.rs` handed to `crate::server::insert_pending_ticket`, the claim-once store `PENDING_TICKETS` in `src/server/connection.rs` (`PendingTicket`, `insert_pending_ticket`, `claim_pending_ticket`, `retain_live_tickets`), claimed at the login check by `claim_pending_ticket(&self.lr.my_id, |h| self.validate_password_plain(h))`, and the `handle_hash` branch in `src/client.rs` behind `PasswordSource::Ticket`, fed by the console writer `kOverlayTicketOption` in `flutter/lib/labdesk/services/overlay_session.dart`, which sets `labdesk-ticket-<peer id>` from `grant.ticket` beside the two overlay options and clears all three on close (`flutter/test/labdesk_overlay_session_test.dart`) | the mint in `src/worker/routes/overlay.ts`, the delivery select in `agent-ingest.ts`, `POST /agent/ticket/:id/claimed` in `src/worker/routes/ticket.ts`, `test/ticket.test.ts`; the daemon reports the claim with `ticket::claimed` over `Data::ClaimedTickets` and `collector::report_claimed_tickets` posting `POST /agent/ticket/:id/claimed` |
 | 4, the writer the projection needs | -- | `PATCH /api/org/machines/:id` in `src/worker/routes/org.ts` with `test/console-api.test.ts` |
 | 5, console read routes | -- | `GET /org/machines/:id/state`, `/metrics`, `/disks`, `GET /org/events`, `POST /org/events/:id/ack` and `GET /org/machines?state=1` in `src/worker/routes/org.ts` |
 | 6, network view | `src/labdesk/netview.rs` (`Adapter`, `Address`, `collect`, `to_value`, `counters`, `adapters`, `windows_kind`, a `walk` per platform) | the `attrs` upsert in `agent-ingest.ts` and the `attrs` member of `GET /api/org/machines/:id` |
@@ -844,3 +853,13 @@ out and the code wins.
    `test_pending_ticket_claim_once_per_ticket_never_for_another_peer`, a second test beside
    `test_pending_switch_sides_uuid_is_claimed_once` rather than an extension of it; the filter
    `cargo test claim_once` that section 10 names matches it.
+
+6. Section 3, delivery timing. Open, and the site lane's to close: `connect_ticket.expires_at` is
+   `issued_at + 120` while `machine.flush_seconds` defaults to 300, so the batch that would carry
+   a ticket usually runs after the row has expired and the delivery select (`claimedAt` NULL,
+   `expiresAt` in the future) finds nothing. Nothing on the machine plane can wake an agent:
+   `collectNow` rides an answer and the answer only comes with the next batch. Until the ticket
+   lives as long as a flush, or opening a session shortens the target's flush the way `urgent`
+   shortens it for a job, a session over labnet falls back to the shared password path, which
+   phase 1 keeps (plan section 0.3). This is why the client half of section 3 is proven by unit
+   test and not in the field.

@@ -62,12 +62,32 @@ pub fn secret_hash(delivered: &str) -> String {
     hex::encode(sha256::hash(delivered.as_bytes()).0)
 }
 
-/// Hand one ticket to the `--server` that answers logins on this machine.
+/// Ask the `--server` that answers logins on this machine one question and
+/// read its answer.
 ///
 /// Linux and macOS: the daemon is root and `--server` runs as the seat0 user,
 /// whose main channel is under that user's runtime directory, so the connect
 /// names the uid. Windows: one named pipe, served by the LocalSystem
 /// `--server`.
+async fn ask(data: crate::ipc::Data) -> ResultType<crate::ipc::Data> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let mut conn = {
+        let uid = crate::platform::get_active_userid();
+        let Ok(uid) = uid.trim().parse::<u32>() else {
+            bail!("no active user whose --server answers logins");
+        };
+        crate::ipc::connect_for_uid(1000, uid, "").await?
+    };
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let mut conn = crate::ipc::connect(1000, "").await?;
+    conn.send(&data).await?;
+    match conn.next_timeout(1000).await? {
+        Some(answer) => Ok(answer),
+        None => bail!("no answer from --server"),
+    }
+}
+
+/// Hand one ticket to the `--server` that answers logins on this machine.
 pub async fn deliver(ticket: &Ticket) -> ResultType<()> {
     let data = crate::ipc::Data::ConnectTicket {
         id: ticket.id.clone(),
@@ -75,23 +95,37 @@ pub async fn deliver(ticket: &Ticket) -> ResultType<()> {
         secret_hash: secret_hash(&ticket.secret),
         expires_at: ticket.expires_at,
     };
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let mut conn = {
-        let uid = crate::platform::get_active_userid();
-        let Ok(uid) = uid.trim().parse::<u32>() else {
-            bail!("no active user to deliver ticket {} to", ticket.id);
-        };
-        crate::ipc::connect_for_uid(1000, uid, "").await?
-    };
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    let mut conn = crate::ipc::connect(1000, "").await?;
-    conn.send(&data).await?;
     // `--server` answers `Empty` once the map holds the ticket, so a delivery
     // that was refused or dropped is an error here rather than a silent gap.
-    match conn.next_timeout(1000).await? {
-        Some(crate::ipc::Data::Empty) => Ok(()),
+    match ask(data).await? {
+        crate::ipc::Data::Empty => Ok(()),
         _ => bail!("no answer from --server for ticket {}", ticket.id),
     }
+}
+
+/// The tickets `--server` has claimed since the last ask, for the daemon to
+/// report with `POST /agent/ticket/:id/claimed` (section 3 of the phase 1
+/// contracts). Each id is reported once: `--server` marks it as it hands it
+/// over.
+pub async fn claimed() -> ResultType<Vec<String>> {
+    match ask(crate::ipc::Data::ClaimedTickets(Vec::new())).await? {
+        crate::ipc::Data::ClaimedTickets(ids) => {
+            Ok(ids.into_iter().filter(|id| is_ticket_id(id)).collect())
+        }
+        _ => bail!("no claimed-ticket answer from --server"),
+    }
+}
+
+/// An id fit to be pasted into the path of `POST /agent/ticket/:id/claimed`.
+/// The ids come back across a process boundary -- on Linux and macOS from a
+/// process running as the logged-in user -- so what reaches a URL is checked
+/// here rather than trusted.
+pub fn is_ticket_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 #[cfg(test)]
@@ -117,6 +151,18 @@ mod tests {
         );
         assert!(tickets_in(r#"{"ok":true}"#).is_empty());
         assert!(tickets_in("nope").is_empty());
+    }
+
+    /// Nothing but an id the Worker could have minted reaches a URL path.
+    #[test]
+    fn a_ticket_id_that_could_reshape_a_url_is_dropped() {
+        assert!(is_ticket_id("2f1c9b7a-0d4e-4b1a-9f00-7c3d5e6f8a91"));
+        assert!(is_ticket_id("t1"));
+        assert!(!is_ticket_id(""));
+        assert!(!is_ticket_id("../../agent/batch"));
+        assert!(!is_ticket_id("t1/claimed?x=1"));
+        assert!(!is_ticket_id("t 1"));
+        assert!(!is_ticket_id(&"t".repeat(65)));
     }
 
     /// The Worker's `sha256Hex` is SHA-256 over the UTF-8 bytes of the

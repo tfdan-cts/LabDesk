@@ -6206,6 +6206,9 @@ struct PendingTicket {
     secret_hash: String,
     expires_at: i64,
     claimed: bool,
+    /// Set once the daemon has been handed this id to report to the server
+    /// (`POST /agent/ticket/:id/claimed`), so a claim is reported once.
+    reported: bool,
 }
 
 fn retain_live_tickets(tickets: &mut Vec<PendingTicket>) {
@@ -6231,6 +6234,7 @@ pub fn insert_pending_ticket(
         secret_hash,
         expires_at,
         claimed: false,
+        reported: false,
     });
     true
 }
@@ -6248,6 +6252,25 @@ pub fn claim_pending_ticket(controller_peer_id: &str, matches: impl Fn(&str) -> 
         }
     }
     false
+}
+
+/// The ids of tickets claimed since the last ask, marked reported as they are
+/// handed over. The daemon asks over the main IPC channel
+/// (`src/labdesk/ticket.rs`) and posts `POST /agent/ticket/:id/claimed` for
+/// each, so the row records that the one-time credential was spent. Reporting
+/// once is what keeps a second ask from asking the server to record a claim
+/// it has already recorded.
+pub fn take_claimed_tickets() -> Vec<String> {
+    let mut tickets = PENDING_TICKETS.lock().unwrap();
+    retain_live_tickets(&mut tickets);
+    tickets
+        .iter_mut()
+        .filter(|t| t.claimed && !t.reported)
+        .map(|t| {
+            t.reported = true;
+            t.id.clone()
+        })
+        .collect()
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -7243,6 +7266,22 @@ mod test {
         assert!(!claim_pending_ticket(&peer, |h| h == "h4"));
         assert!(claim_pending_ticket(&peer, |h| h == "h3"));
         assert!(!claim_pending_ticket(&peer, |h| h == "h3"));
+        // Every claim is owed to the server once: the daemon asks, reports,
+        // and a second ask has nothing left to report.
+        let mine = |ids: Vec<String>| {
+            let mut ids: Vec<String> = ids.into_iter().filter(|id| id.starts_with(&peer)).collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(
+            mine(take_claimed_tickets()),
+            vec![tid(1), tid(3), tid(4)],
+            "the three claimed tickets, and not the one that expired unclaimed"
+        );
+        assert!(
+            mine(take_claimed_tickets()).is_empty(),
+            "reported once"
+        );
     }
 
     #[test]

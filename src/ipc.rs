@@ -385,6 +385,12 @@ pub enum Data {
         secret_hash: String,
         expires_at: i64,
     },
+    /// The connect tickets this process has claimed since the last ask. The
+    /// daemon sends it empty as the question and reads the ids out of the
+    /// answer (src/labdesk/ticket.rs), then reports each to the server. Main
+    /// channel only: `_service` admits `SyncConfig` and `Labnet` and nothing
+    /// else.
+    ClaimedTickets(Vec<String>),
     #[cfg(target_os = "windows")]
     ClipboardFile(ClipboardFile),
     ClipboardFileEnabled(bool),
@@ -1051,6 +1057,13 @@ async fn handle(data: Data, stream: &mut Connection) {
                 log::warn!("A connect ticket was delivered twice; keeping the first");
             }
             allow_err!(stream.send(&Data::Empty).await);
+        }
+        Data::ClaimedTickets(_) => {
+            allow_err!(
+                stream
+                    .send(&Data::ClaimedTickets(crate::server::take_claimed_tickets()))
+                    .await
+            );
         }
         Data::SyncConfig(Some(configs)) => {
             let (config, config2) = *configs;

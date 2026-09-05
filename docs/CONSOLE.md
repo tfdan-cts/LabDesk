@@ -324,8 +324,10 @@ hints) and the client spends it on the connect (`handle_hash` in `src/client.rs`
 option, clears it, and presents `sha256(sha256Hex(secret) || salt)` as the password); the
 target's service receives the ticket's hash on its next uplink and hands it to the login
 process, which accepts it once for that controller and refuses a second use like a wrong
-password. The controller holds the secret in its options file only for the seconds between the
-grant and the connect, and it is cleared on use and again when the grant is released; the
+password, and the target's service then reports the claim to lab-desk.net so the ticket's row
+records that the one-time credential was spent. The controller holds the secret in its options
+file only for the seconds between the grant and the connect, and it is cleared on use and again
+when the grant is released; the
 target keeps the hash in memory only. A ticket expires in two minutes. The ticket password
 is never written to the peer's remembered password and never synced to the personal address
 book, even when that peer already has a remembered password (`PasswordSource::is_storable`
