@@ -95,6 +95,26 @@ void main() {
       expect([signIn, addProfile, skip], [1, 1, 1]);
     });
 
+    testWidgets('it fits a short screen without overflowing', (tester) async {
+      tester.view.physicalSize = const Size(320, 480);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrap(FirstRunView(
+        configuredServer: '',
+        onSignIn: () {},
+        onAddProfile: () {},
+        onSkip: () {},
+      )));
+
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'the smallest phone still has to be able to get past this screen',
+      );
+      expect(find.text('Sign in to lab-desk.net'), findsOneWidget);
+    });
+
     testWidgets('it asks for no permission and mentions none', (tester) async {
       await tester.pumpWidget(_wrap(FirstRunView(
         configuredServer: '',

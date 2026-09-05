@@ -153,6 +153,32 @@ void main() {
     );
   });
 
+  testWidgets('a long name on a narrow phone does not overflow the row',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(_wrap(MachineListView(
+      machines: [
+        _row('1180573903',
+            hostname: 'workshop-pc-in-the-back-room-by-the-window',
+            status: LabDeskPeerStatus.offline,
+            lastSeenOnline: now.subtract(const Duration(hours: 3))),
+      ],
+      onConnect: (_) {},
+      savedPasswords: const {'1180573903'},
+      now: now,
+    )));
+
+    expect(
+      tester.takeException(),
+      isNull,
+      reason: 'the narrowest phone still has to be able to read the list',
+    );
+    expect(find.text('Offline'), findsOneWidget);
+  });
+
   testWidgets('a machine with no hostname is still named by its identifier',
       (tester) async {
     await tester.pumpWidget(_wrap(MachineListView(

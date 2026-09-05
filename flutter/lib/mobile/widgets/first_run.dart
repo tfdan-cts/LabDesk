@@ -52,48 +52,53 @@ class FirstRunView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.textTheme.bodyMedium?.color?.withOpacity(0.7);
+    // Centred when it fits and scrollable when it does not. A fixed column with
+    // spacers overflowed by 60 pixels on a 320 by 480 screen, and a first run
+    // screen that cannot be got past is the worst possible one to break.
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Spacer(),
-            Text(
-              'Choose a server',
-              style: theme.textTheme.headlineSmall,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'LabDesk connects your machines through a server. '
-              'Sign in to use the one on your account, or point this app at '
-              'a server you run.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: muted),
-            ),
-            const SizedBox(height: 28),
-            FilledButton(
-              onPressed: onSignIn,
-              child: const Text('Sign in to lab-desk.net'),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: onAddProfile,
-              child: const Text('Add a server profile'),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              _currentServerLine(),
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(color: muted),
-            ),
-            const Spacer(),
-            TextButton(
-              onPressed: onSkip,
-              child: const Text('Not now'),
-            ),
-          ],
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Choose a server',
+                style: theme.textTheme.headlineSmall,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'LabDesk connects your machines through a server. '
+                'Sign in to use the one on your account, or point this app at '
+                'a server you run.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: muted),
+              ),
+              const SizedBox(height: 28),
+              FilledButton(
+                onPressed: onSignIn,
+                child: const Text('Sign in to lab-desk.net'),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: onAddProfile,
+                child: const Text('Add a server profile'),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                _currentServerLine(),
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(color: muted),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: onSkip,
+                child: const Text('Not now'),
+              ),
+            ],
+          ),
         ),
       ),
     );
