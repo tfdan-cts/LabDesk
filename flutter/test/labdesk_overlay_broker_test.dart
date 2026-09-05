@@ -326,12 +326,16 @@ void main() {
     expect(wire.calls.map((c) => c.headers['authorization']), ['Bearer tok-1', 'Bearer tok-2']);
   });
 
-  test('a session grant carries the address and the id key', () async {
-    wire.reply = {'id': 's1', 'targetAddr': '100.64.0.9:21118', 'targetIdPk': 'pk='};
+  test('a session grant carries the address, the id key and the connect ticket', () async {
+    wire.reply = {'id': 's1', 'targetAddr': '100.64.0.9:21118', 'targetIdPk': 'pk=', 'ticket': {'id': 't1', 'secret': 'c2VjcmV0', 'expiresAt': 1788480243}};
     final g = await broker().session('900000001');
     expect(g.id, 's1');
     expect(g.targetAddr, '100.64.0.9:21118');
     expect(g.targetIdPk, 'pk=');
+    expect(g.ticket, 'c2VjcmV0');
+    // A Worker that mints no ticket (contracts section 3) hands back an empty one.
+    wire.reply = {'id': 's1', 'targetAddr': '100.64.0.9:21118', 'targetIdPk': 'pk='};
+    expect((await broker().session('900000001')).ticket, '');
   });
 
   test('a refusal surfaces the server\'s own sentence, and only the human plane\'s 401 is a sign-in', () async {

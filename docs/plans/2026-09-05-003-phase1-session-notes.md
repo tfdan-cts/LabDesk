@@ -113,3 +113,31 @@ silent everywhere; it is the client lane's file to change.
 Open after these rounds: no signed-in production request (the program seeds no account); a job
 and a ticket end to end need an enrolled machine and therefore an owner-minted token; WP17's
 pages and the rules presets are their own pieces.
+
+## Client lane, RUST CORE, round 2 (2026-09-05)
+
+The round 1 critic found WP15 dead on the controller: `handle_hash` in `src/client.rs` read the
+option `labdesk-ticket-<peer id>` and nothing wrote it, so no ticket was ever presented and the
+target's claim-once map was never exercised. Closed in this round, tests first:
+
+- `flutter/lib/labdesk/services/overlay_broker.dart`: `SessionGrant` carries `ticket`, the
+  `secret` of the `ticket` member `POST /console/overlay/session` answers (contracts section 3),
+  empty when the Worker minted none.
+- `flutter/lib/labdesk/services/overlay_session.dart`: `prepare` writes `labdesk-ticket-<peer
+  id>` after the address and key hints when the grant carried a ticket; `release` clears it with
+  the other two. `handle_hash` already clears it on use, so a ticket is presented once and never
+  lingers past the grant.
+- `flutter/test/labdesk_overlay_session_test.dart` and `labdesk_overlay_broker_test.dart`
+  assert both, and the case of a grant without a ticket. Gate: `flutter test test/labdesk_*.dart`
+  343 pass, `flutter/pubspec.lock` restored.
+- `docs/CONSOLE.md`: "A session" names the third option; "Connect tickets" no longer claims
+  nothing touches disk on either side. The controller holds the plaintext in its options file
+  for the seconds between the grant and the connect (the same file the two overlay hints live
+  in), cleared on use and on release; the target keeps the hash in memory only.
+- `.gitattributes`: `src/labdesk/tools.json text eol=lf`, so a working-tree `cmp` against the
+  Worker's copy is silent on a Windows checkout too (the site lane's note above).
+
+What this round did not change: the Rust side (`src/client.rs`, `src/labdesk/ticket.rs`,
+`src/server/connection.rs`) is as round 1 left it. What remains unproven in the field: a
+ticket end to end needs two enrolled machines and a signed-in console, which needs an
+owner-minted token; Foundry's QEMU disks cannot prove the Windows disk path.

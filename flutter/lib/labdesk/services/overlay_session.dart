@@ -7,13 +7,18 @@ import 'overlay_enrolment.dart' show OptionWriter, bareIp;
 const kOverlayAddrOption = 'labdesk-overlay-addr-';
 const kOverlayPkOption = 'labdesk-overlay-pk-';
 
+/// The connect ticket's secret, read and cleared by `handle_hash` in
+/// `src/client.rs` on the connect, and cleared here with the other two.
+const kOverlayTicketOption = 'labdesk-ticket-';
+
 /// A session grant from lab-desk.net, from asking for it to releasing it.
 ///
 /// `prepare` asks for the rule, waits until this machine's daemon reports the
 /// target peer Connected (the rule has to be signalled and the WireGuard
 /// handshake completed before a socket can cross), then writes the address
-/// hint and the target's id key for the client. Anything short of that writes
-/// nothing, and the session goes the way it always has.
+/// hint, the target's id key and the one-time connect ticket for the client.
+/// Anything short of that writes nothing, and the session goes the way it
+/// always has.
 ///
 /// `noteOpenSessions` is fed the ids of the sessions the console can see; a
 /// granted id that has gone is released and its hints cleared.
@@ -63,6 +68,9 @@ class OverlaySession {
     }
     await setOption('$kOverlayAddrOption$peerId', grant.targetAddr);
     await setOption('$kOverlayPkOption$peerId', grant.targetIdPk);
+    if (grant.ticket.isNotEmpty) {
+      await setOption('$kOverlayTicketOption$peerId', grant.ticket);
+    }
     _grants[peerId] = (grant: grant, seenOpen: false);
     _unseenPolls[peerId] = 0;
     return true;
@@ -95,6 +103,7 @@ class OverlaySession {
     if (g == null) return;
     await setOption('$kOverlayAddrOption$peerId', '');
     await setOption('$kOverlayPkOption$peerId', '');
+    await setOption('$kOverlayTicketOption$peerId', '');
     await broker.endSession(g.grant.id);
   }
 

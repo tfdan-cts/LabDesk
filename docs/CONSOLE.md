@@ -226,13 +226,14 @@ undoes each in the other order and sets `direct-server=N`.
 on, lab-desk.net is asked for a grant (`POST /console/overlay/session`), which creates a one-way
 rule from this machine's group to the target's on the target's direct port. The console waits
 for the target peer to read Connected in the daemon's status (the rule has to be signalled and
-the tunnel's handshake completed first, up to ten seconds), then hands the client two options,
-`labdesk-overlay-addr-<id>` and `labdesk-overlay-pk-<id>`, and connects as always. The client
-tries that address before any server, with the target's own id public key, so the session
-still runs LabDesk's key exchange and is never the insecure kind a bare IP connection is.
-When the session window is gone the grant is released (`DELETE /console/overlay/session/<id>`)
-and the two options cleared. If anything short of that happens, the session simply goes the
-way it always has.
+the tunnel's handshake completed first, up to ten seconds), then hands the client three options,
+`labdesk-overlay-addr-<id>`, `labdesk-overlay-pk-<id>` and `labdesk-ticket-<id>` (the one-time
+connect ticket minted with the grant, see "Connect tickets" below; absent when the grant carried
+none), and connects as always. The client tries that address before any server, with the
+target's own id public key, so the session still runs LabDesk's key exchange and is never the
+insecure kind a bare IP connection is. When the session window is gone the grant is released
+(`DELETE /console/overlay/session/<id>`) and the three options cleared. If anything short of
+that happens, the session simply goes the way it always has.
 
 **Labnets.** The Network section lists the labnets the account owns or this machine belongs
 to, and the invitations waiting on this machine. A labnet is a standing group: members reach
@@ -317,10 +318,14 @@ Windows service does not send it yet.
 
 **Connect tickets.** When the console opens a session over labnet, lab-desk.net mints a
 one-time ticket with it. The console stores the secret as `labdesk-ticket-<peer id>` beside the
-overlay address and the client spends it on the connect; the target's service receives the
-ticket's hash on its next uplink and hands it to the login process, which accepts it once for
-that controller and refuses a second use like a wrong password. Nothing about a ticket is stored
-on disk on either side, and it expires in two minutes.
+overlay address (`services/overlay_session.dart`, the same `prepare` that writes the other two
+hints) and the client spends it on the connect (`handle_hash` in `src/client.rs` reads the
+option, clears it, and presents `sha256(sha256Hex(secret) || salt)` as the password); the
+target's service receives the ticket's hash on its next uplink and hands it to the login
+process, which accepts it once for that controller and refuses a second use like a wrong
+password. The controller holds the secret in its options file only for the seconds between the
+grant and the connect, and it is cleared on use and again when the grant is released; the
+target keeps the hash in memory only. A ticket expires in two minutes.
 
 ## What the console does not show
 

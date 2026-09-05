@@ -109,6 +109,7 @@ class SessionGrant {
     required this.id,
     required this.targetAddr,
     required this.targetIdPk,
+    this.ticket = '',
   });
   final String id;
 
@@ -118,6 +119,11 @@ class SessionGrant {
   /// The target's own id public key, so the direct session still runs the
   /// key exchange the rendezvous path performs.
   final String targetIdPk;
+
+  /// The connect ticket's secret, minted with the grant and spent once by
+  /// the client on the connect (`docs/plans/2026-09-05-002-phase1-contracts.md`
+  /// section 3). Empty when the Worker minted none.
+  final String ticket;
 }
 
 /// The labnet routes on lab-desk.net.
@@ -307,10 +313,12 @@ class OverlayBroker {
       'controller': machineIdOf(peerId()),
       'target': machineIdOf(targetPeerId),
     });
+    final ticket = j['ticket'];
     return SessionGrant(
         id: '${j['id']}',
         targetAddr: '${j['targetAddr']}',
-        targetIdPk: '${j['targetIdPk']}');
+        targetIdPk: '${j['targetIdPk']}',
+        ticket: ticket is Map ? '${ticket['secret'] ?? ''}' : '');
   }
 
   /// Best effort: a session that is over is over whether or not the release

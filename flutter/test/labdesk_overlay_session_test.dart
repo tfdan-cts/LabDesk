@@ -24,8 +24,11 @@ class _World {
 
   Future<(int, String)> http(String method, Uri url, Map<String, String> h, String? body) async {
     log.add('broker $method ${url.path}');
-    return (brokerStatus, '{"id":"s1","targetAddr":"100.64.0.9:21118","targetIdPk":"pk=","error":"That machine has not come up on labnet yet."}');
+    return (brokerStatus, '{"id":"s1","targetAddr":"100.64.0.9:21118","targetIdPk":"pk=",$ticketJson"error":"That machine has not come up on labnet yet."}');
   }
+
+  /// The connect ticket minted with the grant; empty for a Worker without one.
+  String ticketJson = '"ticket":{"id":"t1","secret":"c2VjcmV0","expiresAt":1788480243},';
 
   OverlaySession session() => OverlaySession(
         broker: OverlayBroker(baseUrl: 'https://lab-desk.net', token: () => 't', http: http),
@@ -40,14 +43,21 @@ class _World {
 }
 
 void main() {
-  test('a grant whose peer is up writes the address and key hints for the client', () async {
+  test('a grant whose peer is up writes the address, key and ticket hints for the client', () async {
     final w = _World();
     expect(await w.session().prepare('1180573903'), isTrue);
     expect(w.options, {
       'labdesk-overlay-addr-1180573903': '100.64.0.9:21118',
       'labdesk-overlay-pk-1180573903': 'pk=',
+      'labdesk-ticket-1180573903': 'c2VjcmV0',
     });
-    expect(w.log, ['broker POST /console/overlay/session', 'daemon status', 'option labdesk-overlay-addr-1180573903=100.64.0.9:21118', 'option labdesk-overlay-pk-1180573903=pk=']);
+    expect(w.log, ['broker POST /console/overlay/session', 'daemon status', 'option labdesk-overlay-addr-1180573903=100.64.0.9:21118', 'option labdesk-overlay-pk-1180573903=pk=', 'option labdesk-ticket-1180573903=c2VjcmV0']);
+  });
+
+  test('a grant without a ticket writes the two hints and no ticket option', () async {
+    final w = _World()..ticketJson = '';
+    expect(await w.session().prepare('1'), isTrue);
+    expect(w.options, {'labdesk-overlay-addr-1': '100.64.0.9:21118', 'labdesk-overlay-pk-1': 'pk='});
   });
 
   test('the client waits for the peer to come up, one status read a second, up to the cap', () async {
@@ -77,7 +87,7 @@ void main() {
     await s.noteOpenSessions(['1']);
     await s.noteOpenSessions([]);
     await s.noteOpenSessions([]);
-    expect(w.options, {'labdesk-overlay-addr-1': '', 'labdesk-overlay-pk-1': ''});
+    expect(w.options, {'labdesk-overlay-addr-1': '', 'labdesk-overlay-pk-1': '', 'labdesk-ticket-1': ''});
     expect(w.log.where((l) => l == 'broker DELETE /console/overlay/session/s1'), hasLength(1));
     expect(s.hasGrants, isFalse);
   });
@@ -101,7 +111,7 @@ void main() {
     expect(s.hasGrants, isTrue, reason: 'one poll short of the window it is still waiting');
     await s.noteOpenSessions([]);
     expect(s.hasGrants, isFalse);
-    expect(w.options, {'labdesk-overlay-addr-1': '', 'labdesk-overlay-pk-1': ''});
+    expect(w.options, {'labdesk-overlay-addr-1': '', 'labdesk-overlay-pk-1': '', 'labdesk-ticket-1': ''});
     expect(w.log.where((l) => l == 'broker DELETE /console/overlay/session/s1'), hasLength(1));
   });
 }
