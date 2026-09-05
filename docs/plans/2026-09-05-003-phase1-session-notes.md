@@ -272,3 +272,132 @@ options from process memory, so on Windows only the switch itself survives a dae
 started before the change; and section 3's delivery timing (a ticket lives 120 s while the
 default flush is 300 s) is recorded as contracts section 12 correction 6 and belongs to the site
 lane.
+
+## Client lane, LINUX DELIVERY (WP19), round 1 (2026-09-05)
+
+Linux received no update at all. `src/updater.rs` had a `windows` arm and a `macos` arm and
+nothing else, and `res/DEBIAN/postinst` only symlinked the binary and enabled the service, so a
+Linux machine could learn that a new version was offered and had no way to install it. An earlier
+attempt at this package was reverted because it called
+`/usr/share/rustdesk/labdesk-helper`, a path no package this repository builds produced. This
+round starts where that one should have: with the file.
+
+What landed, on `feat/labnet`, heads `462889346`, `84da030f8` and `489339fc1`:
+
+- `res/labdesk-helper` and `res/polkit/net.lab-desk.LabDesk.policy`, staged by `build.py` into
+  `/usr/share/rustdesk/labdesk-helper` and `/usr/share/polkit-1/actions/` on both deb paths
+  (`build_flutter_deb` and `build_deb_from_folder`) and installed by both flutter rpm specs.
+  `system2` exits the build on a failed command, so a deb that exists is a deb that carries them.
+- The helper is the fence, not a wrapper. `pkexec` authorizes through
+  `org.freedesktop.policykit.exec` against the program it launches and reads the action id from
+  that program's own annotation, so `pkexec dpkg -i <file>` was authorized as dpkg, under dpkg's
+  annotation, and installed whatever package it was pointed at. The helper copies the package into
+  a root-owned 0700 directory first and everything after that reads the copy: the name and version
+  out of the copy, a refusal of any version that is not newer than the installed one, the digest
+  lab-desk.net publishes for that asset of that release, and an install only of bytes that hash to
+  it. The digest is fetched, never taken from the caller, because a digest the caller supplies
+  proves only that the caller knows the hash of its own file.
+- `crate::updater::start_auto_update_linux`, started from `start_os_service` in
+  `src/platform/linux.rs`, which is the root process the unit starts; `--server` is the desktop
+  user's and cannot install a package. It asks that `--server` over IPC whether a session is live
+  (`Data::HasNoActiveConns` is no longer macOS only) and reads an unanswered question as a live
+  session. The install goes to the helper through `systemd-run` and NOT as a child of the service:
+  `res/DEBIAN/preinst` stops `rustdesk.service` on an upgrade and `KillMode=mixed` then kills
+  whatever is left in that cgroup, which would be dpkg part way through unpacking. `postinst`
+  starts the service again on the new binary. `res/DEBIAN/postinst` needed no change; polkit picks
+  the action file up from the packaged path by itself.
+- One test, `updater::linux_tests::the_linux_asset_url_is_one_the_release_allowlist_accepts`, on
+  the one seam a mistake would hide in: a wrong asset name is not a visible failure, it is a 404
+  and a machine that quietly never updates.
+- `docs/CONSOLE.md` said a Linux machine receives no unattended update at all. It now describes
+  the arm that installs one. The architecture's corrections block, item 3b, is rewritten from
+  "built and reverted, still outstanding" to what was built.
+
+Proof, in the order it was taken.
+
+Before any build: the helper and the policy copied to homebox-devserver by hand. `pkaction` reads
+the action with its `auth_admin` defaults and its `exec.path` annotation; `pkexec` executes the
+script (it printed the helper's own usage line), which is the question the design turned on. The
+helper refused a genuine published `labdesk-1.2.4-x86_64.deb` as not newer than the installed
+1.2.4 (exit 67), refused a relative path (64), refused a repacked 9.9.9 deb because lab-desk.net
+publishes no digest for it (68, and the site answers 404 for that URL), and refused a named pipe
+wearing an asset name (66). `dpkg-deb` will not build a package whose version is a path, so the
+version-shape check the round added is belt and not braces.
+
+CI: run `33980760549` is success on `84da030f8`, 251 tests passed, with the new test named in the
+log. The crate does not build on this workstation (kcp-sys needs libclang), so every Rust claim
+here is that run plus the field check below.
+
+Two dispatch builds, because an update needs a version the installed one is behind: `p1-linux-1`
+at 1.2.5 and `p1-linux-2` at 1.2.6. The 1.2.5 deb carries
+`./usr/share/rustdesk/labdesk-helper` (root/root, 755) and
+`./usr/share/polkit-1/actions/net.lab-desk.LabDesk.policy` (root/root, 644), read out of the deb
+with `dpkg-deb -c` before it was installed. Installed on homebox with `dpkg -i`: version 1.2.5,
+service active, `pkaction` reads the action from the packaged path, `pkcheck` from the desktop
+user answers `polkit.result=auth_admin`, and `pkexec` without an authentication agent refuses.
+
+The switch. `allow-auto-update` defaults to off and the daemon's config is not
+`/root/.config/rustdesk/RustDesk2.toml` as it looks: `Config::path` resolves to
+`/root/.config/labdesk/`, and the root service gets its options by `Data::SyncConfig` from the
+user `--server`. `sudo rustdesk --option allow-auto-update Y` is what sets it, and the root
+service's `/root/.config/labdesk/LabDesk2.toml` carried it seconds later. The first check, before
+the switch was on, is in the log as "Auto update is off, skipping" and is itself the proof that
+the IPC session question answered, because the loop asks it before it reads the switch.
+
+The update, unattended. `SHA256SUMS` for `p1-linux-2` was computed the way
+`release-checksums.yml` computes it (`sha256sum -- *` over every asset the release carried) and
+uploaded to the release, because that workflow only offers `workflow_dispatch` from the default
+branch and this work is on a feature branch. The stable channel was pointed at `p1-linux-2` /
+1.2.6 by the same direct D1 write with an audit row that the 2026-09-04 session used for 1.2.4 --
+stable and not a beta channel because `/version/latest`, the only endpoint an installed client
+asks, serves the stable row and nothing else. `/version/latest` then answered 1.2.6 and
+`/releases/checksums/1.2.6/labdesk-1.2.6-x86_64.deb` answered
+`03d1e8b9860038dba53ec9ce42011793335511934352d490ea4c271f5c851e39`.
+
+One more refusal first, the only branch the earlier tests could not reach: the published 1.2.6 deb
+downloaded from lab-desk.net with one byte flipped, which is newer than the installed version and
+whose version the site has published, was refused with "does not hash to the digest lab-desk.net
+publishes for it" and nothing was installed.
+
+Then one command, `systemctl restart rustdesk` at 14:15:23, to bring a check that is otherwise a
+day away forward. Everything after it is the machine:
+
+    14:15:23  [root-update] The unattended update loop has started.
+    14:15:54  [root-update] lab-desk.net offers 1.2.6 over 1.2.5; the release publishes
+              sha256 03d1e8b9...51e39 for labdesk-1.2.6-x86_64.deb
+    14:15:55  [root-update] Handing /tmp/labdesk-update-b4a418a2-.../labdesk-1.2.6-x86_64.deb
+              to the update helper.
+    14:15:55  labdesk-install-update.service: labdesk-helper: installing rustdesk 1.2.6 over 1.2.5
+    14:15:58  labdesk-helper: rustdesk 1.2.6 installed
+    14:15:58  rustdesk.service ActiveEnterTimestamp, on the new binary
+    14:16:28  [root-update] No update available.
+
+Installed version before 1.2.5, after 1.2.6, `dpkg-query -W rustdesk`. The service, `--server` and
+`--tray` are all running on the new binary. The stable channel was then restored to
+`v1.2.4-preview` / 1.2.4 with its full ten-platform asset map and a second audit row; it held
+1.2.6 for about six minutes.
+
+Open at this head:
+
+- The stable channel is the only channel an installed client reads, so proving the path meant
+  pointing the public one at a proof build for six minutes. It is back as found. The site has no
+  way for a client to follow a beta channel, and giving it one is not this package.
+- `p1-linux-2` was built from a tag at the version-bump commit, so the 1.2.6 that homebox now runs
+  does not carry the two commits another lane pushed to `feat/labnet` while it built. It is a
+  proof build on a throwaway tag, not a release.
+- Both dispatch runs were cancelled once the deb they existed for was published, so `p1-linux-1`
+  and `p1-linux-2` carry no macOS x86_64, Windows or AppImage assets, and the `SHA256SUMS` on
+  `p1-linux-2` describes the assets that existed when it was written.
+- The signing key is still the empty placeholder, so the helper and the client both verify a
+  digest and neither verifies a signature. That is WP20 and it is unchanged by this round.
+- The helper's `curl` goes straight to lab-desk.net and does not read the daemon's configured
+  socks proxy, which `create_http_client_with_url_strict` does honour. A machine that can only
+  reach the site through a proxy would download the package and fail at the digest fetch.
+- The helper installs only the stock `rustdesk` package. The `rustdesk-unattended-wayland` variant
+  has an asset name the arm does not build and would be refused by the asset-name check.
+- No macOS or Windows behaviour was touched, and no rpm machine exists to test the rpm arm on; the
+  rpm asset name (`labdesk-<version>-0.<arch>.rpm`) is read from `res/rpm-flutter.spec` and
+  covered by the unit test, not by a field install.
+- `CHANGELOG.md` and `docs/plans/2026-09-05-001-production-program.md` each carry an accidentally
+  duplicated paragraph from another session's uncommitted work. They were left exactly as found
+  and no changelog line was written for 1.2.5 or 1.2.6.
