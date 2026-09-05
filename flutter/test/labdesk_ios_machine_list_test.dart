@@ -131,6 +131,28 @@ void main() {
     expect(find.byIcon(Icons.vpn_key_outlined), findsOneWidget);
   });
 
+  testWidgets('a machine being checked right now says so, not its stale state',
+      (tester) async {
+    await tester.pumpWidget(_wrap(MachineListView(
+      machines: [
+        _row('4',
+            hostname: 'front-desk',
+            status: LabDeskPeerStatus.offline,
+            lastSeenOnline: now.subtract(const Duration(hours: 3)))
+      ],
+      onConnect: (_) {},
+      checking: const {'4'},
+      now: now,
+    )));
+
+    expect(find.text('Checking'), findsOneWidget);
+    expect(
+      find.text('Offline'),
+      findsNothing,
+      reason: 'a question that is still open is not an answer',
+    );
+  });
+
   testWidgets('a machine with no hostname is still named by its identifier',
       (tester) async {
     await tester.pumpWidget(_wrap(MachineListView(

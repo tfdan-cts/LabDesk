@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 
 import '../../common.dart';
 import '../../common/labdesk_profiles.dart';
@@ -106,11 +107,22 @@ class _MachinesPageState extends State<MachinesPage> {
   Widget build(BuildContext context) {
     return RefreshIndicator(
       onRefresh: _refresh,
-      child: MachineListView(
-        machines: _machines,
-        savedPasswords: _savedPasswords,
-        onConnect: (id) => connect(context, id),
-      ),
+      // The store keeps its states in a plain map, so a response folded into it
+      // changes nothing this widget watches. The binding's revision is what
+      // makes an answer arriving repaint the list.
+      child: Obx(() {
+        labdeskStatus.revision.value;
+        final machines = _machines;
+        return MachineListView(
+          machines: machines,
+          savedPasswords: _savedPasswords,
+          checking: {
+            for (final m in machines)
+              if (labdeskStatus.store.isQueryingPeer(m.id)) m.id
+          },
+          onConnect: (id) => connect(context, id),
+        );
+      }),
     );
   }
 }

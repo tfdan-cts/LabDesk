@@ -118,12 +118,22 @@ and it reads through exactly the code the desktop console reads through:
 `LabDeskPeerStatusStore`. Nothing about reachability is re-decided for the
 phone, which is the point: two implementations of three states would drift.
 
-The three states are rendered as the console renders them. Online is a filled
-green dot, offline a filled error-coloured dot, and unknown a hollow ring. A
-machine no response has named carries no times at all: no last seen, no last
+The states are not decided here either. `labdeskDotFor` in
+`flutter/lib/common/labdesk_peer_status.dart` is the shared decision, and the
+phone calls it, so the phone's dot and the console's cannot drift apart. Online
+is a filled green dot, offline a filled error-coloured dot, unknown a hollow
+ring, and a machine whose query is still out is hollow and amber and says
+Checking. Hollow covers both cases where nothing is known, because neither an
+unasked question nor an open one may be drawn as an answer.
+
+A machine no response has named carries no times at all: no last seen, no last
 checked, and never the word Offline. Absence of an answer is not an answer, and
 a phone screen that shades it into "down" would have the operator chasing a
 machine that is fine.
+
+The list repaints when an answer arrives because it watches the binding's
+`revision`. The store keeps its states in a plain map, so folding a response
+into it changes nothing a widget would otherwise notice.
 
 The list is split the same way the console screens are. `MachineListView` in
 `flutter/lib/mobile/widgets/machine_list.dart` takes everything through its

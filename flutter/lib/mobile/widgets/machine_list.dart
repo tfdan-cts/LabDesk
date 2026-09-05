@@ -19,11 +19,16 @@ class MachineListView extends StatelessWidget {
     required this.machines,
     required this.onConnect,
     this.savedPasswords = const {},
+    this.checking = const {},
     this.now,
   });
 
   final List<MachineRow> machines;
   final void Function(String id) onConnect;
+
+  /// Machines with a reachability query still in flight. Their dot says the
+  /// question is open rather than repeating a stale answer as if it were fresh.
+  final Set<String> checking;
 
   /// Machines this client already holds a password for. Shown so the operator
   /// knows which taps will ask for one and which will not.
@@ -49,6 +54,7 @@ class MachineListView extends StatelessWidget {
       itemBuilder: (context, i) => _MachineTile(
         machine: machines[i],
         hasSavedPassword: savedPasswords.contains(machines[i].id),
+        isChecking: checking.contains(machines[i].id),
         onConnect: onConnect,
         now: now,
       ),
@@ -87,12 +93,14 @@ class _MachineTile extends StatelessWidget {
   const _MachineTile({
     required this.machine,
     required this.hasSavedPassword,
+    required this.isChecking,
     required this.onConnect,
     this.now,
   });
 
   final MachineRow machine;
   final bool hasSavedPassword;
+  final bool isChecking;
   final void Function(String id) onConnect;
   final DateTime? now;
 
@@ -100,9 +108,15 @@ class _MachineTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.textTheme.bodySmall?.color?.withOpacity(0.7);
+    // The shared decision, so the phone's dot and the console's cannot drift.
+    final dot = labdeskDotFor(
+      checking: isChecking,
+      status: machine.status,
+      fallbackOnline: false,
+    );
     return ListTile(
       onTap: () => onConnect(machine.id),
-      leading: _StatusDot(status: machine.status),
+      leading: _StatusDot(dot: dot),
       title: Text(machine.displayName,
           maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
@@ -116,7 +130,7 @@ class _MachineTile extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(_word(machine.status),
+          Text(_word(dot),
               style: theme.textTheme.bodySmall?.copyWith(color: muted)),
           if (hasSavedPassword) ...[
             const SizedBox(width: 8),
@@ -136,25 +150,29 @@ class _MachineTile extends StatelessWidget {
   }
 }
 
-String _word(LabDeskPeerStatus status) => switch (status) {
-      LabDeskPeerStatus.online => 'Online',
-      LabDeskPeerStatus.offline => 'Offline',
-      LabDeskPeerStatus.unknown => 'Unknown',
+String _word(LabDeskDot dot) => switch (dot) {
+      LabDeskDot.checking => 'Checking',
+      LabDeskDot.online => 'Online',
+      LabDeskDot.offline => 'Offline',
+      LabDeskDot.unknown => 'Unknown',
     };
 
 class _StatusDot extends StatelessWidget {
-  const _StatusDot({required this.status});
+  const _StatusDot({required this.dot});
 
-  final LabDeskPeerStatus status;
+  final LabDeskDot dot;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final unknown = status == LabDeskPeerStatus.unknown;
-    final colour = switch (status) {
-      LabDeskPeerStatus.online => Colors.green.shade600,
-      LabDeskPeerStatus.offline => theme.colorScheme.error,
-      LabDeskPeerStatus.unknown =>
+    // Hollow covers both states where nothing is known: nobody has asked, and
+    // the asking is still out. Neither may be drawn as an answer.
+    final unknown = dot == LabDeskDot.unknown || dot == LabDeskDot.checking;
+    final colour = switch (dot) {
+      LabDeskDot.online => Colors.green.shade600,
+      LabDeskDot.offline => theme.colorScheme.error,
+      LabDeskDot.checking => Colors.amber.shade700,
+      LabDeskDot.unknown =>
         theme.textTheme.bodySmall?.color?.withOpacity(0.5) ?? Colors.grey,
     };
     return SizedBox(
