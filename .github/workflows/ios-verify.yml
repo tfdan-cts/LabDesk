@@ -1,0 +1,216 @@
+# The iOS verification job. There is no Mac in this fleet, so a booted
+# simulator on a GitHub Actions macOS runner is the device: this workflow builds
+# the app for the simulator, installs it, launches it, and uploads screenshots
+# and logs. Reading code is not verification and a green build is not a working
+# screen; the screenshot is the evidence.
+#
+# Why the simulator and not the ipa job in flutter-build.yml: that job builds
+# aarch64-apple-ios, a device slice, which cannot be run anywhere we have. This
+# one builds aarch64-apple-ios-sim against vcpkg's arm64-ios-simulator triplet,
+# which the runner probe on 2026-09-05 confirmed exists as a community triplet,
+# so it stays on the default arm64 runner. It does not replace the ipa job and
+# does not publish anything.
+name: iOS simulator verification
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/ios
+    paths-ignore:
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "**/*.md"
+
+permissions:
+  contents: read
+
+# One at a time per branch. A superseded push has nothing to prove.
+concurrency:
+  group: ios-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.24.5"
+  RUST_VERSION: "1.75"
+  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  # The device type is fixed so screenshots are comparable between runs; the
+  # runtime is resolved at run time because the runner image moves.
+  SIM_DEVICE_TYPE: "com.apple.CoreSimulator.SimDeviceType.iPhone-17"
+
+jobs:
+  # The same bridge the release build uses, rather than a second copy of the
+  # codegen that could drift from it.
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  simulator:
+    name: build and run on a simulator
+    needs: [generate-bridge]
+    runs-on: macos-latest
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Install dependencies
+        run: brew install nasm yasm
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Install flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Patch flutter
+        run: |
+          cd $(dirname $(dirname $(which flutter)))
+          if [[ "3.24.5" == ${{ env.FLUTTER_VERSION }} ]]; then
+            git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
+          fi
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        shell: bash
+        run: |
+          if ! $VCPKG_ROOT/vcpkg \
+            install \
+            --triplet arm64-ios-simulator \
+            --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
+              echo "$_1:"
+              echo "======"
+              cat "$_1"
+              echo "======"
+              echo ""
+            done
+            exit 1
+          fi
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: aarch64-apple-ios-sim
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: rustdesk-lib-cache-ios-sim
+          key: aarch64-apple-ios-sim
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      # No hwcodec: flutter/ios_x64.sh, the inherited simulator build, leaves it
+      # out too, and a VideoToolbox encode is not something a simulator proves.
+      - name: Build the rust lib for the simulator
+        run: |
+          rustup target add aarch64-apple-ios-sim
+          cargo build --locked --features flutter --release --target aarch64-apple-ios-sim --lib
+
+      # Runner.xcodeproj links a literal path under target/aarch64-apple-ios,
+      # the device slice. Rather than fork the project file for a job that never
+      # ships a build, the simulator slice is put where the project already
+      # looks. The device build in flutter-build.yml is untouched by this.
+      - name: Put the simulator slice where the Xcode project looks for it
+        run: |
+          mkdir -p target/aarch64-apple-ios/release
+          cp target/aarch64-apple-ios-sim/release/liblibrustdesk.a \
+            target/aarch64-apple-ios/release/liblibrustdesk.a
+          lipo -info target/aarch64-apple-ios/release/liblibrustdesk.a
+
+      - name: Build the app for the simulator
+        run: |
+          cd flutter
+          flutter pub get
+          flutter build ios --simulator --debug
+
+      - name: Boot a simulator
+        id: sim
+        run: |
+          xcrun simctl list runtimes
+          # No runtime argument: simctl picks the newest one the device type can
+          # run, which is what we want and is one fewer thing to keep current.
+          udid=$(xcrun simctl create labdesk-verify "$SIM_DEVICE_TYPE")
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      # The bundle identifier is read out of the built app rather than written
+      # here, so this step keeps working through the rebrand.
+      - name: Install and launch
+        id: launch
+        run: |
+          app=flutter/build/ios/iphonesimulator/Runner.app
+          bundle_id=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$app/Info.plist")
+          echo "bundle identifier: $bundle_id"
+          echo "display name: $(/usr/libexec/PlistBuddy -c "Print CFBundleDisplayName" "$app/Info.plist" || echo none)"
+          echo "bundle_id=$bundle_id" >> "$GITHUB_OUTPUT"
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$app"
+          xcrun simctl launch "${{ steps.sim.outputs.udid }}" "$bundle_id"
+
+      - name: Screenshots
+        if: always()
+        run: |
+          mkdir -p artifacts
+          for seconds in 3 7 10; do
+            sleep "$seconds"
+            xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot \
+              "artifacts/after-${seconds}s.png" || true
+          done
+
+      # A launch that returns a pid and then dies is not a running app, so this
+      # is the check the job actually passes or fails on.
+      - name: The app is still running
+        run: |
+          state=$(xcrun simctl spawn "${{ steps.sim.outputs.udid }}" \
+            launchctl list | grep "${{ steps.launch.outputs.bundle_id }}" || true)
+          echo "launchctl says: ${state:-nothing}"
+          if [ -z "$state" ]; then
+            echo "the app is not running twenty seconds after launch" >&2
+            exit 1
+          fi
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p artifacts
+          xcrun simctl spawn "${{ steps.sim.outputs.udid }}" log show \
+            --style compact --last 5m \
+            --predicate 'processImagePath CONTAINS "Runner"' \
+            > artifacts/app.log 2>&1 || true
+          tail -n 60 artifacts/app.log || true
+
+      - name: Upload the evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-simulator-evidence
+          path: artifacts/
+          if-no-files-found: warn
+
+      - name: Upload the app
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: labdesk-ios-simulator-app
+          path: flutter/build/ios/iphonesimulator/Runner.app
+          if-no-files-found: warn
