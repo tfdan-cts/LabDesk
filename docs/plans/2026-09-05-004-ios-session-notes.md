@@ -321,6 +321,13 @@ Worth separating: the vcpkg step itself succeeded again, so the
 once. The failure was in the newest and least proven step in the job, which
 is the right place for a failure to be.
 
+The general rule behind that, worth having because the error message does
+not state it: the ffmpeg and aom ports want nasm and yasm, the ports that
+go through `vcpkg_configure_make` want the autotools, and a job's package
+list has to satisfy the union of what every port it builds needs rather
+than whichever port somebody added first. Adding a port to a vcpkg manifest
+can therefore break a job that never mentions that port.
+
 The second thing is not about iOS at all and belongs to whoever owns CI.
 vcpkg printed:
 
