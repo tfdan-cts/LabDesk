@@ -45,9 +45,9 @@
     },
     {
       "id": "process_kill",
-      "label": "Kill a process",
+      "label": "End a process",
       "runAs": "system",
-      "timeoutS": 60,
+      "timeoutS": 30,
       "params": {
         "pid": { "type": "int", "min": 1, "max": 4194304 }
       },
@@ -61,7 +61,7 @@
       "id": "power_restart",
       "label": "Restart the machine",
       "runAs": "system",
-      "timeoutS": 60,
+      "timeoutS": 30,
       "params": {},
       "platforms": {
         "windows": { "steps": [["shutdown.exe", "/r", "/t", "0"]] },
@@ -73,7 +73,7 @@
       "id": "power_shutdown",
       "label": "Shut the machine down",
       "runAs": "system",
-      "timeoutS": 60,
+      "timeoutS": 30,
       "params": {},
       "platforms": {
         "windows": { "steps": [["shutdown.exe", "/s", "/t", "0"]] },
@@ -85,11 +85,11 @@
       "id": "power_logoff",
       "label": "Log the user off",
       "runAs": "active_user",
-      "timeoutS": 60,
+      "timeoutS": 30,
       "params": {},
       "platforms": {
         "windows": { "steps": [["shutdown.exe", "/l"]] },
-        "linux": { "steps": [["loginctl", "terminate-user", "{active_user}"]] },
+        "linux": { "steps": [["loginctl", "terminate-user"]] },
         "macos": { "steps": [["osascript", "-e", "tell app \"System Events\" to log out"]] }
       }
     },
@@ -97,7 +97,7 @@
       "id": "power_lock",
       "label": "Lock the screen",
       "runAs": "active_user",
-      "timeoutS": 60,
+      "timeoutS": 30,
       "params": {},
       "platforms": {
         "windows": { "steps": [["rundll32.exe", "user32.dll,LockWorkStation"]] },
@@ -109,7 +109,7 @@
       "id": "flush_dns",
       "label": "Flush the DNS cache",
       "runAs": "system",
-      "timeoutS": 60,
+      "timeoutS": 30,
       "params": {},
       "platforms": {
         "windows": { "steps": [["ipconfig.exe", "/flushdns"]] },

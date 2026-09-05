@@ -41,8 +41,10 @@ What landed, all on `feat/labnet`:
   refuse `already_ran` from a 256 entry ledger beside the identity file). The collector reads
   `jobs` and `collectNow` from the batch answer, runs jobs on a thread of their own, and sends
   at most four `jobResults` a batch. Section 11 of the contracts records the divergences: the
-  pattern subset, the leading `-` refusal, the `{active_user}` token, Linux `active_user`
-  entries running in the daemon, Windows launches whose exit status is not observed.
+  pattern subset, the leading `-` refusal, the seat0 user appended to `power_logoff` on
+  Linux, Linux `active_user` entries running in the daemon, Windows launches whose exit
+  status is not observed. The site lane wrote its `tools.json` first (labels and 30 s power
+  timeouts); the client adopted those bytes, and `cmp` of the two copies is silent.
 - WP15, the ticket claim path: `Data::ConnectTicket` over the main IPC channel,
   `insert_pending_ticket` and `claim_pending_ticket` in `src/server/connection.rs` beside the
   switch-sides map (`cargo test claim_once`), the hook at the top of `validate_password`, the

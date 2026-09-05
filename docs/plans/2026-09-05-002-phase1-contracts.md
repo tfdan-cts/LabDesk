@@ -728,11 +728,12 @@ builds against these.
    its type, because every step hands the value to a program's option parser and the contract's
    class admits `--force` as a unit name. The Worker may accept such a job; the agent's result
    then says `bad_params`.
-3. Section 1, `power_logoff` on Linux. The entry's argv is `["loginctl", "terminate-user",
-   "{active_user}"]`. `{active_user}` is the one template token that is not a parameter: the
-   agent fills it from `get_active_username()`, a parameter of that name is refused, and a
-   `system` entry may not use it. The token is in `tools.json`, so the Worker's copy carries it
-   too and passes it through untouched.
+3. Section 1, `power_logoff` on Linux. The entry's argv is `["loginctl", "terminate-user"]` in
+   both copies of `tools.json` (the Worker's bytes, adopted by the client in this round), and
+   the agent appends `get_active_username()` to that one entry on that one platform, refusing
+   `no_active_user` when nobody is on seat0. The rule is keyed on the tool id in
+   `tools.rs::argv_for`, not on a token, so the shared file carries nothing the Worker's
+   catalog check would refuse.
 4. Section 2, `active_user` on Linux. `loginctl terminate-user` and `loginctl lock-sessions`
    are refused by polkit to anyone but root, so on Linux the daemon runs both entries itself
    with the seat0 user filled in; `run_as_user` serves Windows and macOS, as `labdesk

@@ -66,8 +66,8 @@ wrong, the correction is recorded here rather than left to be rediscovered.
 
 8. Linux `active_user` tools (phase 1 contracts, section 1). The two entries are `loginctl`
    commands aimed at another user's sessions, which polkit refuses to anyone but root, so on Linux
-   the daemon runs them itself with the seat0 user filled into the `{active_user}` token from
-   `get_active_username()`. `run_as_user` serves Windows and macOS through `labdesk --labdesk-tool
+   the daemon runs them itself, appending the seat0 user from `get_active_username()` to the
+   `power_logoff` argv. `run_as_user` serves Windows and macOS through `labdesk --labdesk-tool
    <id>`; on Windows the exit status of that launch is not observed (`LaunchProcessWin` hands back
    no handle) and the job result says so in its output.
 -->

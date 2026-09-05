@@ -217,7 +217,7 @@ impl Catalog {
             }
             let mut params = BTreeMap::new();
             for (name, spec) in t.params {
-                if !valid_name(&name, 1) || name == "active_user" {
+                if !valid_name(&name, 1) {
                     bail!("{}: parameter name {:?} is not allowed", t.id, name);
                 }
                 let param = match spec {
@@ -279,11 +279,7 @@ impl Catalog {
                                 arg
                             ),
                             Token::Whole(name) => {
-                                if name == "active_user" {
-                                    if run_as != RunAs::ActiveUser {
-                                        bail!("{}: {{active_user}} in a system tool", t.id);
-                                    }
-                                } else if !params.contains_key(name) {
+                                if !params.contains_key(name) {
                                     bail!(
                                         "{}: {} names parameter {:?} the entry does not list",
                                         t.id,
@@ -337,9 +333,7 @@ enum Token<'a> {
 }
 
 /// Whether an argument is exactly `{name}`, contains braces somewhere inside
-/// text, or is plain. `{active_user}` is the one token that is not a
-/// parameter: `argv_for` fills it from `crate::platform::get_active_username()`,
-/// and `Catalog::parse` refuses a parameter of that name.
+/// text, or is plain.
 fn template_token(arg: &str) -> Token<'_> {
     if let Some(name) = arg.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
         if !name.contains(['{', '}']) {
@@ -390,7 +384,19 @@ pub fn jobs_in(text: &str) -> (Vec<Job>, bool) {
         .map(|entries| {
             entries
                 .iter()
-                .filter_map(|entry| match serde_json::from_value::<Job>(entry.clone()) {
+                .map(|entry| {
+                    // `machine_job.params` is a JSON text column; an answer
+                    // that hands it over unparsed is read the same as one
+                    // that parsed it.
+                    let mut entry = entry.clone();
+                    if let Some(text) = entry["params"].as_str() {
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
+                            entry["params"] = parsed;
+                        }
+                    }
+                    entry
+                })
+                .filter_map(|entry| match serde_json::from_value::<Job>(entry) {
                     Ok(job) => Some(job),
                     Err(err) => {
                         log::warn!("[tools] Skipping a job the answer mis-shaped: {}", err);
@@ -448,6 +454,12 @@ impl JobResult {
 /// parameter the entry does not list refuses the job; a value is substituted
 /// only where the whole argument is its token, and is never split, quoted or
 /// looked inside.
+///
+/// `active_user` is the seat0 user for the one entry that names one: section
+/// 1 of the phase 1 contracts has `power_logoff` on Linux take the user from
+/// `get_active_username()` and never from a parameter, and the catalog entry
+/// is `["loginctl", "terminate-user"]` with the agent appending the name.
+/// Empty or absent is `no_active_user`.
 pub fn argv_for(
     tool: &Tool,
     params: &serde_json::Map<String, serde_json::Value>,
@@ -475,11 +487,7 @@ pub fn argv_for(
         let mut built = Vec::with_capacity(argv.len());
         for arg in argv {
             match template_token(arg) {
-                Token::Whole("active_user") => match active_user {
-                    Some(user) if !user.is_empty() => built.push(user.to_owned()),
-                    _ => return Err("no_active_user"),
-                },
-                // `Catalog::parse` proved every other token names a listed
+                // `Catalog::parse` proved every token names a listed
                 // parameter, and every listed parameter was just filled in.
                 Token::Whole(name) => match values.get(name) {
                     Some(value) => built.push(value.clone()),
@@ -489,10 +497,19 @@ pub fn argv_for(
                 Token::Partial => return Err("bad_params"),
             }
         }
+        if tool.id == LOGOFF_TOOL && platform == "linux" {
+            match active_user {
+                Some(user) if !user.is_empty() => built.push(user.to_owned()),
+                _ => return Err("no_active_user"),
+            }
+        }
         out.push(built);
     }
     Ok(out)
 }
+
+/// The entry whose Linux argv the agent completes with the seat0 user.
+const LOGOFF_TOOL: &str = "power_logoff";
 
 /// The argument a parameter value becomes, or `None` when it fails its check.
 ///
@@ -840,11 +857,13 @@ mod tests {
             ]
         );
         for t in c.tools() {
-            assert_eq!(t.timeout_s, 60, "{}", t.id);
+            let timeout = if t.id.starts_with("service_") { 60 } else { 30 };
+            assert_eq!(t.timeout_s, timeout, "{}", t.id);
             assert_eq!(t.platforms().collect::<Vec<_>>(), ["linux", "macos", "windows"], "{}", t.id);
             let expected = if t.id.starts_with("power_lo") { RunAs::ActiveUser } else { RunAs::System };
             assert_eq!(t.run_as, expected, "{}", t.id);
         }
+        assert_eq!(c.get("process_kill").unwrap().label, "End a process");
         assert_eq!(c.get("service_restart").unwrap().param_names().collect::<Vec<_>>(), ["unit"]);
         assert_eq!(c.get("process_kill").unwrap().param_names().collect::<Vec<_>>(), ["pid"]);
         assert_eq!(c.get("flush_dns").unwrap().param_names().count(), 0);
@@ -924,10 +943,20 @@ mod tests {
             argv_for(restart, &params(&[("unit", "spooler".into()), ("extra", "x".into())]), "linux", None),
             Err("bad_params")
         );
-        // A parameter named after the agent-filled token is an extra one.
+        // The user the agent appends on Linux is never a parameter.
         assert_eq!(
-            argv_for(c.get("power_lock").unwrap(), &params(&[("active_user", "root".into())]), "linux", Some("dan")),
+            argv_for(c.get("power_logoff").unwrap(), &params(&[("user", "root".into())]), "linux", Some("dan")),
             Err("bad_params")
+        );
+        // And is appended nowhere else: the lock entry and the other platforms
+        // carry exactly their catalog argv.
+        assert_eq!(
+            argv_for(c.get("power_lock").unwrap(), &params(&[]), "linux", Some("dan")).unwrap(),
+            [vec!["loginctl", "lock-sessions"]]
+        );
+        assert_eq!(
+            argv_for(c.get("power_logoff").unwrap(), &params(&[]), "windows", Some("dan")).unwrap(),
+            [vec!["shutdown.exe", "/l"]]
         );
         // A platform the entry does not name.
         assert_eq!(argv_for(restart, &params(&[("unit", "spooler".into())]), "freebsd", None), Err("wrong_platform"));
@@ -984,8 +1013,6 @@ mod tests {
             ("empty argv", base("ok_tool", "system", 60, "{}", r#"{"linux":{"steps":[[]]}}"#)),
             ("token inside text", base("ok_tool", "system", 60, r#"{"unit":{"type":"pattern","pattern":"^[a-z]{1,8}$"}}"#, r#"{"linux":{"steps":[["systemctl","restart","{unit}.service"]]}}"#)),
             ("unlisted param", base("ok_tool", "system", 60, "{}", r#"{"linux":{"steps":[["systemctl","restart","{unit}"]]}}"#)),
-            ("param named active_user", base("ok_tool", "system", 60, r#"{"active_user":{"type":"pattern","pattern":"^[a-z]{1,8}$"}}"#, lin)),
-            ("active_user token in a system tool", base("ok_tool", "system", 60, "{}", r#"{"linux":{"steps":[["loginctl","terminate-user","{active_user}"]]}}"#)),
             ("active_user tool with a param", base("ok_tool", "active_user", 60, r#"{"unit":{"type":"pattern","pattern":"^[a-z]{1,8}$"}}"#, lin)),
             ("pattern not anchored", base("ok_tool", "system", 60, r#"{"unit":{"type":"pattern","pattern":"[a-z]{1,8}"}}"#, lin)),
             ("pattern with alternation", base("ok_tool", "system", 60, r#"{"unit":{"type":"pattern","pattern":"^(a|b){1,8}$"}}"#, lin)),
@@ -1040,15 +1067,17 @@ mod tests {
             r#"{"ok":true,"sampleSeconds":60,"flushSeconds":300,"jobs":[
                 {"id":"2f1c","toolId":"service_restart","params":{"unit":"spooler"},"runAs":"system","timeoutS":60,"expiresAt":1788483600},
                 {"id":"broken"},
-                {"id":"3a","toolId":"flush_dns","runAs":"system","timeoutS":60,"expiresAt":1788483600}
+                {"id":"3a","toolId":"flush_dns","runAs":"system","timeoutS":60,"expiresAt":1788483600},
+                {"id":"4b","toolId":"process_kill","params":"{\"pid\":42}","runAs":"system","timeoutS":30,"expiresAt":1788483600}
             ],"tickets":[],"collectNow":true,"later":{"x":1}}"#,
         );
-        assert_eq!(jobs.len(), 2, "the mis-shaped entry is skipped, the rest run");
+        assert_eq!(jobs.len(), 3, "the mis-shaped entry is skipped, the rest run");
         assert_eq!(jobs[0].id, "2f1c");
         assert_eq!(jobs[0].tool_id, "service_restart");
         assert_eq!(jobs[0].params, params(&[("unit", "spooler".into())]));
         assert_eq!(jobs[0].expires_at, 1788483600);
         assert_eq!(jobs[1].params, params(&[]), "params absent is params empty");
+        assert_eq!(jobs[2].params, params(&[("pid", 42.into())]), "the column's JSON text is read too");
         assert!(now);
         // The answer the server sends today: no member at all.
         assert_eq!(jobs_in(r#"{"ok":true,"sampleSeconds":60,"flushSeconds":300}"#), (Vec::new(), false));
