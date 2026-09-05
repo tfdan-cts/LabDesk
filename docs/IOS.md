@@ -110,6 +110,41 @@ maps TeamViewer's iOS app against the inherited RustDesk client. In order:
 
 Tier 2 and Tier 3 are out of scope. Tier 3 items are owner decisions.
 
+### The machine list
+
+Item 4 is built. The phone gains a Machines tab beside Connection and Settings,
+and it reads through exactly the code the desktop console reads through:
+`buildMachineRows` in `flutter/lib/labdesk/console_data.dart`, over the same
+`LabDeskPeerStatusStore`. Nothing about reachability is re-decided for the
+phone, which is the point: two implementations of three states would drift.
+
+The three states are rendered as the console renders them. Online is a filled
+green dot, offline a filled error-coloured dot, and unknown a hollow ring. A
+machine no response has named carries no times at all: no last seen, no last
+checked, and never the word Offline. Absence of an answer is not an answer, and
+a phone screen that shades it into "down" would have the operator chasing a
+machine that is fine.
+
+The list is split the same way the console screens are. `MachineListView` in
+`flutter/lib/mobile/widgets/machine_list.dart` takes everything through its
+constructor and imports neither the FFI nor a model, so it is tested without the
+generated bridge; `MachinesPage` in `flutter/lib/mobile/pages/machines_page.dart`
+is the wiring. Seven widget tests cover it in
+`flutter/test/labdesk_ios_machine_list_test.dart`, including the one that
+matters: a machine nobody has asked about must not read as down.
+
+A key icon marks the machines this client already holds a password for, so the
+operator can see which taps will ask for one. One tap connects. Pull down to
+refresh; the list also refreshes every thirty seconds while it is on screen, and
+stops when it is not.
+
+The tab is gated to iOS. Android would benefit from it too, but that client
+belongs to another lane and this change does not reach into it.
+
+**Unverified.** The list has not been seen running. Widget tests prove the
+rendering rules; they do not prove it looks right on a phone, and they cannot.
+That waits on the first green simulator run.
+
 ### Identity
 
 What the target carries now, and what each value replaced:

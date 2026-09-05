@@ -143,6 +143,45 @@ and prints them, so the first green run will either confirm them or not.
 with cryptography. Answering it truthfully is a Tier 1 item and its own piece of
 work.
 
+## Piece 3: the machine list, Tier 1 item 4
+
+Written test first. The seven tests in
+`flutter/test/labdesk_ios_machine_list_test.dart` were red before the widget
+existed and are green now; the whole `flutter test -j 1 test/labdesk_*.dart`
+gate passes at 350 tests.
+
+The find that shaped it: `buildMachineRows` in
+`flutter/lib/labdesk/console_data.dart` is plain Dart with no FFI and no
+platform gating, and `LabDeskPeerStatusStore` already holds real per-peer
+three state reachability. So the phone did not need a reachability model of
+its own; it needed a list widget over the one that exists. Two
+implementations of three states would have drifted, and the desktop one is
+the one dvonr-02 named as correct.
+
+Worth recording because it was checked rather than assumed: the store does
+get fed on the phone. `_attachLabDeskStatus` in
+`flutter/lib/models/peer_model.dart` registers the online-state handler once
+for the whole application, and `flutter/lib/common/widgets/peers_view.dart`,
+which the mobile peer tabs use, already calls `bind.queryOnlines`. So the
+dots carry real answers rather than sitting at unknown forever.
+
+Also worth recording, because it contradicts a first reading: the shared
+`getOnline` in `flutter/lib/common/widgets/peer_card.dart` still renders the
+old two state model, a global `labdeskStatusChecking` flag plus a boolean,
+so a peer nobody has asked about draws red there. That widget is shared with
+the desktop client and was left alone. The machine list does not use it.
+
+Files: `flutter/lib/mobile/widgets/machine_list.dart` (pure, no FFI),
+`flutter/lib/mobile/pages/machines_page.dart` (wiring), one gated insertion
+into `flutter/lib/mobile/pages/home_page.dart`. `dart analyze` on all three
+returns four infos and no errors; three are `withOpacity` deprecations,
+which the rest of this codebase also carries, and one is a pre-existing
+`WillPopScope`.
+
+**Unverified.** Nobody has looked at this list running. Widget tests prove
+the rules, not the look, and the look cannot be judged until the simulator
+job is green.
+
 ## Open items
 
 - Rebase onto `feat/labnet` once `82a6d8f27` is pushed there, then rerun the
