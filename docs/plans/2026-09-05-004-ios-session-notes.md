@@ -210,6 +210,37 @@ Nothing has been filed and there is no account to file it against.
 holds a code Apple issues after approving uploaded documentation, and
 writing one there would be inventing it.
 
+## Piece 5: leaving a session in a pocket, Tier 1 item 7
+
+Written test first again. Six tests in
+`flutter/test/labdesk_ios_background_grace_test.dart` were red before
+`flutter/lib/mobile/background_grace.dart` existed.
+
+What was there before: `_RemotePageState` already mixed in
+`WidgetsBindingObserver` and already overrode
+`didChangeAppLifecycleState`, but only to sync the clipboard on resume.
+Nothing closed a session on background, so a phone in a pocket left the far
+end showing somebody connected to it.
+
+The iOS-shaped part, which is why the policy is checked twice rather than
+once. A timer alone is not enough: iOS suspends the process shortly after
+backgrounding and a suspended process runs no timers. So the timer handles
+the case where the app still has runtime, and gives the far end a real
+disconnect, while the way back to the foreground re-checks the elapsed wall
+clock and closes a session that outlived its grace while suspended. Both
+callers ask the same clock-free value type so they cannot disagree.
+
+One test exists because of a bug it would otherwise invite: a clock that
+jumps backwards produces a negative elapsed time, and treating that as an
+expired grace would drop the operator at random.
+
+Gated to iOS. Android keeps a session alive deliberately, running a
+foreground service and able to be the controlled side.
+
+**Unverified.** Nobody has watched this happen. The policy is proved by
+tests; the wiring into the session screen is not, and backgrounding under
+real memory pressure is something a simulator cannot show anyway.
+
 ## Open items
 
 - Rebase onto `feat/labnet` once `82a6d8f27` is pushed there, then rerun the

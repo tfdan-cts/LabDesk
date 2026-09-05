@@ -14,6 +14,7 @@ import 'package:flutter_svg/svg.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 
+import '../background_grace.dart';
 import '../../common.dart';
 import '../../common/widgets/overlay.dart';
 import '../../common/widgets/dialog.dart';
@@ -60,6 +61,8 @@ class RemotePage extends StatefulWidget {
 
 class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   Timer? _timer;
+  final _backgroundGrace = BackgroundGrace();
+  Timer? _backgroundCloseTimer;
   bool _showBar = !isWebDesktop;
   bool _showGestureHelp = false;
   String _value = '';
@@ -165,6 +168,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     inputModel.keyboardInputAllowed = true;
     await gFFI.close();
     _timer?.cancel();
+    _backgroundCloseTimer?.cancel();
     _iosKeyboardWorkaroundTimer?.cancel();
     gFFI.dialogManager.dismissAll();
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
@@ -181,8 +185,52 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      _cancelBackgroundClose();
       trySyncClipboard();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _startBackgroundClose();
     }
+  }
+
+  /// The phone must not hold a session open in a pocket. Backgrounding
+  /// starts a short grace, and the session is closed when it runs out.
+  ///
+  /// iOS only. Android keeps a session alive on purpose: it runs a
+  /// foreground service and can be the controlled side, and that client
+  /// belongs to another lane.
+  void _startBackgroundClose() {
+    if (!isIOS) return;
+    _backgroundGrace.onBackground(DateTime.now());
+    _backgroundCloseTimer?.cancel();
+    // Fires while iOS still gives this process runtime, so the far end gets
+    // a real disconnect. If the process is suspended first it never fires,
+    // which is what the check on the way back up is for.
+    _backgroundCloseTimer = Timer(
+      _backgroundGrace.remaining(DateTime.now()),
+      _closeForBackground,
+    );
+  }
+
+  void _cancelBackgroundClose() {
+    if (!isIOS) return;
+    _backgroundCloseTimer?.cancel();
+    _backgroundCloseTimer = null;
+    // Suspended past the grace and only now waking up: the session was not
+    // being used, and resuming it would hand back a window onto somebody
+    // else's machine that nobody asked to keep open.
+    if (_backgroundGrace.isDue(DateTime.now())) {
+      _backgroundGrace.onForeground();
+      _closeForBackground();
+      return;
+    }
+    _backgroundGrace.onForeground();
+  }
+
+  void _closeForBackground() {
+    if (!mounted) return;
+    _backgroundGrace.onForeground();
+    closeConnection();
   }
 
   // For client side

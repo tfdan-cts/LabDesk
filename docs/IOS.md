@@ -141,6 +141,39 @@ stops when it is not.
 The tab is gated to iOS. Android would benefit from it too, but that client
 belongs to another lane and this change does not reach into it.
 
+### Leaving a session in a pocket
+
+Item 7 is built. A phone must not hold a remote session open while it is in a
+pocket: the far end cannot tell a backgrounded phone from an attentive one, so
+the machine keeps showing somebody connected to it.
+
+Backgrounding the session screen starts a twenty second grace. Coming back
+inside it cancels the grace, because switching apps for a moment is not leaving.
+When it runs out the session is closed through the same path the close button
+uses, so teardown is the one that already works.
+
+The grace is checked in two places on purpose, and the reason is iOS rather than
+taste. While iOS still gives the process runtime after backgrounding, a timer
+fires and the session closes properly, with a disconnect the far end sees. If
+iOS suspends the process first no timer fires at all, so the elapsed time is
+checked again against the wall clock on the way back to the foreground, and a
+session that outlived its grace while suspended is closed then instead of handed
+back.
+
+The policy is a clock-free value type, `BackgroundGrace` in
+`flutter/lib/mobile/background_grace.dart`, so both callers ask the same
+question and it can be tested without waiting twenty seconds. Six tests cover it
+in `flutter/test/labdesk_ios_background_grace_test.dart`, including a clock that
+jumps backwards, which must not close a live session.
+
+Gated to iOS. Android keeps a session alive deliberately: it runs a foreground
+service and can be the controlled side.
+
+**Unverified.** The grace has not been watched happening on a simulator. The
+policy is proved by tests; the wiring into the session screen is not, and
+backgrounding under real memory pressure is one of the things a simulator cannot
+tell us anyway.
+
 **Unverified.** The list has not been seen running. Widget tests prove the
 rendering rules; they do not prove it looks right on a phone, and they cannot.
 That waits on the first green simulator run.

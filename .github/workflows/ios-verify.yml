@@ -177,6 +177,21 @@ jobs:
               "artifacts/after-${seconds}s.png" || true
           done
 
+      # Tier 1 asks for dark mode that follows the system. The application asks
+      # for ThemeMode.system by default and listens for the platform brightness
+      # changing, so flipping the simulator is the check: two screenshots that
+      # differ are the evidence, and two that do not are the bug.
+      - name: Both appearances
+        if: always()
+        run: |
+          for appearance in dark light; do
+            xcrun simctl ui "${{ steps.sim.outputs.udid }}" appearance \
+              "$appearance" || true
+            sleep 4
+            xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot \
+              "artifacts/appearance-${appearance}.png" || true
+          done
+
       # A launch that returns a pid and then dies is not a running app, so this
       # is the check the job actually passes or fails on.
       - name: The app is still running
