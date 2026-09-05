@@ -325,6 +325,29 @@ mod tests {
         assert!(h.critical_warnings().is_empty());
     }
 
+    /// The one page here that came off a drive: log page 02h from a Micron
+    /// 3400 MTFDKBA512TFH on homebox-devserver, 2026-09-05, read over
+    /// `NVME_IOCTL_ADMIN_CMD` by `linux::nvme_health_page`. Provenance in
+    /// `fixtures/README.md`.
+    #[test]
+    fn reads_a_real_micron_page() {
+        const REAL: &[u8] = include_bytes!("fixtures/nvme_health_micron3400.bin");
+        let h = parse_nvme_health(REAL).unwrap();
+        assert_eq!(h.critical_warning, 0);
+        assert_eq!(h.temp_c, Some(27), "300 K is 27 C");
+        assert_eq!(h.avail_spare, 100);
+        assert_eq!(h.spare_threshold, 5);
+        assert_eq!(h.percent_used, 1);
+        assert_eq!(h.data_units_read, 2_342_348);
+        assert_eq!(h.data_units_written, 8_367_439);
+        assert_eq!(h.power_cycles, 36);
+        assert_eq!(h.power_on_hours, 4_500);
+        assert_eq!(h.unsafe_shutdowns, 25);
+        assert_eq!(h.media_errors, 0);
+        assert_eq!(h.data_written_gb, 4_284);
+        assert!(h.critical_warnings().is_empty());
+    }
+
     #[test]
     fn reads_the_failing_page() {
         let f = parse_nvme_health(FAILING).unwrap();

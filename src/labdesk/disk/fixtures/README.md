@@ -179,3 +179,31 @@ carries no reading, so the parsers return `Empty`.
 This is the fixture that matters most. Read as data it says "0 reallocated
 sectors, no critical warnings", which would render as a perfectly healthy drive.
 It must produce `unreadable` instead, and it must not panic.
+
+## Captured from real hardware, 2026-09-05
+
+Two buffers below are the exception to "constructed programmatically": they were
+read off drives on homebox-devserver (Lubuntu 26.04, kernel 7.0.0-30) by a
+harness that compiled this directory verbatim and ran `linux::nvme_health_page`
+and `linux::ata_smart_table` as root. Neither structure carries a serial number;
+the drive identity lives in `/sys` and is not here. The raw capture, with the
+harness source hashes, is in the phase 1 evidence directory of that session
+(`gauntlet-evidence/p1-rust-core/round-1/homebox-disk-harness.txt`).
+
+### `nvme_health_micron3400.bin` (512 bytes)
+
+Log page 02h from a Micron 3400 MTFDKBA512TFH (firmware P7MU002) over
+`NVME_IOCTL_ADMIN_CMD`. Composite temperature 300 K (27 C), spare 100 percent
+against a threshold of 5, 1 percent used, 4,500 power-on hours, 36 power cycles,
+25 unsafe shutdowns, 8,367,439 data units written (4,284 GB), no media errors,
+no critical warning. Asserted field by field by `nvme::tests::reads_a_real_micron_page`.
+
+### `ata_attrs_st1000vx008.bin` (512 bytes)
+
+SMART READ_ATTRIBUTES from a Seagate ST1000VX008-2AY1 (firmware CV11) over
+`SG_IO` with the ATA PASS-THROUGH(16) CDB in `linux.rs`. Twenty five attributes,
+checksum valid. The one this capture exists for is attribute 9: the drive
+reports `6a b8 00 00 4e 41`, and the upper two bytes changed between two reads
+seconds apart, which is why `ata::summarize` now takes the low 24 bits (47,210
+hours) and not the 48 bit value (71 trillion). Asserted by
+`ata::tests::reads_a_real_seagate_table`.

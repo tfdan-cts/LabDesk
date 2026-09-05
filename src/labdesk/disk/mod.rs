@@ -365,6 +365,7 @@ fn probe_linux(sysfs: &linux::SysfsDisk, index: u32) -> Probe {
     );
     probe.device_path = Some(sysfs.dev_path.clone());
     probe.model = model;
+    probe.firmware = sysfs.firmware.clone();
     probe.rotational = sysfs.rotational;
     probe.size_bytes = sysfs.size_bytes;
     let bus = if nvme_namespace { "nvme" } else { "unknown" };

@@ -82,6 +82,10 @@ pub struct SysfsDisk {
     pub model: Option<String>,
     pub vendor: Option<String>,
     pub serial: Option<String>,
+    /// `device/rev` for a SCSI or ATA disk, `firmware_rev` on the controller
+    /// for an NVMe namespace. Read on homebox 2026-09-05 as `CV11` and
+    /// `P7MU002`, both of which had been arriving at the server as null.
+    pub firmware: Option<String>,
 }
 
 /// Every block device in `/sys/block` that could carry a health reading.
@@ -123,6 +127,7 @@ fn read_sysfs_disk(dir: &Path, name: String) -> SysfsDisk {
         model: text(read("device/model").or_else(|| from_class("model"))),
         vendor: text(read("device/vendor")),
         serial: text(read("device/serial").or_else(|| from_class("serial"))),
+        firmware: text(read("device/rev").or_else(|| from_class("firmware_rev"))),
         name,
     }
 }
@@ -131,15 +136,17 @@ fn read_sysfs_disk(dir: &Path, name: String) -> SysfsDisk {
 /// privilege.
 ///
 /// Depends on `CONFIG_NVME_HWMON`, so the directory is probed rather than
-/// assumed: a kernel built without it simply has no `hwmon*` under the
-/// controller and this returns `None`.
+/// assumed: a kernel built without it simply has no `hwmon*` and this returns
+/// `None`. The hwmon device is registered on the controller itself, so it is
+/// `/sys/class/nvme/nvme0/hwmon1` (kernel 7.0 on homebox, 2026-09-05, where
+/// `device/hwmon*` does not exist); the `device` directory is still searched
+/// second for the kernels that put it there.
 pub fn nvme_temp_c(block_name: &str) -> Option<i32> {
-    let controller = nvme_controller(block_name)?;
-    let device = PathBuf::from("/sys/class/nvme")
-        .join(controller)
-        .join("device");
-    fs::read_dir(device)
-        .ok()?
+    let controller = PathBuf::from("/sys/class/nvme").join(nvme_controller(block_name)?);
+    [controller.clone(), controller.join("device")]
+        .into_iter()
+        .filter_map(|dir| fs::read_dir(dir).ok())
+        .flatten()
         .flatten()
         .filter(|entry| entry.file_name().to_string_lossy().starts_with("hwmon"))
         .find_map(|entry| {

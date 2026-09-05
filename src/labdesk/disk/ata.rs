@@ -260,14 +260,15 @@ pub struct AtaSummary {
 
 /// Lift the counters above out of a parsed attribute table.
 ///
-/// Power-on hours is the raw 48 bit value as the drive reported it. Two vendor
-/// habits make that number untrustworthy as hours, and no field in the
-/// structure says which applies: some count minutes or half-minutes rather than
-/// hours, and some pack a second counter into the upper bytes, so the full 48
-/// bit read comes back enormous. This does not guess at either. The number is
-/// stored as reported, the vendor blob on `disk_event` keeps the bytes for a
-/// better decoder later, and a consumer rendering this as hours has to say
-/// where its per-vendor table came from.
+/// Power-on hours is the LOW 24 BITS of the raw value. Measured on
+/// 2026-09-05 against a Seagate ST1000VX008 (`fixtures/ata_attrs_st1000vx008.bin`):
+/// the drive reports `6a b8 00 00 4e 41`, and the upper two bytes moved from
+/// `0x414e` to `0x417a` between two reads seconds apart, so they are a second,
+/// faster counter packed beside the hours and the full 48 bit read is 71
+/// trillion. No drive has run for 2^24 hours (1,914 years), so anything above
+/// the low 24 bits cannot be hours and is dropped. A vendor that counts minutes
+/// rather than hours is still reported sixty times high; that habit leaves no
+/// mark in the structure to detect it by.
 pub fn summarize(attrs: &[AtaAttr]) -> AtaSummary {
     let find = |id: u8| attrs.iter().find(|a| a.id == id);
     let raw = |id: u8| find(id).map(|a| a.raw48());
@@ -275,7 +276,7 @@ pub fn summarize(attrs: &[AtaAttr]) -> AtaSummary {
         temp_c: find(ATTR_TEMPERATURE)
             .and_then(|a| a.temp_c())
             .or_else(|| find(ATTR_AIRFLOW_TEMPERATURE).and_then(|a| a.temp_c())),
-        power_on_hours: raw(ATTR_POWER_ON_HOURS),
+        power_on_hours: raw(ATTR_POWER_ON_HOURS).map(|hours| hours & 0x00FF_FFFF),
         power_cycles: raw(ATTR_POWER_CYCLES),
         reallocated: raw(ATTR_REALLOCATED_SECTORS),
         reallocated_events: raw(ATTR_REALLOCATED_EVENTS),
@@ -521,6 +522,31 @@ mod tests {
         let attrs = parse_ata_attributes(FAILING).unwrap();
         let rate = attrs.iter().find(|a| a.id == ATTR_RAW_READ_ERROR_RATE).unwrap();
         assert_eq!(rate.raw48(), 12_884_901_888);
+    }
+
+    /// The one table here that came off a drive: SMART READ_ATTRIBUTES from a
+    /// Seagate ST1000VX008-2AY1 on homebox-devserver, 2026-09-05, read over
+    /// `SG_IO` by `linux::ata_smart_table`. Provenance in `fixtures/README.md`.
+    #[test]
+    fn reads_a_real_seagate_table() {
+        const REAL: &[u8] = include_bytes!("fixtures/ata_attrs_st1000vx008.bin");
+        assert!(checksum_ok(REAL), "the drive's own checksum");
+        let attrs = parse_ata_attributes(REAL).unwrap();
+        assert_eq!(attrs.len(), 25);
+        let poh = attrs.iter().find(|a| a.id == ATTR_POWER_ON_HOURS).unwrap();
+        // 0x414e0000b86a as read: a second counter in the upper bytes beside
+        // 47,210 hours in the low 24 bits. The 48 bit value is not hours.
+        assert_eq!(poh.raw, [0x6a, 0xb8, 0x00, 0x00, 0x4e, 0x41]);
+        assert_eq!(poh.raw48(), 0x414e_0000_b86a);
+        let s = summarize(&attrs);
+        assert_eq!(s.power_on_hours, Some(47_210));
+        assert_eq!(s.power_cycles, Some(65));
+        assert_eq!(s.reallocated, Some(0));
+        assert_eq!(s.pending, Some(0));
+        assert_eq!(s.uncorrectable, Some(0));
+        assert_eq!(s.crc_errors, Some(0));
+        assert_eq!(s.temp_c, Some(28));
+        assert_eq!(s.life_used_pct, None);
     }
 
     #[test]
