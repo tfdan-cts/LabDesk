@@ -274,19 +274,21 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 /// Enrol this machine: prove possession of the agent key against a single-use token an
 /// org owner minted, and pin the machine id and cadences the server assigns.
+///
+/// `peer_id` is this machine's nine-digit id: `crate::ipc::get_id()` from the CLI, and
+/// `Config::get_id()` inside the daemon, which cannot ask itself over IPC.
+///
+/// The machine plane is always lab-desk.net. The `api-server` option is the profile's
+/// hbbs API, which on a machine whose config still carries the RustDesk name is a
+/// server that has never heard of `/agent/*` (`get_api_server_`, src/common.rs).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub fn enrol(token: &str) -> ResultType<String> {
-    let api_server = crate::ui_interface::get_api_server();
-    if api_server.is_empty() || crate::is_public(&api_server) {
-        bail!("No API server is configured!");
-    }
+pub fn enrol(token: &str, peer_id: &str) -> ResultType<String> {
     let mut identity = AgentIdentity::load_or_create()?;
-    let peer_id = crate::ipc::get_id();
     let ts = (hbb_common::get_time() / 1000).to_string();
     let signature = identity.sign(&enrol_signed_msg(
         token,
         identity.public_key(),
-        &peer_id,
+        peer_id,
         &ts,
     ))?;
     let body = serde_json::json!({
@@ -300,7 +302,7 @@ pub fn enrol(token: &str) -> ResultType<String> {
         "sig": signature,
     })
     .to_string();
-    let url = format!("{}/agent/enrol", api_server);
+    let url = format!("{}/agent/enrol", crate::LABDESK_SITE);
     let text = crate::post_request_sync(url, body, "")?;
     let response = serde_json::from_str::<serde_json::Value>(&text)?;
     let Some(machine_id) = response["machineId"].as_str() else {

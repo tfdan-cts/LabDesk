@@ -1801,85 +1801,71 @@ pub fn main_get_id_pk() -> String {
 }
 
 /// Sign one `/agent/*` request with this machine's own agent key and answer the
-/// three headers the machine plane reads, as JSON `{"machine","ts","sig"}`:
-/// the machine id the server looks the key up by, the timestamp it bounds
-/// replay with, and the detached Ed25519 signature over `uplink_signed_msg`
-/// (`src/labdesk/identity.rs`), which is what `agentAuth` rebuilds and verifies
-/// (`src/worker/agent-auth.ts` in labdesk-site).
+/// three headers the machine plane reads, as JSON `{"machine","ts","sig"}`
+/// (`signature_json`, src/labdesk/labnet.rs). The body is signed as the bytes
+/// of `body`, so the caller must send exactly the string it passed here and
+/// nothing re-encoded from it.
 ///
-/// The timestamp is minted here rather than taken from the caller, so the
-/// timestamp that was signed and the timestamp that is sent cannot drift apart.
-/// The body is signed as the bytes of `_body`, so the caller must send exactly
-/// the string it passed here and nothing re-encoded from it.
-///
-/// An empty answer means this process cannot speak for the machine, which is
-/// not a failure to paper over. Nothing is minted on the way past: the identity
-/// is only loaded when its file already exists, because a key generated here
-/// would land in the calling account's own profile and would not be the key the
-/// server holds.
-///
-/// KNOWN GAP, and the reason it is worth stating where the function is rather
-/// than only where it is called: the Flutter UI is NOT a process that may read
-/// the credential, on any platform. `AgentIdentity::path()` is under
-/// `ServiceProfiles\LocalService` on Windows, whose ACL the store narrows to
-/// SYSTEM and Administrators, and is written 0600 by the root daemon elsewhere
-/// (`src/labdesk/identity.rs`). So this answers "" whenever the console asks,
-/// and every machine-plane call is refused before the wire. Closing it means
-/// the UI asking the privileged daemon to sign, the way it already asks for its
-/// config and for the Wayland restore token (`crate::ipc::get_config`,
-/// `crate::ipc::get_wayland_screencast_restore_token`), which needs a request of
-/// its own in `src/ipc.rs`. The signing itself is here and is right; what is
-/// missing is a caller that runs where the key is.
+/// The console is not a process that may read the credential on any platform
+/// (src/labdesk/identity.rs), so this asks the privileged process over IPC
+/// unless it is that process itself. An empty answer means nobody could speak
+/// for the machine, which is not a failure to paper over.
 pub fn main_agent_sign(_method: String, _path: String, _body: String) -> String {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        use crate::labdesk::identity::AgentIdentity;
-        if !AgentIdentity::path().exists() {
-            return "".to_owned();
+        use crate::labdesk::labnet::{serve_here_or_over_ipc, LabnetRequest};
+        match serve_here_or_over_ipc(LabnetRequest::Sign {
+            method: _method,
+            path: _path,
+            body: _body,
+        }) {
+            Ok(json) => json,
+            Err(err) => {
+                log::warn!("labnet: cannot sign for this machine: {}", err);
+                "".to_owned()
+            }
         }
-        let Ok(identity) = AgentIdentity::load_or_create() else {
-            return "".to_owned();
-        };
-        if identity.machine_id().is_empty() {
-            return "".to_owned();
-        }
-        agent_signature_json(
-            identity.machine_id(),
-            &_method,
-            &_path,
-            (hbb_common::get_time() / 1000).to_string(),
-            _body.as_bytes(),
-            |msg| identity.sign(msg),
-        )
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     "".to_owned()
 }
 
-/// The three headers as JSON, or "" when the key would not sign.
-///
-/// Split out from the loader above because the one property here that is not
-/// the key's own -- that the timestamp reported is the timestamp signed, over a
-/// message built from the request as it will be sent -- is the one a test can
-/// hold without a machine credential on disk.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn agent_signature_json(
-    machine_id: &str,
-    method: &str,
-    path: &str,
-    ts: String,
-    body: &[u8],
-    sign: impl FnOnce(&[u8]) -> ResultType<String>,
-) -> String {
-    match sign(&crate::labdesk::identity::uplink_signed_msg(
-        method, path, &ts, body,
-    )) {
-        Ok(sig) => serde_json::json!({ "machine": machine_id, "ts": ts, "sig": sig }).to_string(),
-        Err(err) => {
-            log::error!("Failed to sign an agent request: {}", err);
-            "".to_owned()
+/// Enrol this machine with an org-minted token (`labdesk::identity::enrol`),
+/// in the privileged process over IPC. Answers `{"machineId":...}` or
+/// `{"error":...}`.
+pub fn main_agent_enrol(_token: String) -> String {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        use crate::labdesk::labnet::{serve_here_or_over_ipc, LabnetRequest};
+        match serve_here_or_over_ipc(LabnetRequest::Enrol { token: _token }) {
+            Ok(machine_id) => serde_json::json!({ "machineId": machine_id }).to_string(),
+            Err(error) => serde_json::json!({ "error": error }).to_string(),
         }
     }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    serde_json::json!({ "error": "unsupported" }).to_string()
+}
+
+/// Drive the bundled labnet daemon in the privileged process over IPC:
+/// `action` is `install`, `start`, `up`, `down` or `status`; `setup_key` is
+/// read by `up`; `management_url` by `install` and `up`. Answers
+/// `{"output":...}`, the daemon's stdout (the status JSON for `status`), or
+/// `{"error":...}`, the daemon's own words.
+pub fn main_overlay_daemon(_action: String, _setup_key: String, _management_url: String) -> String {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        use crate::labdesk::labnet::{serve_here_or_over_ipc, LabnetRequest};
+        match serve_here_or_over_ipc(LabnetRequest::Daemon {
+            action: _action,
+            setup_key: _setup_key,
+            management_url: _management_url,
+        }) {
+            Ok(output) => serde_json::json!({ "output": output }).to_string(),
+            Err(error) => serde_json::json!({ "error": error }).to_string(),
+        }
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    serde_json::json!({ "error": "unsupported" }).to_string()
 }
 
 /// The port the direct listener answers on.
@@ -3362,52 +3348,5 @@ mod tests {
         for option in ["", " ", "0", "-1", "abc", "21119abc"] {
             assert_eq!(direct_access_port(option), RENDEZVOUS_PORT + 2, "{option}");
         }
-    }
-
-    /// The machine plane rebuilds the signing message from the request it
-    /// received, under the timestamp the header carries (`agentAuth`,
-    /// src/worker/agent-auth.ts). So a timestamp that is reported but not
-    /// signed, or a message built from anything other than the method, the path
-    /// and the body handed in, refuses every uplink the console makes.
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    #[test]
-    fn the_agent_signature_reports_the_timestamp_it_signed_over_the_request_it_was_given() {
-        use crate::labdesk::identity::uplink_signed_msg;
-        const BODY: &[u8] = br#"{"overlayIp":"100.64.0.3"}"#;
-        // A "signature" that is the message itself, so this reads what was
-        // signed rather than only that something was.
-        let answer: serde_json::Value = serde_json::from_str(&super::agent_signature_json(
-            "m-1",
-            "POST",
-            "/agent/overlay/self",
-            "1788480000".to_owned(),
-            BODY,
-            |msg| Ok(crate::encode64(msg)),
-        ))
-        .unwrap();
-        assert_eq!(answer["machine"], "m-1");
-        let ts = answer["ts"].as_str().unwrap();
-        assert_eq!(
-            crate::decode64(answer["sig"].as_str().unwrap()).unwrap(),
-            uplink_signed_msg("POST", "/agent/overlay/self", ts, BODY)
-        );
-    }
-
-    /// A key that refuses to sign is not a signature of "": the console must be
-    /// told it cannot speak for this machine rather than sent unsigned.
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    #[test]
-    fn a_key_that_will_not_sign_answers_nothing_at_all() {
-        assert_eq!(
-            super::agent_signature_json(
-                "m-1",
-                "GET",
-                "/agent/overlay/inbox",
-                "1".to_owned(),
-                b"",
-                |_| { hbb_common::bail!("no agent identity secret key") }
-            ),
-            ""
-        );
     }
 }

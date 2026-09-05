@@ -449,13 +449,11 @@ async fn post_signed(
     path: &str,
     body: &str,
 ) -> ResultType<(u16, String)> {
-    let api_server = crate::ui_interface::get_api_server();
-    if api_server.is_empty() || crate::is_public(&api_server) {
-        bail!("No API server is configured!");
-    }
+    // Always lab-desk.net: the `api-server` option is the profile's hbbs API, not the
+    // machine plane (see `enrol` in src/labdesk/identity.rs).
     let ts = (hbb_common::get_time() / 1000).to_string();
     let signature = identity.sign(&uplink_signed_msg("POST", path, &ts, body.as_bytes()))?;
-    let url = format!("{}{}", api_server, path);
+    let url = format!("{}{}", crate::LABDESK_SITE, path);
     // The strict client refuses anything but HTTPS. An uplink carries a machine's whole
     // inventory, so cleartext is not a configuration we quietly accept.
     let response = crate::hbbs_http::create_http_client_async_with_url_strict(&url)

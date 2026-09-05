@@ -664,7 +664,7 @@ pub fn core_main() -> Option<Vec<String>> {
                 let max = args.len() - 1;
                 let pos = args.iter().position(|x| x == "--token").unwrap_or(max);
                 if pos < max {
-                    match crate::labdesk::identity::enrol(&args[pos + 1]) {
+                    match crate::labdesk::identity::enrol(&args[pos + 1], &crate::ipc::get_id()) {
                         Err(err) => println!("{}", err),
                         Ok(machine_id) => println!("Enrolled as {}", machine_id),
                     }

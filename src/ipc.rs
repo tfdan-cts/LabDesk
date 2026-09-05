@@ -370,6 +370,10 @@ pub enum Data {
     FS(FS),
     Test,
     SyncConfig(Option<Box<(Config, Config2)>>),
+    /// labnet: served by the process that holds the agent identity
+    /// (src/labdesk/labnet.rs, which says who may ask and what they get).
+    Labnet(crate::labdesk::labnet::LabnetRequest),
+    LabnetResult(Result<String, String>),
     #[cfg(target_os = "windows")]
     ClipboardFile(ClipboardFile),
     ClipboardFileEnabled(bool),
@@ -588,7 +592,9 @@ pub async fn start(postfix: &str) -> ResultType<()> {
                                 }
                                 Ok(Some(data)) => {
                                     // On Linux/macOS, the protected `_service` channel is used only for
-                                    // syncing config between root service and the active user process.
+                                    // syncing config between root service and the active user process,
+                                    // and for the labnet requests only the root service can serve
+                                    // (src/labdesk/labnet.rs).
                                     //
                                     // NOTE: `is_service_ipc_postfix()` also includes `_uinput_*`, but those
                                     // channels are handled by the dedicated uinput listener/protocol in
@@ -600,7 +606,7 @@ pub async fn start(postfix: &str) -> ResultType<()> {
                                     // uinput IPC paths while still minimizing exposed message surface here.
                                     #[cfg(any(target_os = "linux", target_os = "macos"))]
                                     if postfix == crate::POSTFIX_SERVICE {
-                                        if matches!(&data, Data::SyncConfig(_)) {
+                                        if matches!(&data, Data::SyncConfig(_) | Data::Labnet(_)) {
                                             handle(data, &mut stream).await;
                                         } else {
                                             log::warn!(
@@ -1010,6 +1016,19 @@ async fn handle(data: Data, stream: &mut Connection) {
         Data::NatType(_) => {
             let t = Config::get_nat_type();
             allow_err!(stream.send(&Data::NatType(Some(t))).await);
+        }
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        Data::Labnet(request) => {
+            // On a thread of its own: `enrol` and the netbird calls block, and `enrol`
+            // builds a runtime of its own, which a runtime thread may not.
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            std::thread::spawn(move || {
+                tx.send(crate::labdesk::labnet::serve(request)).ok();
+            });
+            let answer = rx
+                .await
+                .unwrap_or_else(|_| Err("The labnet request was dropped".to_owned()));
+            allow_err!(stream.send(&Data::LabnetResult(answer)).await);
         }
         Data::SyncConfig(Some(configs)) => {
             let (config, config2) = *configs;
@@ -1857,18 +1876,29 @@ pub async fn get_option_async(key: &str) -> String {
     }
 }
 
-pub fn set_option(key: &str, value: &str) {
-    let mut options = get_options();
+#[tokio::main(flavor = "current_thread")]
+pub async fn set_option(key: &str, value: &str) {
+    set_option_async(key, value).await
+}
+
+/// `set_option` for a caller already inside a runtime, such as the client's
+/// connect path, where the sync one would try to start a second runtime.
+pub async fn set_option_async(key: &str, value: &str) {
+    let mut options = get_options_async().await;
     if value.is_empty() {
         options.remove(key);
     } else {
         options.insert(key.to_owned(), value.to_owned());
     }
-    set_options(options).ok();
+    set_options_async(options).await.ok();
 }
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn set_options(value: HashMap<String, String>) -> ResultType<()> {
+    set_options_async(value).await
+}
+
+async fn set_options_async(value: HashMap<String, String>) -> ResultType<()> {
     let _nat = CheckTestNatType::new();
     if let Ok(mut c) = connect(1000, "").await {
         c.send(&Data::Options(Some(value.clone()))).await?;
@@ -1877,6 +1907,21 @@ pub async fn set_options(value: HashMap<String, String>) -> ResultType<()> {
     }
     Config::set_options(value);
     Ok(())
+}
+
+/// Ask the process that holds the agent identity to serve one labnet request
+/// (src/labdesk/labnet.rs). For the FFI thread; never from inside a runtime.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tokio::main(flavor = "current_thread")]
+pub async fn labnet(request: crate::labdesk::labnet::LabnetRequest) -> ResultType<String> {
+    let ms_timeout = request.ipc_timeout_ms();
+    let mut c = connect(1000, crate::labdesk::labnet::IPC_POSTFIX).await?;
+    c.send(&Data::Labnet(request)).await?;
+    match c.next_timeout(ms_timeout).await? {
+        Some(Data::LabnetResult(Ok(answer))) => Ok(answer),
+        Some(Data::LabnetResult(Err(err))) => bail!(err),
+        _ => bail!("No answer from the LabDesk service"),
+    }
 }
 
 #[inline]

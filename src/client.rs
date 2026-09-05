@@ -398,8 +398,8 @@ impl Client {
                 match parse_overlay_hint(&hint) {
                     None => {
                         log::error!("labnet: discarding overlay address {} for {}", hint, peer);
-                        Config::set_option(addr_key, "".to_owned());
-                        Config::set_option(pk_key, "".to_owned());
+                        crate::ipc::set_option_async(&addr_key, "").await;
+                        crate::ipc::set_option_async(&pk_key, "").await;
                     }
                     Some(addr) => {
                         let started = Instant::now();
@@ -472,9 +472,12 @@ impl Client {
                                 // A socket that answers but cannot prove it is
                                 // the peer gets no session. Drop the address and
                                 // the key together, so no later connect pays the
-                                // same cost again and the two cannot drift.
-                                Config::set_option(addr_key, "".to_owned());
-                                Config::set_option(pk_key, "".to_owned());
+                                // same cost again and the two cannot drift. Through
+                                // IPC, not `Config` alone: this is the client process,
+                                // and a hint cleared only here comes back from the
+                                // server copy on the next option sync.
+                                crate::ipc::set_option_async(&addr_key, "").await;
+                                crate::ipc::set_option_async(&pk_key, "").await;
                                 if overlay_is_impersonation(conn.is_secured(), signed_other_id) {
                                     // Another machine answered on the peer's
                                     // address under an identity of its own. Say
