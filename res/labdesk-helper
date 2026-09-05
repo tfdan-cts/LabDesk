@@ -67,6 +67,12 @@ case "$name" in
     *) kind=rpm ;;
 esac
 
+# Checked before the copy as well as after it. The check after the copy is the
+# one that decides; this one keeps the ordinary mistake, and the named pipe a
+# caller could leave in place of a package, from being read at all.
+[ -f "$given" ] || fail "not a regular file: $given" 66
+if [ -L "$given" ]; then fail "the package path is a symlink: $given" 66; fi
+
 work=$(mktemp -d /var/tmp/labdesk-helper-XXXXXX)
 chmod 700 "$work"
 trap 'rm -rf "$work"' EXIT INT TERM
@@ -87,7 +93,12 @@ else
     version=$(rpm -qp --nosignature --qf '%{VERSION}' "$pkg") || fail "not an RPM package: $name" 65
     installed=$(rpm -q --qf '%{VERSION}' "$package" 2>/dev/null || true)
 fi
-[ -n "$version" ] || fail "the package declares no version" 65
+# The version comes out of the package, so it is whatever whoever built that
+# package put there, and it is about to become part of a URL path. A Debian
+# version is digits, letters and a few punctuation marks; anything else is
+# refused here rather than sent to the site.
+printf '%s' "$version" | grep -qE '^[0-9][0-9A-Za-z.+~-]*$' ||
+    fail "the package declares a version that is not a version: $version" 65
 
 # An old release is a published release, so a digest check alone would let one
 # be handed back to a machine that has already moved past it. Every install
