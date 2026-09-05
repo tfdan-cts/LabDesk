@@ -230,6 +230,20 @@ jobs:
             exit 1
           fi
 
+      # The rebrand is only real if iOS renders it. Sending the app to the
+      # background leaves the home screen up, where the icon and the display
+      # name are the two things the operator sees before anything else.
+      - name: The home screen, for the icon and the name
+        if: always()
+        run: |
+          mkdir -p artifacts
+          xcrun simctl ui "${{ steps.sim.outputs.udid }}" appearance light || true
+          xcrun simctl terminate "${{ steps.sim.outputs.udid }}" \
+            "${{ steps.launch.outputs.bundle_id }}" || true
+          sleep 4
+          xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot \
+            "artifacts/home-screen.png" || true
+
       - name: Collect logs
         if: always()
         run: |

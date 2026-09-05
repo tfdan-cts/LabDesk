@@ -277,6 +277,32 @@ Source for the build script reading:
 <https://raw.githubusercontent.com/sodiumoxide/sodiumoxide/master/libsodium-sys/build.rs>,
 read 2026-09-05.
 
+## A correction: the icons were already somebody's job
+
+The first version of the icon work was a Python script,
+`flutter/tool/make_ios_app_icons.py`, written because `res/icon.png` is a
+rounded tile with transparent corners and iOS wants square opaque art. It
+is deleted.
+
+`flutter/pubspec.yaml` already carries `flutter_launcher_icons` as a direct
+dependency with a complete `flutter_icons` block pointed at `res/icon.png`
+and `remove_alpha_ios: true`. The script was custom code for a job an
+installed and configured dependency already did. Running
+`dart run flutter_launcher_icons` regenerates them, and the iOS icons in
+this branch are now its output; the Android files it also rewrote were
+reverted, since that client is another lane.
+
+The one thing worth knowing, checked rather than waved away: the tool
+flattens the transparent corners onto black, so the raw 1024 asset has
+black corners while the hand-written script had extended the artwork into
+them. `res/icon.png` rounds at 390 in a 2048 tile, 19 percent of the width,
+and the mask iOS applies to an app icon is wider than that, so those black
+pixels sit where iOS cuts. The two outputs should be indistinguishable on a
+home screen. Should be, because that is a reading of the geometry and not
+yet a screenshot, which is why the verification job now takes one of the
+home screen: it shows the icon and the display name as iOS renders them,
+and it is the only thing that settles both the rebrand and this paragraph.
+
 ## The bar, written before anything is judged against it
 
 The brief asks for a gauntlet loop: one concrete bar, pieces judged alone,
