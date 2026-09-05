@@ -250,15 +250,15 @@ the service to (`main_agent_sign`, served by `src/labdesk/labnet.rs`), and `serv
 refuses from any process that is not the privileged one. The human-side calls (a session grant,
 the labnet list and lifecycle, invitations, the organization's machines) go to
 `/console/overlay/...` and `/console/org/...` with the app token `/api/login` minted. They
-never target `/api/`: while lab-desk.net is private, `/api/*` sits behind the Cloudflare Access
-wall and answers the desktop's bearer with a 302, and the bypass that lets the desktop through
-carries `/agent` and `/console` and must never gain `/api`. The Worker mounts its
+never target `/api/`: the prefix dates from the private phase, when `/api/*` sat behind the
+Cloudflare Access wall and answered the desktop's bearer with a 302; the wall came down on
+2026-09-05 and the prefix stays served because this build speaks it. The Worker mounts its
 `/api/overlay/*` and `/api/org/*` handlers a second time under `/console`, and `actor()` there
 resolves the bearer to the same person with the same role as in the browser.
 `test/labdesk_overlay_broker_test.dart` asserts that no human-plane call targets `/api/`.
 
 **What is proven, and what is not (2026-09-05).** Production serves the Worker that mounts
-`/console`; `lab-desk.net/agent` and `lab-desk.net/console` are on the Access bypass; the labnet
+`/console`; the Access wall and its bypass are gone since later that day and the site is public; the labnet
 tables exist, migrations 0002 through 0009 having been applied that day; and probed with no
 bearer and with a junk one, every `/console` route answers JSON 401 rather than a redirect. The
 build at `d9d9b23dc` (release `labnet-ready`) is installed on trapLab-Foundry. What has not

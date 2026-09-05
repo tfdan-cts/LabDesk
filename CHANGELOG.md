@@ -20,6 +20,11 @@ past that release:
   machines) go to `/console/...`, where the app token reaches a handler while the site is behind
   its private-phase wall. The machine plane stays on `/agent/...`. No console call targets
   `/api/...` any more, and a test holds it.
+- lab-desk.net is public since 2026-09-05. The Cloudflare zone was hardened and every setting
+  read back live, the site's admin gained a registration switch (default off: a self sign-up
+  lands pending and cannot sign in until an admin approves it) and an overview of the
+  organizations, machines and open labnet sessions, and the private-phase Access wall came
+  down. The `/console` prefix this build speaks stays served.
 - The direct listener signs its identity when bound to the overlay address, so a direct session
   completes instead of falling back to the relay every time, and a peer whose key the broker has
   not yet learned is reported as unproven and falls through rather than being called an

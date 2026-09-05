@@ -73,10 +73,11 @@ lives only in the Worker's environment. The Worker creates and deletes peers,
 groups and policies on the labnet control plane. No human credential and no
 machine credential reaches NetBird directly.
 
-Outside all seven sits Cloudflare Access, the wall in front of lab-desk.net for
-the private phase. Its allowlist is edited from `/admin` through
-`src/worker/access.ts`. Whether the `/agent/*` prefix is on its bypass list is
-unknown and is recorded in section 5.
+Outside all seven stood Cloudflare Access, the wall in front of lab-desk.net for
+the private phase, until 2026-09-05, when it and its bypass were deleted along
+with `src/worker/access.ts`. The site is public; the registration switch in
+`/admin` (default off, so a new account waits for approval) decides who may use
+it, and the zone's WAF rules, rate limit and bot policies stand at the edge.
 
 ### What each organization role may do
 
@@ -250,8 +251,9 @@ kept for the record. The machine plane is signed by the privileged process over
 IPC (`b3fe22bc5`, `src/labdesk/labnet.rs`, `main_agent_sign`), and the human
 plane moved to `/console/overlay/*` and `/console/org/*` (`d9d9b23dc`), where the
 Worker mounts the same handlers a second time and `actor()` resolves the app
-bearer (site `a73fa72`, `9728be6`). `lab-desk.net/console` is on the Access bypass
-beside `/agent`; `/api` is not and must never be. What was true when written:
+bearer (site `a73fa72`, `9728be6`). The Access bypass that admitted `/console` and
+`/agent` went with the wall on 2026-09-05; the prefix stays because this build
+speaks it. What was true when written:
 the broker addressed the right routes, six machine side calls to
 `/agent/overlay/*` and the rest to `/api/overlay/*`, but neither half
 authenticated.
@@ -486,8 +488,11 @@ applied, so the deployed schema is not the schema any test or probe ran against.
 This was established this session against the live database, not from the
 repository. **Settles it:** apply them, then read the deployed schema back.
 
-**Whether `/agent/*` is on the Cloudflare Access bypass is unknown.**
-`wrangler.jsonc` carries a `CF_ACCESS_APP_ID`, and a live `POST` to
+**Whether `/agent/*` is on the Cloudflare Access bypass is unknown.** SETTLED
+2026-09-05, kept for the record: `/agent` was put on the bypass that morning
+(`/agent/overlay/inbox` answered JSON 401 and `POST /agent/enrol` JSON 400 from
+outside), and the wall itself was deleted later that day.
+`wrangler.jsonc` carried a `CF_ACCESS_APP_ID`, and a live `POST` to
 `/agent/batch` returned a redirect to the Access login. If that prefix is not
 bypassed, every agent request in production hits a login wall and the machine
 plane is dead on arrival regardless of the code. The policy lives in Cloudflare,
