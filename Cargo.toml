@@ -135,6 +135,10 @@ windows = { version = "0.61", features = [
     # identifiers. Neither pulls a new crate in; they widen the `windows` crate
     # that is already here.
     "Win32_Storage_Nvme",
+    # For src/labdesk/netview.rs: GetAdaptersAddresses, the per-adapter link
+    # state and addresses. Landed alone first, the way the two above were, so
+    # CI proves the feature string before code is written against it.
+    "Win32_NetworkManagement_IpHelper",
     "Win32_System",
     "Win32_System_Com",
     "Win32_System_Diagnostics",
