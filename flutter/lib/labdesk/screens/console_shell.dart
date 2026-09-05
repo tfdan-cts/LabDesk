@@ -23,6 +23,7 @@ enum ConsoleSection {
   tools,
   automation,
   actions,
+  network,
   thisMachine,
   settings,
 }
@@ -42,6 +43,7 @@ extension ConsoleSectionInfo on ConsoleSection {
         ConsoleSection.tools => 'Tools',
         ConsoleSection.automation => 'Automation',
         ConsoleSection.actions => 'Actions',
+        ConsoleSection.network => 'Network',
         ConsoleSection.settings => 'Settings',
       };
 
@@ -54,6 +56,7 @@ extension ConsoleSectionInfo on ConsoleSection {
         ConsoleSection.automation => LdIcons.refresh,
         ConsoleSection.terminal => LdIcons.terminal,
         ConsoleSection.actions => LdIcons.actions,
+        ConsoleSection.network => LdIcons.group,
         ConsoleSection.settings => LdIcons.settings,
       };
 
@@ -66,6 +69,7 @@ extension ConsoleSectionInfo on ConsoleSection {
         ConsoleSection.sessions ||
         ConsoleSection.tools ||
         ConsoleSection.automation ||
+        ConsoleSection.network ||
         ConsoleSection.settings =>
           false,
         _ => true,
@@ -404,6 +408,7 @@ class _ConsoleShellState extends State<ConsoleShell> {
       case ConsoleSection.sessions:
       case ConsoleSection.tools:
       case ConsoleSection.automation:
+      case ConsoleSection.network:
         // Supplied by the client through [hosted] once built; until then the
         // section says so rather than showing an empty frame.
         return _HostedElsewhere(section: _section);

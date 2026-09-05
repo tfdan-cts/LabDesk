@@ -16,11 +16,17 @@ import 'package:flutter/material.dart';
 
 import 'common/labdesk_peer_status.dart';
 import 'labdesk/charts/reachability_chart.dart';
+import 'labdesk/models/labnet.dart';
 import 'labdesk/models/machine_metrics.dart';
 import 'labdesk/models/machine_row.dart';
 import 'labdesk/screens/console_shell.dart';
+import 'labdesk/screens/enrol_card.dart';
+import 'labdesk/screens/labnet_card.dart';
+import 'labdesk/screens/network_screen.dart';
 import 'labdesk/screens/settings_screen.dart';
 import 'labdesk/screens/terminal_screen.dart';
+import 'labdesk/screens/this_machine_screen.dart';
+import 'labdesk/services/overlay_enrolment.dart';
 import 'labdesk/theme/console_theme.dart';
 
 void main() => runApp(const LabDeskPreviewApp());
@@ -81,6 +87,63 @@ class _LabDeskPreviewAppState extends State<LabDeskPreviewApp> {
             setState(() => _refreshing = true);
             await Future.delayed(const Duration(milliseconds: 1400));
             if (mounted) setState(() => _refreshing = false);
+          },
+          // The two labnet surfaces, with fixture state, so they can be looked
+          // at beside the sections they sit among.
+          hosted: {
+            ConsoleSection.thisMachine: (_) => ThisMachineScreen(
+                  machineId: '482910337',
+                  password: 'k7Qm2xLp',
+                  passwordIsTemporary: true,
+                  serviceRunning: true,
+                  displayName: 'Workshop NAS',
+                  // A fake daemon: a token that starts with "bad" is refused
+                  // the way the server would, anything else is enrolled.
+                  enrol: MachineEnrolCard(
+                    enrol: (token) async {
+                      await Future.delayed(const Duration(milliseconds: 600));
+                      return token.startsWith('bad')
+                          ? '{"error":"That enrolment token has expired or was already used."}'
+                          : '{"machineId":"5f1c2a0e-7b3d-4c9a-9e21-0d4b8a6f3c11"}';
+                    },
+                  ),
+                  labnet: LabnetCard(
+                    state: const LabnetCardState(LabnetPhase.on, ip: '100.64.0.3'),
+                    onDisable: () {},
+                  ),
+                ),
+            ConsoleSection.network: (_) => NetworkScreen(
+                  inbox: const LabnetInbox(
+                    enrolled: true,
+                    overlayIp: '100.64.0.3',
+                    invitations: [
+                      LabnetInvitation(labnetId: 'L9', name: 'Rack', invitedBy: 'owner@lab-desk.net'),
+                    ],
+                    labnets: [
+                      Labnet(id: 'L1', name: 'Workshop', fullAccess: false, owner: true, members: [
+                        LabnetMember(deviceId: '482910337', status: 'approved', overlayIp: '100.64.0.3'),
+                        LabnetMember(deviceId: '118374662', status: 'approved', overlayIp: '100.64.0.7'),
+                        LabnetMember(deviceId: '905513280', status: 'pending'),
+                      ]),
+                      Labnet(id: 'L2', name: 'Office', fullAccess: true, owner: false, members: [
+                        LabnetMember(deviceId: '482910337', status: 'approved', overlayIp: '100.64.0.3'),
+                        LabnetMember(deviceId: '330918744', status: 'approved', overlayIp: '100.64.0.12'),
+                      ]),
+                    ],
+                  ),
+                  thisMachineId: '482910337',
+                  machines: [
+                    for (final m in _fixtures) NetworkMachine(id: m.id, name: m.displayName),
+                  ],
+                  onCreate: (_) {},
+                  onApprove: (_) {},
+                  onDecline: (_) {},
+                  onInvite: (_, __) {},
+                  onFullAccess: (_, __) {},
+                  onLeave: (_) {},
+                  onRemove: (_, __) {},
+                  onDelete: (_) {},
+                ),
           },
         ),
       ),
