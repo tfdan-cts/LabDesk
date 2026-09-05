@@ -355,6 +355,14 @@ book routes. What the console has no surface for is managing the organization. C
   no FFI bind at HEAD, so nothing they produce, SMART surfaces included, reaches this interface.
   Work adding those binds is in flight in `src/flutter_ffi.rs` and is not committed.
 * **No update is driven from the console.** The update banner offers the client's own flow, which
-  installs in place on Windows and, through the service process, on macOS. `src/updater.rs` has no
-  Linux install arm, so a Linux machine receives no unattended update at all; on that platform the
-  check downloads the file, verifies its hash, and stops there.
+  installs in place on Windows and, through the service process, on macOS and, since 2026-09-05, on
+  Linux. `crate::updater::start_auto_update_linux` runs in the root service that
+  `res/rustdesk.service` starts, asks the desktop user's `--server` over IPC whether a session is
+  live, downloads the deb or rpm the release publishes for this platform, checks it against the
+  digest lab-desk.net publishes, and hands it to `/usr/share/rustdesk/labdesk-helper` through
+  `systemd-run`. The helper is the same program the polkit action
+  `net.lab-desk.LabDesk.install-update` names, so the console's own banner and the unattended loop
+  install through one gate; the helper fetches the published digest itself and refuses anything
+  that is not a package lab-desk.net has published, or that is not newer than the installed
+  version. An AppImage, a flatpak or a copy that was never installed from a package still gets the
+  download page rather than an install.
