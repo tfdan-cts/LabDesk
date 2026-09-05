@@ -66,12 +66,17 @@ CI then found two build gates the harness could not: `PENDING_TICKETS` sat behin
 referenced `crate::labdesk` on Android, where `lib.rs` does not compile the module; both are
 `cfg` fixes, no logic changed.
 
-The Windows network walk, added after that round: CI builds Linux only
-(`.github/workflows/ci.yml` has one uncommented matrix row), so it compiles nothing behind
-`#[cfg(target_os = "windows")]` and cannot be the proof for this arm. What CI does assert is
-`netview::windows_kind`, which is free of `cfg` and carries the whole `IfType` classification.
-The call itself was compiled and run on this Windows workstation against the real
-`src/labdesk/netview.rs` bytes, in a harness that supplies only the sampler's `Networks`
+The Windows network walk, added after that round. Two gates, and it matters which is which:
+`.github/workflows/ci.yml` is the workflow that RUNS the tests and it builds Linux only (one
+uncommented matrix row), so it compiles nothing behind `#[cfg(target_os = "windows")]`; what it
+asserts about the Windows arm is `netview::windows_kind`, which is free of `cfg` and carries the
+whole `IfType` classification. `Full Flutter CI` (`.github/workflows/flutter-ci.yml`, which runs
+on every pull request) is the workflow that COMPILES it: run 33968145857 on head 6df79e172 is
+green with `run-ci / x86_64-pc-windows-msvc`, `run-ci / i686-pc-windows-msvc` and
+`run-ci / aarch64-pc-windows-msvc` all success, so the call, the two added `windows` features and
+the struct layouts build on all three Windows targets. That workflow builds and does not test.
+The call's behaviour was proven by compiling and running it on this Windows workstation against
+the real `src/labdesk/netview.rs` bytes, in a harness that supplies only the sampler's `Networks`
 (`gauntlet-evidence/p1-rust-core/round-4/`): 34 raw entries folded to 10 adapters, loopback
 dropped, prefixes 8, 16, 20, 24, 32, 64 and 128 read straight off `OnLinkPrefixLength`, and
 `cargo test` green on all 7 tests in the module including `the_walk_finds_this_machines_interfaces`
@@ -85,6 +90,12 @@ Open after this round:
   `docs/plans/2026-09-05-002-phase1-contracts.md` (the two `windows` features the call really
   needs, and `FriendlyName` as the adapter name). The two copies are byte identical by that
   document's own rule and only the site lane can land its half.
+- A second Windows machine for the network walk. Foundry was offline for this round
+  (`tailscale status`: "offline, last seen 1h ago" on `centaur-diminished.ts.net`, ssh to
+  100.81.16.49 timed out), so `net.adapters` is proven on one Windows box, this workstation,
+  and by three Windows compile targets in CI. The static harness binary is in
+  `gauntlet-evidence/p1-rust-core/round-4/netview-harness.exe` and runs on Foundry unchanged
+  when it comes back.
 - The exit status of an `active_user` launch on Windows.
 - Field checks that need a built binary: `labdesk --disk-health` on homebox from the branch's
   own Linux build (the harness proved the module, not the shipped binary) and on Foundry, where

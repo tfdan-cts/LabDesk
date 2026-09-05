@@ -10,12 +10,16 @@
 // The walk is the only unsafe code; `collect` is the pure fold over what it
 // found and is what the tests drive.
 //
-// CI builds Linux only (`.github/workflows/ci.yml`, the one uncommented matrix
-// row), so nothing here that is behind `#[cfg(target_os = "windows")]` is
-// compiled by the gate that passes a round. What the Windows arm can prove on
-// the Linux runner it proves through `windows_kind`, which is free of `cfg`
-// and carries the whole classification; the call itself is proven by building
-// and running it on a Windows machine and by the dispatch build.
+// Which gate proves which arm. `.github/workflows/ci.yml` is the workflow that
+// RUNS the tests and it builds Linux only (one uncommented matrix row), so it
+// compiles nothing behind `#[cfg(target_os = "windows")]`; what it can assert
+// about the Windows arm it asserts through `windows_kind`, which is free of
+// `cfg` and carries the whole classification. The Windows arm is COMPILED by
+// `.github/workflows/flutter-ci.yml` on every pull request, whose
+// `flutter-build.yml` matrix carries `x86_64-pc-windows-msvc`,
+// `i686-pc-windows-msvc` and `aarch64-pc-windows-msvc`; that workflow builds
+// and does not test, so the call's behaviour is proven by running it on a
+// Windows machine.
 
 use hbb_common::sysinfo::Networks;
 use std::collections::BTreeMap;
