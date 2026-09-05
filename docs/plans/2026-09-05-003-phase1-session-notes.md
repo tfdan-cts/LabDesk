@@ -62,6 +62,10 @@ How it was checked before CI: the pure parts (`tools.rs`, `netview.rs`, `ticket.
 (`gauntlet-evidence/p1-rust-core/round-1/`); the disk module's 64 tests ran there too after the
 fixes. `collector.rs`, `ipc.rs`, `connection.rs`, `client.rs` and `core_main.rs` are proven by
 the CI run on the pushed head only.
+CI then found two build gates the harness could not: `PENDING_TICKETS` sat behind the
+`flutter` feature (the drm and i686 jobs build without it) and the `handle_hash` ticket block
+referenced `crate::labdesk` on Android, where `lib.rs` does not compile the module; both are
+`cfg` fixes, no logic changed.
 
 Open after this round:
 

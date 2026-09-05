@@ -3855,6 +3855,7 @@ pub async fn handle_hash(
     // stored by the console as `labdesk-ticket-<peer id>` beside the overlay
     // address, spent here once. The target holds H = sha256Hex(secret) and
     // checks sha256(H || salt), the way it checks a shared password.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let id = lc.read().unwrap().id.clone();
         let key = format!("labdesk-ticket-{}", id);
