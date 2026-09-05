@@ -382,6 +382,12 @@ fn probe_linux(sysfs: &linux::SysfsDisk, index: u32) -> Probe {
     {
         if let Ok(attrs) = ata::parse_ata_attributes(&buf) {
             probe.ata = attrs;
+            // The drive answered ATA PASS-THROUGH with a SMART table, so it is
+            // an ATA drive whatever the controller in front of it is. Named
+            // here rather than guessed from the device name, because `unknown`
+            // is what the console showed for the SATA drive on homebox while
+            // its `ata_smart` reading sat beside it.
+            probe.bus = Some("ata".to_owned());
             let mut checksum = ata::checksum_ok(&buf);
             if let Ok(buf) =
                 linux::ata_smart_table(&sysfs.dev_path, linux::ATA_SMART_READ_THRESHOLDS)
