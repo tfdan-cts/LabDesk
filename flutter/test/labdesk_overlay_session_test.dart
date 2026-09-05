@@ -47,7 +47,7 @@ void main() {
       'labdesk-overlay-addr-1180573903': '100.64.0.9:21118',
       'labdesk-overlay-pk-1180573903': 'pk=',
     });
-    expect(w.log, ['broker POST /api/overlay/session', 'daemon status', 'option labdesk-overlay-addr-1180573903=100.64.0.9:21118', 'option labdesk-overlay-pk-1180573903=pk=']);
+    expect(w.log, ['broker POST /console/overlay/session', 'daemon status', 'option labdesk-overlay-addr-1180573903=100.64.0.9:21118', 'option labdesk-overlay-pk-1180573903=pk=']);
   });
 
   test('the client waits for the peer to come up, one status read a second, up to the cap', () async {
@@ -60,14 +60,14 @@ void main() {
     final w = _World()..statuses.addAll([false, false, false, false]);
     expect(await w.session().prepare('1'), isFalse);
     expect(w.options, isEmpty);
-    expect(w.log.last, 'broker DELETE /api/overlay/session/s1');
+    expect(w.log.last, 'broker DELETE /console/overlay/session/s1');
   });
 
   test('a refused grant yields no hint and no error', () async {
     final w = _World()..brokerStatus = 409;
     expect(await w.session().prepare('1'), isFalse);
     expect(w.options, isEmpty);
-    expect(w.log, ['broker POST /api/overlay/session']);
+    expect(w.log, ['broker POST /console/overlay/session']);
   });
 
   test('a session seen open and then gone is released once and its hints cleared', () async {
@@ -78,7 +78,7 @@ void main() {
     await s.noteOpenSessions([]);
     await s.noteOpenSessions([]);
     expect(w.options, {'labdesk-overlay-addr-1': '', 'labdesk-overlay-pk-1': ''});
-    expect(w.log.where((l) => l == 'broker DELETE /api/overlay/session/s1'), hasLength(1));
+    expect(w.log.where((l) => l == 'broker DELETE /console/overlay/session/s1'), hasLength(1));
     expect(s.hasGrants, isFalse);
   });
 
@@ -102,6 +102,6 @@ void main() {
     await s.noteOpenSessions([]);
     expect(s.hasGrants, isFalse);
     expect(w.options, {'labdesk-overlay-addr-1': '', 'labdesk-overlay-pk-1': ''});
-    expect(w.log.where((l) => l == 'broker DELETE /api/overlay/session/s1'), hasLength(1));
+    expect(w.log.where((l) => l == 'broker DELETE /console/overlay/session/s1'), hasLength(1));
   });
 }

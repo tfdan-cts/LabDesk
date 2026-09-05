@@ -131,21 +131,18 @@ class SessionGrant {
 ///   detached signature over the request. Every route on it acts on this
 ///   machine's own labnet identity, so nothing in the request names a machine
 ///   and there is nothing for a caller to choose.
-/// * The HUMAN plane, `/api/overlay/*` (`src/worker/routes/overlay.ts`). Every
+/// * The HUMAN plane, `/console/overlay/*` and `/console/org/*`: the handlers
+///   of `/api/overlay/*` and `/api/org/*` (`src/worker/routes/overlay.ts`,
+///   `src/worker/routes/org.ts`) mounted a second time under `/console`. Every
 ///   route calls `actor()`, which resolves the signed-in person and their
-///   organization. These are the labnets an organization holds and the session
-///   grant a technician opens.
+///   organization from the app token `/api/login` mints. These are the labnets
+///   an organization holds and the session grant a technician opens.
 ///
-/// ONE GAP, said rather than hidden. It is not closed in this file and not
-/// papered over: a call that cannot be authorized is refused or left to the
-/// server's own refusal rather than sent as something else.
-///
-/// * The HUMAN plane's credential does not resolve. The console holds the app
-///   token `/api/login` mints (`bearerUser`, `src/worker/routes/client-api.ts`)
-///   and `actor()` reads a Better Auth session, with no bearer plugin
-///   registered (`src/worker/auth.ts`), so the token below names nobody and
-///   those calls answer "Sign in first" until the Worker resolves an app token
-///   into an actor. That is a Worker change, not a client one.
+/// WHY `/console` AND NEVER `/api`: while lab-desk.net is private, `/api/*` sits
+/// behind a Cloudflare Access wall that answers a bearer with a 302 to its
+/// sign-in page, and the bypass that lets this desktop through carries `/agent`
+/// and `/console` only. A human-plane call built on `/api/` would never reach a
+/// handler, so none is.
 ///
 /// The MACHINE plane is signed for this process by the privileged LabDesk
 /// process, which holds the agent key and answers over IPC (`main_agent_sign`,
@@ -306,7 +303,7 @@ class OverlayBroker {
   /// as a peer id, because a machine lab-desk.net cannot name is one it must
   /// refuse.
   Future<SessionGrant> session(String targetPeerId) async {
-    final j = await _human('POST', '/api/overlay/session', {
+    final j = await _human('POST', '/console/overlay/session', {
       'controller': machineIdOf(peerId()),
       'target': machineIdOf(targetPeerId),
     });
@@ -320,17 +317,17 @@ class OverlayBroker {
   /// lands; the server sweeps what a dead client leaves behind.
   Future<void> endSession(String id) async {
     try {
-      await _human('DELETE', '/api/overlay/session/$id');
+      await _human('DELETE', '/console/overlay/session/$id');
     } catch (_) {}
   }
 
-  /// The organization's machines (`GET /api/org/machines`,
+  /// The organization's machines (`GET /console/org/machines`,
   /// `src/worker/routes/org.ts`), narrowed by the server to the caller's org
   /// and fleets. It is the only route on which `machine.id` and the peer id
   /// appear together, so it is both the map [machineIdOf] is built from and the
   /// console's own list of the machines an account may invite.
   Future<List<OrgMachine>> machines() async {
-    final j = await _human('GET', '/api/org/machines');
+    final j = await _human('GET', '/console/org/machines');
     return [
       for (final m in _rows(j['machines']))
         OrgMachine(
@@ -349,7 +346,7 @@ class OverlayBroker {
   /// * This machine's own standing and the invitations waiting on it come from
   ///   `GET /agent/overlay/inbox`, which answers for the machine that signed
   ///   and for no other (`src/worker/routes/agent-overlay.ts`).
-  /// * The labnets come from `GET /api/overlay/labnets`, the route that
+  /// * The labnets come from `GET /console/overlay/labnets`, the route that
   ///   replaced the old console inbox (`src/worker/routes/overlay.ts`). It
   ///   answers the ORGANIZATION's labnets, which is what the person managing
   ///   them is looking at. The machine plane's own list is deliberately not
@@ -361,7 +358,7 @@ class OverlayBroker {
   /// there is no `owner` on either route.
   Future<LabnetInbox> inbox() async {
     final mine = await _mine();
-    final theirs = await _human('GET', '/api/overlay/labnets');
+    final theirs = await _human('GET', '/console/overlay/labnets');
     final device = mine['device'] is Map ? mine['device'] as Map : const {};
     return LabnetInbox(
       enrolled: device['enrolled'] == true,
@@ -419,7 +416,7 @@ class OverlayBroker {
   }
 
   Future<Labnet> createLabnet(String name) async {
-    final j = await _human('POST', '/api/overlay/labnets', {'name': name});
+    final j = await _human('POST', '/console/overlay/labnets', {'name': name});
     return Labnet(
         id: '${j['id']}',
         name: '${j['name']}',
@@ -428,16 +425,16 @@ class OverlayBroker {
   }
 
   Future<void> setFullAccess(String id, bool on) =>
-      _human('PATCH', '/api/overlay/labnets/$id', {'fullAccess': on});
+      _human('PATCH', '/console/overlay/labnets/$id', {'fullAccess': on});
 
   Future<void> deleteLabnet(String id) =>
-      _human('DELETE', '/api/overlay/labnets/$id');
+      _human('DELETE', '/console/overlay/labnets/$id');
 
   /// [machineId] is a `machine.id`, which is what `actor()` resolves the
   /// invited machine against, and it is what [machines] hands the console to
   /// offer. A peer id here is answered "No such machine."
   Future<void> invite(String labnetId, String machineId) =>
-      _human('POST', '/api/overlay/labnets/$labnetId/invite',
+      _human('POST', '/console/overlay/labnets/$labnetId/invite',
           {'machine': machineId});
 
   /// The invited machine decides for itself, which is why this is on the
@@ -453,5 +450,5 @@ class OverlayBroker {
 
   /// [machineId] is a `machine.id`, the same id the member came back as.
   Future<void> removeMember(String labnetId, String machineId) =>
-      _human('DELETE', '/api/overlay/labnets/$labnetId/members/$machineId');
+      _human('DELETE', '/console/overlay/labnets/$labnetId/members/$machineId');
 }

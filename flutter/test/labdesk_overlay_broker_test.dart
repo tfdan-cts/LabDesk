@@ -71,7 +71,7 @@ const _machineInbox = {
   ],
 };
 
-/// What `GET /api/overlay/labnets` answers, transcribed from that route and
+/// What `GET /console/overlay/labnets` answers, transcribed from that route and
 /// from `labnetMembers` (src/worker/routes/overlay.ts). A member is
 /// `{machineId,status,overlayIp}` and NOTHING here carries `owner`: both were
 /// what the client used to read, and reading them off this shape is how the two
@@ -91,7 +91,7 @@ const _humanLabnets = {
   ],
 };
 
-/// What `GET /api/org/machines` answers (src/worker/routes/org.ts), cut to the
+/// What `GET /console/org/machines` answers (src/worker/routes/org.ts), cut to the
 /// keys this client reads.
 const _orgMachines = {
   'machines': [
@@ -104,7 +104,7 @@ void main() {
   var token = 'tok-1';
   _Wire wire = _Wire();
   _Key key = _Key();
-  // The map the console builds from `GET /api/org/machines` and gives the
+  // The map the console builds from `GET /console/org/machines` and gives the
   // broker: this machine is peer 1180573903 and machine m-1.
   var fleet = <String, String>{};
   OverlayBroker broker() => OverlayBroker(
@@ -178,16 +178,16 @@ void main() {
       'machine POST /agent/overlay/invites/L1/decide {"approve":false}',
       'machine POST /agent/overlay/labnets/L1/leave {}',
       'machine DELETE /agent/overlay/enrol -',
-      'human GET /api/org/machines -',
-      'human POST /api/overlay/session {"controller":"m-1","target":"M2"}',
-      'human DELETE /api/overlay/session/s1 -',
-      'human POST /api/overlay/labnets {"name":"Office"}',
-      'human PATCH /api/overlay/labnets/L1 {"fullAccess":true}',
-      'human POST /api/overlay/labnets/L1/invite {"machine":"M3"}',
-      'human DELETE /api/overlay/labnets/L1/members/M3 -',
-      'human DELETE /api/overlay/labnets/L1 -',
+      'human GET /console/org/machines -',
+      'human POST /console/overlay/session {"controller":"m-1","target":"M2"}',
+      'human DELETE /console/overlay/session/s1 -',
+      'human POST /console/overlay/labnets {"name":"Office"}',
+      'human PATCH /console/overlay/labnets/L1 {"fullAccess":true}',
+      'human POST /console/overlay/labnets/L1/invite {"machine":"M3"}',
+      'human DELETE /console/overlay/labnets/L1/members/M3 -',
+      'human DELETE /console/overlay/labnets/L1 -',
       'machine GET /agent/overlay/inbox -',
-      'human GET /api/overlay/labnets -',
+      'human GET /console/overlay/labnets -',
     ]);
 
     // The signature covers the request as sent, under the timestamp the header
@@ -223,7 +223,7 @@ void main() {
   /// above cannot.
   test('the inbox is read the way the two routes that answer it write it', () async {
     wire.byPath['/agent/overlay/inbox'] = _machineInbox;
-    wire.byPath['/api/overlay/labnets'] = _humanLabnets;
+    wire.byPath['/console/overlay/labnets'] = _humanLabnets;
     final inbox = await broker().inbox();
 
     // This machine's own half, from the machine plane.
@@ -255,7 +255,7 @@ void main() {
   });
 
   test('the organization\'s machines are read with both ids, named by whichever name it has', () async {
-    wire.byPath['/api/org/machines'] = _orgMachines;
+    wire.byPath['/console/org/machines'] = _orgMachines;
     final machines = await broker().machines();
     expect(machines.map((m) => '${m.id} ${m.peerId} ${m.name}'),
         ['m-1 1180573903 Bench', 'M2 900000001 reception']);
@@ -286,12 +286,35 @@ void main() {
     // The human plane needs no machine key, so the labnets an account manages
     // are still read; what is missing is only what the machine says about
     // itself, and a machine with no key is not enrolled.
-    wire.byPath['/api/overlay/labnets'] = _humanLabnets;
+    wire.byPath['/console/overlay/labnets'] = _humanLabnets;
     final inbox = await broker().inbox();
     expect(inbox.enrolled, isFalse);
     expect(inbox.invitations, isEmpty);
     expect(inbox.labnets.single.members.map((m) => m.deviceId), ['m-1', 'M3']);
-    expect(wire.calls.map(_row), ['human GET /api/overlay/labnets -']);
+    expect(wire.calls.map(_row), ['human GET /console/overlay/labnets -']);
+  });
+
+  /// The private-phase Cloudflare Access wall answers `/api/*` with a 302 to
+  /// its sign-in page, and the bypass that lets the desktop through carries
+  /// `/agent` and `/console` and must never gain `/api`. So the app token is
+  /// good on `/console/*` only, and a human-plane call built on `/api/` would
+  /// never reach a handler.
+  test('no human-plane call ever targets /api/', () async {
+    wire.reply = {'id': 's1', 'targetAddr': '100.64.0.9:21118', 'targetIdPk': 'pk=', 'name': 'Office', 'fullAccess': true};
+    final b = broker();
+    await b.machines();
+    await b.session('900000001');
+    await b.endSession('s1');
+    await b.createLabnet('Office');
+    await b.setFullAccess('L1', true);
+    await b.invite('L1', 'M3');
+    await b.removeMember('L1', 'M3');
+    await b.deleteLabnet('L1');
+    await b.inbox();
+    final human = wire.calls.where((c) => _planeOf(c.headers) == 'human').map((c) => Uri.parse(c.url).path);
+    expect(human, hasLength(9));
+    expect(human, everyElement(startsWith('/console/')));
+    expect(human, everyElement(isNot(startsWith('/api/'))));
   });
 
   test('the human plane carries the account token read at that moment', () async {
@@ -335,7 +358,7 @@ void main() {
     wire.reply = 'not json';
     await broker().endSession('s1');
     expect(wire.calls.single.method, 'DELETE');
-    expect(wire.calls.single.url, endsWith('/api/overlay/session/s1'));
+    expect(wire.calls.single.url, endsWith('/console/overlay/session/s1'));
   });
 
   test('the machine credential is read the way main_agent_sign writes it', () {
