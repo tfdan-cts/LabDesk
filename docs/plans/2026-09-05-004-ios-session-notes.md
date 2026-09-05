@@ -404,6 +404,40 @@ started without the installer licence land in the same place. That is
 another lane's call, and it has been passed to dvonr-02 rather than acted
 on here.
 
+## Piece 6: first run, Tier 1 item 2
+
+Written test first: nine tests in
+`flutter/test/labdesk_ios_first_run_test.dart`, four on the rule and five on
+the screen, red before
+`flutter/lib/mobile/widgets/first_run.dart` existed. The gate is at 370.
+
+The rule is that the phone asks when it has nothing: no server profile and
+no sign in. A sign in counts as having one because signing in is what writes
+the server, and a skip counts because asking twice for something already
+declined is nagging rather than onboarding. Stated as a plain function over
+three booleans so it can be read and tested without configuration.
+
+One test earns its place more than the others: it asserts that the words
+camera and notification appear nowhere on the screen. That is Tier 1's
+"asks for nothing but a server profile or the sign in" turned into something
+that fails if somebody later adds a permission prompt to onboarding.
+
+The copy problem, and how it was avoided. The screen wants to say which
+server the client is on, but there is no FFI that returns the effective
+rendezvous server; `main_get_api_server` exists and no equivalent for the
+rendezvous does. Adding one means touching `src/flutter_ffi.rs` and
+regenerating the bridge, which is another lane and a heavy change for a
+sentence. So the screen names the configured server when there is one and
+otherwise says the built in default is in use, without inventing a name for
+it. `bind.mainIsUsingPublicServer` reports the same condition, and
+`using_public_server` in `src/common.rs:2108` is literally "no custom
+rendezvous server is set", so nothing here is a guess about what the core
+does. When dvonr-02's LabDesk server exists, that sentence can name it
+without the screen changing shape.
+
+**Unverified.** Not seen running, and whether it appears at the right moment
+on a genuinely fresh install is a thing only a fresh install shows.
+
 ## Open items
 
 - Rebase onto `feat/labnet` once `82a6d8f27` is pushed there, then rerun the

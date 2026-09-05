@@ -1,0 +1,104 @@
+import 'package:flutter/material.dart';
+
+/// Whether the phone should ask for a server before anything else.
+///
+/// It asks when it has nothing: no server profile and no sign in. Signing in
+/// counts because a sign in is what writes the server, so a signed in client
+/// already has one. Skipping counts because asking twice for something the
+/// operator declined is nagging, not onboarding.
+///
+/// Deliberately a plain function over three booleans rather than a read of the
+/// configuration, so the rule can be stated and tested on its own.
+bool needsServerSetup({
+  required bool hasProfile,
+  required bool isSignedIn,
+  required bool skipped,
+}) =>
+    !hasProfile && !isSignedIn && !skipped;
+
+/// The first thing a new install shows.
+///
+/// It asks for one thing, a server, by the two routes that provide one. It asks
+/// for no permission: there is no camera prompt and no notification prompt
+/// here, because nothing on this screen uses either, and a permission asked for
+/// before the feature that needs it is a permission asked for without a reason.
+///
+/// The line about the current server is read rather than assumed. When a server
+/// is configured it is named. When none is, the screen says the built in
+/// default is in use and does not invent its name, because this client cannot
+/// currently read the effective server back out of the core.
+class FirstRunView extends StatelessWidget {
+  const FirstRunView({
+    super.key,
+    required this.configuredServer,
+    required this.onSignIn,
+    required this.onAddProfile,
+    required this.onSkip,
+  });
+
+  /// The configured rendezvous server, or empty when none is set.
+  final String configuredServer;
+
+  final VoidCallback onSignIn;
+  final VoidCallback onAddProfile;
+  final VoidCallback onSkip;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodyMedium?.color?.withOpacity(0.7);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Spacer(),
+            Text(
+              'Choose a server',
+              style: theme.textTheme.headlineSmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'LabDesk connects your machines through a server. '
+              'Sign in to use the one on your account, or point this app at '
+              'a server you run.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: muted),
+            ),
+            const SizedBox(height: 28),
+            FilledButton(
+              onPressed: onSignIn,
+              child: const Text('Sign in to lab-desk.net'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: onAddProfile,
+              child: const Text('Add a server profile'),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              _currentServerLine(),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: onSkip,
+              child: const Text('Not now'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _currentServerLine() {
+    final server = configuredServer.trim();
+    if (server.isEmpty) {
+      return 'No server is set, so this app uses the one built into the app.';
+    }
+    return 'This app is set to $server.';
+  }
+}

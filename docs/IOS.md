@@ -110,6 +110,41 @@ maps TeamViewer's iOS app against the inherited RustDesk client. In order:
 
 Tier 2 and Tier 3 are out of scope. Tier 3 items are owner decisions.
 
+### First run
+
+Item 2 is built. A fresh install shows one screen before the tabs: choose a
+server, by signing in to lab-desk.net or by adding a server profile, with a
+"Not now" that is remembered so nobody is asked twice.
+
+It asks for nothing else. There is no camera prompt and no notification prompt
+on that screen, and a test asserts the words do not appear on it, because a
+permission asked for before the feature that needs it is a permission asked for
+without a reason. Nothing in the application requests a permission at launch
+either: no permission plugin is invoked on startup, and `AppDelegate.swift`
+registers no push.
+
+The screen exists because of a fact rather than a preference. A phone has no
+installer to carry a server in, so a fresh install has none until it is signed
+in or given a profile, and until then the core falls back to a default the
+operator never chose. That is traced in full in
+`docs/plans/2026-09-05-004-ios-session-notes.md`.
+
+The line about the current server is read, not written. When a server is
+configured the screen names it; when none is, it says the built in default is in
+use and does not invent a name, because this client cannot currently read the
+effective server back out of the core. `bind.mainIsUsingPublicServer` reports
+the same condition, and `using_public_server` in `src/common.rs` is exactly
+"no custom rendezvous server is set".
+
+Split as usual. `needsServerSetup` and `FirstRunView` in
+`flutter/lib/mobile/widgets/first_run.dart` take everything through arguments
+and import no model, so both the rule and the screen are tested without the
+generated bridge. Nine tests cover them. The wiring is in the phone's home page
+and is gated to iOS.
+
+**Unverified.** Not seen running. In particular, whether it appears at the right
+moment on a genuinely fresh install is a thing only a fresh install can show.
+
 ### The machine list
 
 Item 4 is built. The phone gains a Machines tab beside Connection and Settings,

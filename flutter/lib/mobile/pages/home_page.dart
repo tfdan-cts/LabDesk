@@ -7,6 +7,10 @@ import '../../common.dart';
 import '../../common/widgets/chat_page.dart';
 import '../../models/platform_model.dart';
 import '../../models/state_model.dart';
+import '../../common/labdesk_profiles.dart';
+import '../../common/widgets/login.dart';
+import '../widgets/dialog.dart';
+import '../widgets/first_run.dart';
 import 'connection_page.dart';
 import 'machines_page.dart';
 
@@ -40,10 +44,44 @@ class HomePageState extends State<HomePage> {
     });
   }
 
+  /// Remembers that the operator was offered a server and declined. Asking a
+  /// second time for something already declined is nagging, not onboarding.
+  static const _kSkippedKey = 'labdesk-first-run-skipped';
+
+  bool _needsSetup = false;
+  String _configuredServer = '';
+
   @override
   void initState() {
     super.initState();
     initPages();
+    if (isIOS) _checkServerSetup();
+  }
+
+  /// Whether this install has a server yet, read rather than assumed.
+  ///
+  /// iOS only, which is the platform being built here. It matters more on a
+  /// phone than anywhere else: there is no installer to carry a server in, so a
+  /// fresh install has none until it is signed in or given a profile.
+  Future<void> _checkServerSetup() async {
+    await ServerProfilesModel.ensureLoaded();
+    final configured = await bind.mainGetOption(key: 'custom-rendezvous-server');
+    final needs = needsServerSetup(
+      hasProfile: ServerProfilesModel.profiles.isNotEmpty,
+      isSignedIn: gFFI.userModel.userName.isNotEmpty,
+      skipped: bind.mainGetLocalOption(key: _kSkippedKey) == 'Y',
+    );
+    if (!mounted) return;
+    setState(() {
+      _configuredServer = configured;
+      _needsSetup = needs;
+    });
+  }
+
+  Future<void> _skipServerSetup() async {
+    await bind.mainSetLocalOption(key: _kSkippedKey, value: 'Y');
+    if (!mounted) return;
+    setState(() => _needsSetup = false);
   }
 
   void initPages() {
@@ -68,6 +106,26 @@ class HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    // Before the tabs, because a client with no server has nothing to show in
+    // them and every other screen would be answering a question nobody asked.
+    if (_needsSetup) {
+      return Scaffold(
+        body: FirstRunView(
+          configuredServer: _configuredServer,
+          onSignIn: () async {
+            await loginDialog();
+            await _checkServerSetup();
+          },
+          onAddProfile: () {
+            showServerSettings(gFFI.dialogManager, (callback) {
+              setState(callback);
+              _checkServerSetup();
+            });
+          },
+          onSkip: _skipServerSetup,
+        ),
+      );
+    }
     return WillPopScope(
         onWillPop: () async {
           if (_selectedIndex != 0) {
