@@ -1,32 +1,39 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/labdesk/services/overlay_broker.dart';
 import 'package:flutter_hbb/labdesk/services/overlay_daemon.dart';
 import 'package:flutter_hbb/labdesk/services/overlay_enrolment.dart';
 
-/// The enrolment sequence, with the daemon, the broker and the elevation
-/// prompt all faked, so the order of what it does is what is under test.
+/// The enrolment sequence, with the privileged process behind the daemon and
+/// the broker both faked, so the order of what it does is what is under test.
 const _connected = '{"daemonStatus":"Connected","netbirdIp":"100.64.0.3/16","publicKey":"wg=","management":{"connected":true,"error":""},"signal":{"connected":true,"error":""},"peers":{"details":[]}}';
 const _connecting = '{"daemonStatus":"Connecting","netbirdIp":"","management":{"connected":false,"error":"dial tcp: no route"},"signal":{"connected":false,"error":""}}';
 
+/// What `main_overlay_daemon` answers for one action.
+String _out(String s) => jsonEncode({'output': s});
+String _err(String s) => jsonEncode({'error': s});
+
 class _World {
   final log = <String>[];
-  final statuses = <ProcessResult>[];
-  ProcessResult daemonReply = ProcessResult(0, 0, '', '');
+  final statuses = <String>[];
+  String daemonReply = _out('');
   int brokerStatus = 200;
   Map<String, Object?> brokerReply = {'setupKey': 'SK', 'managementUrl': 'https://nb.lab-desk.net', 'ok': true};
-  String? elevatedReply;
   final options = <String, String>{};
+
+  /// What each daemon action was handed, so the setup key and the control
+  /// plane can be read back.
+  final daemonArgs = <String, (String, String)>{};
 
   /// The body of the last POST to /agent/overlay/self, so what this machine told
   /// lab-desk.net about itself can be read back.
   String? selfBody;
 
-  Future<ProcessResult> run(String exe, List<String> args) async {
-    log.add('daemon ${args.first}');
-    if (args.first == 'status') return statuses.isEmpty ? daemonReply : statuses.removeAt(0);
+  Future<String> call(String action, String setupKey, String managementUrl) async {
+    log.add('daemon $action');
+    daemonArgs[action] = (setupKey, managementUrl);
+    if (action == 'status') return statuses.isEmpty ? daemonReply : statuses.removeAt(0);
     return daemonReply;
   }
 
@@ -36,18 +43,13 @@ class _World {
     return (brokerStatus, '{"setupKey":"SK","managementUrl":"https://nb.lab-desk.net","ok":true}');
   }
 
-  Future<String?> elevated(List<String> args) async {
-    log.add('elevated ${args.take(2).join(' ')}');
-    return elevatedReply;
-  }
-
   Future<void> setOption(String k, String v) async {
     log.add('option $k=$v');
     options[k] = v;
   }
 
   OverlayEnrolment enrolment() => OverlayEnrolment(
-        daemon: OverlayDaemon(binary: 'netbird', stateDir: '/tmp/state', daemonAddr: 'unix:///tmp/d.sock', run: run),
+        daemon: OverlayDaemon(call: call),
         // The enrolment sequence speaks the machine plane, so the broker is
         // given a machine credential; the signature itself is the Rust
         // core's (src/flutter_ffi.rs), and what it covers is asserted in
@@ -58,9 +60,7 @@ class _World {
             sign: (m, p, b) async =>
                 const MachineSignature(machine: 'm-1', ts: '1788480000', sig: 'sig='),
             http: http),
-        elevated: elevated,
         setOption: setOption,
-        hostname: 'zenbook',
         // What the client reads back for this machine. Not the default for
         // anything: there is no default, and these values reaching the broker
         // unchanged is what the identity callback exists to make happen.
@@ -87,9 +87,9 @@ void main() {
       () async {
     final w = _World()
       ..statuses.addAll([
-        ProcessResult(1, 1, '', 'failed to connect to daemon error: x'),
-        ProcessResult(0, 0, _connecting, ''),
-        ProcessResult(0, 0, _connected, ''),
+        _err('failed to connect to daemon error: x'),
+        _out(_connecting),
+        _out(_connected),
       ]);
     final e = w.enrolment();
     final end = await e.enable();
@@ -98,8 +98,8 @@ void main() {
     expect(w.log, [
       'daemon status',
       'broker POST /agent/overlay/enrol',
-      'elevated service install',
-      'elevated service start',
+      'daemon install',
+      'daemon start',
       'daemon up',
       'daemon status',
       'daemon status',
@@ -107,10 +107,25 @@ void main() {
       'option labdesk-direct-bind=100.64.0.3',
       'option direct-server=Y',
     ]);
+    // The service is fixed to the control plane lab-desk.net named, and the
+    // key it answered reaches up and nothing else. No prompt anywhere: the
+    // privileged process does the installing.
+    expect(w.daemonArgs['install'], ('', 'https://nb.lab-desk.net'));
+    expect(w.daemonArgs['up'], ('SK', 'https://nb.lab-desk.net'));
+    expect(w.daemonArgs['start'], ('', ''));
+  });
+
+  test('a service the privileged process cannot install ends in its own words, before anything joins', () async {
+    final w = _World()..daemonReply = _err('failed to connect to daemon error: x');
+    final end = await w.enrolment().enable();
+    expect(end.phase, LabnetPhase.error);
+    expect(end.detail, 'failed to connect to daemon error: x');
+    expect(w.log, ['daemon status', 'broker POST /agent/overlay/enrol', 'daemon install']);
+    expect(w.options, isEmpty);
   });
 
   test('a daemon that never connects ends in error with the management error it reported', () async {
-    final w = _World()..daemonReply = ProcessResult(0, 0, _connecting, '');
+    final w = _World()..daemonReply = _out(_connecting);
     final end = await w.enrolment().enable();
     expect(end.phase, LabnetPhase.error);
     expect(end.detail, 'dial tcp: no route');
@@ -119,24 +134,24 @@ void main() {
 
   test('a refused enrolment shows the server\'s sentence and touches nothing', () async {
     final w = _World()
-      ..daemonReply = ProcessResult(1, 1, '', 'failed to connect to daemon error: x')
+      ..daemonReply = _err('failed to connect to daemon error: x')
       ..brokerStatus = 503;
     final end = await w.enrolment().enable();
     expect(end.phase, LabnetPhase.error);
     expect(end.detail, contains('503'));
-    expect(w.log.where((l) => l.startsWith('elevated')), isEmpty);
+    expect(w.log.where((l) => l.startsWith('daemon')), ['daemon status']);
     expect(w.options, isEmpty);
   });
 
   test('a machine whose daemon is already up only re-registers', () async {
-    final w = _World()..daemonReply = ProcessResult(0, 0, _connected, '');
+    final w = _World()..daemonReply = _out(_connected);
     final end = await w.enrolment().enable();
     expect(end.phase, LabnetPhase.on);
     expect(w.log, ['daemon status', 'broker POST /agent/overlay/self', 'option labdesk-direct-bind=100.64.0.3', 'option direct-server=Y']);
   });
 
   test('the machine reports the id key and the direct port the client read, not a placeholder', () async {
-    final w = _World()..daemonReply = ProcessResult(0, 0, _connected, '');
+    final w = _World()..daemonReply = _out(_connected);
     final end = await w.enrolment().enable();
     expect(end.phase, LabnetPhase.on, reason: end.detail);
     expect(jsonDecode(w.selfBody!), {
@@ -156,7 +171,7 @@ void main() {
   });
 
   test('states are streamed as the sequence advances', () async {
-    final w = _World()..daemonReply = ProcessResult(0, 0, _connected, '');
+    final w = _World()..daemonReply = _out(_connected);
     final e = w.enrolment();
     final seen = <LabnetPhase>[];
     final sub = e.states.listen((s) => seen.add(s.phase));

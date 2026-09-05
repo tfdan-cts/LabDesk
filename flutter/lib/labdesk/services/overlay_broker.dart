@@ -12,9 +12,11 @@ typedef HttpCall = Future<(int, String)> Function(
 /// lab-desk.net reads, or null when this process cannot speak for the machine.
 ///
 /// The client cannot do this itself: the agent key is kept where an
-/// interactive user cannot read it (`src/labdesk/identity.rs`), so the Rust
-/// core signs and only the answer crosses. `main_agent_sign` in
-/// `src/flutter_ffi.rs` is the implementation.
+/// interactive user cannot read it (`src/labdesk/identity.rs`), so the
+/// privileged LabDesk process signs on request over IPC
+/// (`src/labdesk/labnet.rs`) and only the answer crosses. `main_agent_sign` in
+/// `src/flutter_ffi.rs` is the implementation; it answers "" when nobody could
+/// speak for the machine, which is what an unenrolled machine gets.
 typedef MachineSigner = Future<MachineSignature?> Function(
     String method, String path, String body);
 
@@ -134,9 +136,9 @@ class SessionGrant {
 ///   organization. These are the labnets an organization holds and the session
 ///   grant a technician opens.
 ///
-/// TWO GAPS, said rather than hidden. Neither is closed in this file, and
-/// neither is papered over: a call that cannot be authorized is refused or
-/// left to the server's own refusal rather than sent as something else.
+/// ONE GAP, said rather than hidden. It is not closed in this file and not
+/// papered over: a call that cannot be authorized is refused or left to the
+/// server's own refusal rather than sent as something else.
 ///
 /// * The HUMAN plane's credential does not resolve. The console holds the app
 ///   token `/api/login` mints (`bearerUser`, `src/worker/routes/client-api.ts`)
@@ -144,13 +146,12 @@ class SessionGrant {
 ///   registered (`src/worker/auth.ts`), so the token below names nobody and
 ///   those calls answer "Sign in first" until the Worker resolves an app token
 ///   into an actor. That is a Worker change, not a client one.
-/// * The MACHINE plane cannot be signed from this process. The agent key is
-///   kept where an interactive user cannot read it (`src/labdesk/identity.rs`:
-///   LocalService on Windows, 0600 under root elsewhere), and the Flutter UI is
-///   neither. `main_agent_sign` therefore answers "" here and [sign] answers
-///   null, so every machine-plane call is refused before the wire. Closing it
-///   needs the privileged daemon to sign on request, over the same IPC the UI
-///   already asks for its config on (`src/ipc.rs`), which is not this file.
+///
+/// The MACHINE plane is signed for this process by the privileged LabDesk
+/// process, which holds the agent key and answers over IPC (`main_agent_sign`,
+/// `src/labdesk/labnet.rs`). [sign] answers null only when that process could
+/// not speak for the machine, which is what a machine nobody has enrolled
+/// gets, and every machine-plane call is then refused before the wire.
 ///
 /// The human plane does not wait on the machine plane: everything an account
 /// does to an organization's labnets is reachable with no agent key at all.
@@ -202,8 +203,8 @@ class OverlayBroker {
   /// sent: the machine plane would refuse it, and a doomed request every
   /// fifteen seconds is not a better answer than this one.
   static const _noKey =
-      'This machine has no agent key of its own yet, so it cannot speak for '
-      'itself on lab-desk.net.';
+      'This machine is not enrolled with an organization yet, so it cannot '
+      'speak for itself on lab-desk.net. Enrol it under This machine.';
 
   /// The status on a refusal this client made itself, before any request. No
   /// HTTP status is 0, so a caller can tell one from anything a server said.

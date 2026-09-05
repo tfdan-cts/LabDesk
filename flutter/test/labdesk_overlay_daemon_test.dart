@@ -1,10 +1,12 @@
-import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/labdesk/models/overlay_state.dart';
 import 'package:flutter_hbb/labdesk/services/overlay_daemon.dart';
 
-/// The labnet daemon, driven through its command line by a fake runner.
+/// The labnet daemon, driven through the privileged process by a fake that
+/// answers the way `main_overlay_daemon` (src/flutter_ffi.rs) does:
+/// `{"output":...}` or `{"error":...}`.
 ///
 /// Field names in the fixture follow the struct tags in the daemon's source
 /// (client/status/status.go, NetBird v0.78.0). It is a composed sample, not
@@ -27,37 +29,25 @@ const _statusJson = '''
 ''';
 
 class _Fake {
-  final calls = <List<String>>[];
-  ProcessResult next = ProcessResult(0, 0, '', '');
+  final calls = <(String, String, String)>[];
+  String next = '{"output":""}';
 
-  /// What the setup key file held while the daemon was being run; it must
-  /// be gone again by the time the call returns.
-  String? keyFileContents;
-  String? keyFilePath;
-
-  Future<ProcessResult> call(String exe, List<String> args) async {
-    calls.add([exe, ...args]);
-    final at = args.indexOf('--setup-key-file');
-    if (at >= 0) {
-      keyFilePath = args[at + 1];
-      keyFileContents = await File(keyFilePath!).readAsString();
-    }
+  Future<String> call(String action, String setupKey, String managementUrl) async {
+    calls.add((action, setupKey, managementUrl));
     return next;
   }
 }
 
-OverlayDaemon _daemon(_Fake f) => OverlayDaemon(
-      binary: r'C:\Program Files\LabDesk\netbird\netbird.exe',
-      stateDir: r'C:\ProgramData\LabDesk\netbird',
-      daemonAddr: 'npipe://labdesk-netbird',
-      run: f.call,
-    );
+OverlayDaemon _daemon(_Fake f) => OverlayDaemon(call: f.call);
+
+String _output(String s) => jsonEncode({'output': s});
+String _error(String s) => jsonEncode({'error': s});
 
 void main() {
   group('OverlayState.fromStatusJson', () {
     test('reads the daemon status, this machine, and the peers it can reach',
         () {
-      final f = _Fake()..next = ProcessResult(0, 0, _statusJson, '');
+      final f = _Fake()..next = _output(_statusJson);
       return _daemon(f).status().then((s) {
         expect(s.status, OverlayDaemonStatus.connected);
         expect(s.isUp, isTrue);
@@ -107,89 +97,81 @@ void main() {
   });
 
   group('OverlayDaemon.status', () {
+    test('asks the privileged process for status and nothing else', () async {
+      final f = _Fake()..next = _output(_statusJson);
+      await _daemon(f).status();
+      expect(f.calls.single, ('status', '', ''));
+    });
+
     test('reads notInstalled when no daemon answers the command line',
         () async {
       final f = _Fake()
-        ..next = ProcessResult(1, 1, '',
+        ..next = _error(
             'failed to connect to daemon error: context deadline exceeded\nIf the daemon is not running please run: netbird service install');
       final s = await _daemon(f).status();
       expect(s.status, OverlayDaemonStatus.notInstalled);
       expect(s.error, contains('failed to connect to daemon'));
-      expect(f.calls.single,
-          [r'C:\Program Files\LabDesk\netbird\netbird.exe', 'status', '--json', '--daemon-addr', 'npipe://labdesk-netbird']);
     });
 
     test('never throws on output it cannot parse', () async {
-      final f = _Fake()..next = ProcessResult(0, 0, 'not json at all', '');
+      final f = _Fake()..next = _output('not json at all');
       final s = await _daemon(f).status();
       expect(s.status, OverlayDaemonStatus.unknown);
       expect(s.error, 'not json at all');
     });
 
-    test('reads notInstalled when the executable itself is missing', () async {
-      final d = OverlayDaemon(
-        binary: r'C:\nowhere\netbird.exe',
-        stateDir: r'C:\ProgramData\LabDesk\netbird',
-        daemonAddr: 'npipe://labdesk-netbird',
-        run: (_, __) => throw const ProcessException('netbird.exe', [], 'not found', 2),
-      );
-      expect((await d.status()).status, OverlayDaemonStatus.notInstalled);
+    test('an answer that is not the FFI\'s shape is a failure in its own words',
+        () async {
+      final f = _Fake()..next = 'garbage';
+      final s = await _daemon(f).status();
+      expect(s.status, OverlayDaemonStatus.unknown);
+      expect(s.error, 'garbage');
+    });
+
+    test('a privileged process that cannot be reached is a failure, not a throw',
+        () async {
+      final d = OverlayDaemon(call: (_, __, ___) => throw StateError('no ipc'));
+      final s = await d.status();
+      expect(s.status, OverlayDaemonStatus.unknown);
+      expect(s.error, contains('no ipc'));
     });
   });
 
   group('OverlayDaemon commands', () {
-    test('up passes the key through a file that lives only for the call, never on the command line',
+    test('up hands the key and the control plane to the privileged process',
         () async {
       final f = _Fake();
       final err = await _daemon(f).up(
-          setupKey: 'SK-1',
-          managementUrl: 'https://nb.lab-desk.net',
-          hostname: 'zenbook');
+          setupKey: 'SK-1', managementUrl: 'https://nb.lab-desk.net');
       expect(err, isNull);
-      final args = f.calls.single.skip(1).toList();
-      expect(args.sublist(0, 2), ['up', '--setup-key-file']);
-      expect(args.sublist(3), [
-        '--management-url', 'https://nb.lab-desk.net',
-        '--hostname', 'zenbook',
-        '--daemon-addr', 'npipe://labdesk-netbird',
-      ]);
-      expect(f.keyFileContents, 'SK-1');
-      expect(args.join(' '), isNot(contains('SK-1')),
-          reason: 'argv is readable by every local user');
-      expect(File(f.keyFilePath!).existsSync(), isFalse,
-          reason: 'the key file is gone once the daemon has answered');
-      expect(args.join(' '), isNot(contains('allow-server-ssh')));
+      expect(f.calls.single, ('up', 'SK-1', 'https://nb.lab-desk.net'));
     });
 
     test('a failed up returns the daemon\'s own words', () async {
-      final f = _Fake()..next = ProcessResult(2, 1, '', 'Error: setup key not valid');
-      expect(await _daemon(f).up(setupKey: 'x', managementUrl: 'u', hostname: 'h'),
+      final f = _Fake()..next = _error('Error: setup key not valid');
+      expect(await _daemon(f).up(setupKey: 'x', managementUrl: 'u'),
           'Error: setup key not valid');
     });
 
-    test('down is addressed to this daemon and nothing else', () async {
+    test('install fixes the control plane and start carries nothing', () async {
       final f = _Fake();
-      await _daemon(f).down();
-      expect(f.calls.single.skip(1), ['down', '--daemon-addr', 'npipe://labdesk-netbird']);
+      final d = _daemon(f);
+      expect(await d.install('https://nb.lab-desk.net'), isNull);
+      expect(await d.start(), isNull);
+      expect(await d.down(), isNull);
+      expect(f.calls, [
+        ('install', '', 'https://nb.lab-desk.net'),
+        ('start', '', ''),
+        ('down', '', ''),
+      ]);
     });
 
-    test('service install names its own service, socket and state directory, once each',
-        () {
-      final args = _daemon(_Fake()).serviceInstallArgs('https://nb.lab-desk.net');
-      expect(args.take(2), ['service', 'install']);
-      for (final flag in [
-        '--service',
-        '--management-url',
-        '--disable-update-settings',
-        '--service-env',
-        '--daemon-addr',
-      ]) {
-        expect(args.where((a) => a == flag).length, 1, reason: flag);
-      }
-      expect(args[args.indexOf('--service') + 1], 'labdesk-netbird');
-      expect(args[args.indexOf('--service-env') + 1],
-          r'NB_STATE_DIR=C:\ProgramData\LabDesk\netbird');
-      expect(args.join(' '), isNot(contains('allow-server-ssh')));
+    test('a refused control plane is the privileged process\'s sentence',
+        () async {
+      final f = _Fake()
+        ..next = _error('Refusing a control plane other than nb.lab-desk.net');
+      expect(await _daemon(f).install('https://evil.example'),
+          'Refusing a control plane other than nb.lab-desk.net');
     });
   });
 }

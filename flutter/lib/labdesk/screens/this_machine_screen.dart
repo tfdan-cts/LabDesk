@@ -20,6 +20,7 @@ class ThisMachineScreen extends StatelessWidget {
     this.passwordIsTemporary = true,
     this.serviceRunning,
     this.profileSwitcher,
+    this.enrol,
     this.labnet,
     this.onEditPassword,
     this.onRefreshPassword,
@@ -43,6 +44,9 @@ class ThisMachineScreen extends StatelessWidget {
 
   /// The client's own profile switcher, mounted whole rather than reimplemented.
   final Widget? profileSwitcher;
+
+  /// The organization card: enrolling this machine with an enrolment token.
+  final Widget? enrol;
 
   /// The labnet card: whether this machine takes encrypted direct connections.
   final Widget? labnet;
@@ -208,6 +212,10 @@ class ThisMachineScreen extends StatelessWidget {
                   'Which ID and relay servers this machine is registered with.',
               child: profileSwitcher!,
             ),
+          ],
+          if (enrol != null) ...[
+            const SizedBox(height: 16),
+            enrol!,
           ],
           if (labnet != null) ...[
             const SizedBox(height: 16),

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show File, Platform;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart' show mapEquals;
@@ -42,9 +41,9 @@ import 'screens/console_shell.dart';
 import 'screens/sessions_screen.dart';
 import 'screens/settings_screen.dart';
 import 'models/labnet.dart';
+import 'screens/enrol_card.dart';
 import 'screens/labnet_card.dart';
 import 'screens/network_screen.dart';
-import 'services/elevated.dart';
 import 'services/overlay_broker.dart';
 import 'services/overlay_daemon.dart';
 import 'services/overlay_enrolment.dart';
@@ -1168,6 +1167,12 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
               model.verificationMethod != kUsePermanentPassword,
           serviceRunning: model.isStart,
           profileSwitcher: const ServerProfileSwitcher(),
+          // Enrolment is the machine's own consent to be owned, so the token
+          // is pasted here, at the machine, and the privileged process spends
+          // it (src/labdesk/labnet.rs).
+          enrol: MachineEnrolCard(
+            enrol: (token) => bind.mainAgentEnrol(token: token),
+          ),
           labnet: LabnetCard(
             state: _labnet,
             onEnable: _enableLabnet,
@@ -1186,26 +1191,20 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
   }
 
   void _initLabnet() {
-    final exeDir = File(Platform.resolvedExecutable).parent.path;
-    final sep = Platform.pathSeparator;
+    // The bundled netbird is driven by the privileged process, which knows
+    // where it is and owns its service, so nothing here needs a path or a
+    // prompt.
     _daemon = OverlayDaemon(
-      binary: [exeDir, 'netbird', Platform.isWindows ? 'netbird.exe' : 'netbird']
-          .join(sep),
-      stateDir: Platform.isWindows
-          ? [
-              Platform.environment['ProgramData'] ?? r'C:\ProgramData',
-              'LabDesk',
-              'netbird'
-            ].join(sep)
-          : '/var/lib/labdesk/netbird',
+      call: (action, setupKey, managementUrl) => bind.mainOverlayDaemon(
+          action: action, setupKey: setupKey, managementUrl: managementUrl),
     );
     _broker = OverlayBroker(
       baseUrl: 'https://lab-desk.net',
       token: () => bind.mainGetLocalOption(key: 'access_token'),
       // The machine plane's credential. The console cannot make it: the agent
       // key is kept where an interactive user cannot read it
-      // (src/labdesk/identity.rs), so the core signs and only the three
-      // headers come back.
+      // (src/labdesk/identity.rs), so the privileged process signs over IPC
+      // and only the three headers come back.
       sign: (method, path, body) async => MachineSignature.decode(
           await bind.mainAgentSign(method: method, path: path, body: body)),
       peerId: () => gFFI.serverModel.serverId.text,
@@ -1214,9 +1213,7 @@ class _LabDeskConsolePageState extends State<LabDeskConsolePage> {
     _enrolment = OverlayEnrolment(
       daemon: _daemon,
       broker: _broker,
-      elevated: (args) => runElevated(_daemon.binary, args),
       setOption: (k, v) => bind.mainSetOption(key: k, value: v),
-      hostname: Platform.localHostname,
       identity: () async =>
           (await bind.mainGetIdPk(), await bind.mainGetDirectAccessPort()),
     );

@@ -20,6 +20,7 @@ import 'labdesk/models/labnet.dart';
 import 'labdesk/models/machine_metrics.dart';
 import 'labdesk/models/machine_row.dart';
 import 'labdesk/screens/console_shell.dart';
+import 'labdesk/screens/enrol_card.dart';
 import 'labdesk/screens/labnet_card.dart';
 import 'labdesk/screens/network_screen.dart';
 import 'labdesk/screens/settings_screen.dart';
@@ -96,6 +97,16 @@ class _LabDeskPreviewAppState extends State<LabDeskPreviewApp> {
                   passwordIsTemporary: true,
                   serviceRunning: true,
                   displayName: 'Workshop NAS',
+                  // A fake daemon: a token that starts with "bad" is refused
+                  // the way the server would, anything else is enrolled.
+                  enrol: MachineEnrolCard(
+                    enrol: (token) async {
+                      await Future.delayed(const Duration(milliseconds: 600));
+                      return token.startsWith('bad')
+                          ? '{"error":"That enrolment token has expired or was already used."}'
+                          : '{"machineId":"5f1c2a0e-7b3d-4c9a-9e21-0d4b8a6f3c11"}';
+                    },
+                  ),
                   labnet: LabnetCard(
                     state: const LabnetCardState(LabnetPhase.on, ip: '100.64.0.3'),
                     onDisable: () {},

@@ -281,7 +281,7 @@ void main() {
         broker().enrol(),
         throwsA(isA<OverlayBrokerException>()
             .having((e) => e.signInAgain, 'signInAgain', isFalse)
-            .having((e) => e.message, 'message', contains('no agent key'))));
+            .having((e) => e.message, 'message', contains('not enrolled'))));
     expect(wire.calls, isEmpty);
     // The human plane needs no machine key, so the labnets an account manages
     // are still read; what is missing is only what the machine says about

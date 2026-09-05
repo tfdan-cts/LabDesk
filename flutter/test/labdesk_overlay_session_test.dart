@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/labdesk/services/overlay_broker.dart';
@@ -16,10 +16,10 @@ class _World {
   final statuses = <bool>[];
   int brokerStatus = 200;
 
-  Future<ProcessResult> run(String exe, List<String> args) async {
-    log.add('daemon ${args.first}');
+  Future<String> call(String action, String setupKey, String managementUrl) async {
+    log.add('daemon $action');
     final up = statuses.isEmpty ? true : statuses.removeAt(0);
-    return ProcessResult(0, 0, _status(targetUp: up), '');
+    return jsonEncode({'output': _status(targetUp: up)});
   }
 
   Future<(int, String)> http(String method, Uri url, Map<String, String> h, String? body) async {
@@ -29,7 +29,7 @@ class _World {
 
   OverlaySession session() => OverlaySession(
         broker: OverlayBroker(baseUrl: 'https://lab-desk.net', token: () => 't', http: http),
-        daemon: OverlayDaemon(binary: 'netbird', stateDir: '/s', daemonAddr: 'unix:///d', run: run),
+        daemon: OverlayDaemon(call: call),
         setOption: (k, v) async {
           log.add('option $k=$v');
           options[k] = v;

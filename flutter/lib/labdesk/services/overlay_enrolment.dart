@@ -19,10 +19,6 @@ class LabnetCardState {
   final String ip;
 }
 
-/// Runs a command that needs elevation (service install, service start) through
-/// the platform's own prompt. Returns the failure text, or null on success.
-typedef ElevatedRunner = Future<String?> Function(List<String> args);
-
 /// Reads and writes the client's own options (`direct-server`,
 /// `labdesk-direct-bind`), kept out of this file so it stays free of the FFI.
 typedef OptionWriter = Future<void> Function(String key, String value);
@@ -57,13 +53,16 @@ String bareIp(String cidr) => cidr.split('/').first.trim();
 /// lab-desk.net for a setup key, bring the daemon up with it, wait for it to
 /// report Connected, tell lab-desk.net the address it got, then open the direct
 /// listener on that address only. Disable undoes it in the other order.
+///
+/// Nothing here raises a prompt: the service is installed and started by the
+/// privileged LabDesk process, which is always on, so an unattended machine
+/// can be turned on from its own console. The one consent prompt is the
+/// caller's, before this sequence is entered.
 class OverlayEnrolment {
   OverlayEnrolment({
     required this.daemon,
     required this.broker,
-    required this.elevated,
     required this.setOption,
-    required this.hostname,
     required this.identity,
     Future<void> Function(Duration) sleep = Future.delayed,
     this.connectTimeout = const Duration(seconds: 60),
@@ -71,9 +70,7 @@ class OverlayEnrolment {
 
   final OverlayDaemon daemon;
   final OverlayBroker broker;
-  final ElevatedRunner elevated;
   final OptionWriter setOption;
-  final String hostname;
   final MachineIdentity identity;
   final Duration connectTimeout;
   final Future<void> Function(Duration) _sleep;
@@ -100,9 +97,9 @@ class OverlayEnrolment {
       if (status.status == OverlayDaemonStatus.notInstalled) {
         _working('Installing the labnet service');
         final enrolment = await broker.enrol();
-        final installed = await elevated(daemon.serviceInstallArgs(enrolment.managementUrl));
+        final installed = await daemon.install(enrolment.managementUrl);
         if (installed != null) return _fail(installed);
-        final started = await elevated(daemon.serviceStartArgs());
+        final started = await daemon.start();
         if (started != null) return _fail(started);
         return await _join(enrolment);
       }
@@ -120,7 +117,6 @@ class OverlayEnrolment {
     final err = await daemon.up(
       setupKey: enrolment.setupKey,
       managementUrl: enrolment.managementUrl,
-      hostname: hostname,
     );
     if (err != null) return _fail(err);
     _working('Connecting');
@@ -173,8 +169,8 @@ class OverlayEnrolment {
     try {
       await broker.revoke();
     } on OverlayBrokerException catch (e) {
-      // Nothing to revoke from here is not a failed turn-off: the console
-      // holds no agent key, so the machine plane always refuses locally, and
+      // Nothing to revoke from here is not a failed turn-off: a machine that
+      // is not enrolled cannot sign, so the machine plane refuses locally, and
       // a sign-in that lapsed is the account surface's to report.
       if (!e.signInAgain && !e.refusedHere) return _fail(e.message);
     }
