@@ -372,7 +372,9 @@ pub enum Data {
     SyncConfig(Option<Box<(Config, Config2)>>),
     /// labnet: served by the process that holds the agent identity
     /// (src/labdesk/labnet.rs, which says who may ask and what they get).
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     Labnet(crate::labdesk::labnet::LabnetRequest),
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     LabnetResult(Result<String, String>),
     #[cfg(target_os = "windows")]
     ClipboardFile(ClipboardFile),
