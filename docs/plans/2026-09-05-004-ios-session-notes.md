@@ -378,6 +378,26 @@ server profile or the lab-desk.net sign in, and this is the reason the item
 exists rather than a matter of polish. The first screenshot from the
 verification job will be of an application in exactly this state.
 
+The reason this matters is not the hostname. `RS_PUB_KEY` at `config.rs:121`
+is upstream's public key, and it is pinned beside the fallback server, so an
+unconfigured client is not merely reachable through somebody else's broker,
+it is trusting somebody else's key material for the rendezvous exchange.
+"Registered nowhere" and "registered with another party's broker under that
+party's key" are different sentences, and the second is the one that is true
+today. It follows that changing the hostname alone would not finish the job:
+the pinned key has to change with it, and a LabDesk client should carry no
+upstream key material as a fallback at all.
+
+**Resolved by the owner, 2026-09-05.** LabDesk defaults to a LabDesk public
+server, never to RustDesk's. That server does not exist yet; dvonr-02 owns
+building it, with its own threat model rather than as a constant swap. For
+this lane it means the first run screen is offered rather than required and
+can be skipped, and the empty state names the server the client fell back to
+instead of showing a blank. The screen is still being built against the
+stricter no-default reading, because one that works with no default also
+works with one and the reverse is not true. Until that server and its pinned
+key are real, any default written here is a placeholder and says so.
+
 Worth flagging beyond iOS: nothing here is iOS specific except the absence
 of the Windows installer path, so an Android build and a desktop build
 started without the installer licence land in the same place. That is
