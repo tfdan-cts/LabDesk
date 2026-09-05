@@ -164,3 +164,24 @@ Proof: the crate does not build on this workstation (kcp-sys needs libclang), so
 was not executed locally and the green is the CI run on the pushed head, recorded in the
 workbench log. The disk sources are unchanged since c342c53cb, so the homebox field proof stands;
 Foundry's QEMU disks cannot prove Windows.
+
+## Site lane, WORKER CORE, round 4 (2026-09-05)
+
+Tests only, on `feat/labnet-broker` = `dev`, commit `e13951a`, after the round 3 critic found
+the suite held no narrowed-writer case for the three write routes and no test reaching the
+acknowledgement's fleet branch (`routes/org.ts:214-216`).
+
+- `test/jobs.test.ts`: a technician narrowed to `fl-jobs` asks for a job on the fleetless
+  machine and is answered 404 with no `machine_job` row under their id, then 201 on the fleet's
+  machine.
+- `test/console-api.test.ts`: a technician narrowed to `fl-capi` gets 404 on
+  `PATCH /org/machines/:id` outside the fleet with `display_name` untouched and 200 inside,
+  and 404 on `POST /org/events/:id/ack` outside the fleet with `acknowledged_by` and
+  `acknowledged_at` still null, then 200 inside with `acknowledged_by` set to them.
+
+Red was proven by mutation rather than by flipping an assertion: with the machine narrowing
+line in `actor()` removed the job and PATCH cases fail, and with the ack fleet branch removed
+only the ack case fails, so those lines are now covered. `tsc` clean, the suite serial 28 files
+466/466, site CI 33965660638 green on the head, dev build `86caaa66` deployed version
+`8e3e6fe6` at 12:19:26Z, production probes unchanged (every org and console route 401 JSON
+unsigned). Evidence under the session scratchpad `gauntlet-evidence/p1-worker-core/round-4/`.
