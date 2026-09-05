@@ -202,6 +202,23 @@ fn parse_overlay_hint(hint: &str) -> Option<SocketAddr> {
     Some(addr)
 }
 
+/// labnet: a hint that led nowhere is cleared on both copies of the options.
+/// The client process holds one and the service holds the other, and a hint
+/// cleared only here comes back on the next option sync, so the clear goes
+/// over IPC. iOS has no `ipc` module (`src/lib.rs`) and no service to sync
+/// from, so there the local config is the whole story.
+#[cfg(not(target_os = "ios"))]
+async fn clear_overlay_hint(addr_key: &str, pk_key: &str) {
+    crate::ipc::set_option_async(addr_key, "").await;
+    crate::ipc::set_option_async(pk_key, "").await;
+}
+
+#[cfg(target_os = "ios")]
+async fn clear_overlay_hint(addr_key: &str, pk_key: &str) {
+    Config::set_option(addr_key.to_owned(), "".to_owned());
+    Config::set_option(pk_key.to_owned(), "".to_owned());
+}
+
 /// labnet: the one condition on the overlay path that names a machine rather
 /// than a route. `signed_other_id` comes back from the exchange only when the
 /// far end signed, under the very key the broker gave us for the peer, an id
@@ -398,8 +415,7 @@ impl Client {
                 match parse_overlay_hint(&hint) {
                     None => {
                         log::error!("labnet: discarding overlay address {} for {}", hint, peer);
-                        crate::ipc::set_option_async(&addr_key, "").await;
-                        crate::ipc::set_option_async(&pk_key, "").await;
+                        clear_overlay_hint(&addr_key, &pk_key).await;
                     }
                     Some(addr) => {
                         let started = Instant::now();
@@ -476,8 +492,7 @@ impl Client {
                                 // IPC, not `Config` alone: this is the client process,
                                 // and a hint cleared only here comes back from the
                                 // server copy on the next option sync.
-                                crate::ipc::set_option_async(&addr_key, "").await;
-                                crate::ipc::set_option_async(&pk_key, "").await;
+                                clear_overlay_hint(&addr_key, &pk_key).await;
                                 if overlay_is_impersonation(conn.is_secured(), signed_other_id) {
                                     // Another machine answered on the peer's
                                     // address under an identity of its own. Say
