@@ -27,6 +27,11 @@ bool needsServerSetup({
 /// is configured it is named. When none is, the screen says the built in
 /// default is in use and does not invent its name, because this client cannot
 /// currently read the effective server back out of the core.
+///
+/// That line has room to grow on purpose. A default server is not only a
+/// hostname: the client pins a key for it, and this screen is where somebody
+/// learns which server and which key they are trusting. When there is a
+/// rendezvous server to name, both belong here.
 class FirstRunView extends StatelessWidget {
   const FirstRunView({
     super.key,

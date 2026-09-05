@@ -110,6 +110,25 @@ maps TeamViewer's iOS app against the inherited RustDesk client. In order:
 
 Tier 2 and Tier 3 are out of scope. Tier 3 items are owner decisions.
 
+### Two readings, resolved the only way they both fit
+
+Item 3 asks for "a session that survives backgrounding" and item 7 asks for "an
+explicit disconnect after a short grace on background". Read as the same kind of
+session those contradict each other, so they are read as two different ones, and
+that is the only reading under which both hold:
+
+- The **sign in** survives backgrounding, and a relaunch. The access token is
+  kept in the local option store and `runMobileApp` calls `refreshCurrentUser`
+  at launch, so this already holds; proving it needs a real lab-desk.net
+  account.
+- The **remote control session** does not survive backgrounding. It is closed
+  after a grace, which is item 7 and the reason the phone does not sit in a
+  pocket holding a machine open.
+
+If the owner meant something else by either, this is the sentence to correct.
+The grace is twenty seconds, a named constant in
+`flutter/lib/mobile/background_grace.dart`, changed in one place.
+
 ### First run
 
 Item 2 is built. A fresh install shows one screen before the tabs: choose a
