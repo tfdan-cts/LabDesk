@@ -49,6 +49,10 @@ jobs:
     name: build and run on a simulator
     needs: [generate-bridge]
     runs-on: macos-latest
+    # The vcpkg and cargo builds are the long part. The cap exists so a stuck
+    # job says so in an hour and a half rather than holding a macOS runner for
+    # the six hours GitHub allows.
+    timeout-minutes: 90
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
@@ -143,8 +147,12 @@ jobs:
           flutter pub get
           flutter build ios --simulator --debug
 
+      # iOS 26 simulators are reported to hang on boot a fraction of the time,
+      # and bootstatus waits forever when they do. Bounded so a hung simulator
+      # fails the run instead of burning the job's whole budget on a boot.
       - name: Boot a simulator
         id: sim
+        timeout-minutes: 8
         run: |
           xcrun simctl list runtimes
           # No runtime argument: simctl picks the newest one the device type can
