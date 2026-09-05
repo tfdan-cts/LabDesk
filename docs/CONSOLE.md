@@ -325,7 +325,10 @@ target's service receives the ticket's hash on its next uplink and hands it to t
 process, which accepts it once for that controller and refuses a second use like a wrong
 password. The controller holds the secret in its options file only for the seconds between the
 grant and the connect, and it is cleared on use and again when the grant is released; the
-target keeps the hash in memory only. A ticket expires in two minutes.
+target keeps the hash in memory only. A ticket expires in two minutes. The ticket password
+is never written to the peer's remembered password and never synced to the personal address
+book, even when that peer already has a remembered password (`PasswordSource::is_storable`
+in `src/client.rs`, the same rule a shared address book password follows).
 
 ## What the console does not show
 

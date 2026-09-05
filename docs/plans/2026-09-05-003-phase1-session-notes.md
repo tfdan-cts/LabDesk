@@ -141,3 +141,26 @@ What this round did not change: the Rust side (`src/client.rs`, `src/labdesk/tic
 `src/server/connection.rs`) is as round 1 left it. What remains unproven in the field: a
 ticket end to end needs two enrolled machines and a signed-in console, which needs an
 owner-minted token; Foundry's QEMU disks cannot prove the Windows disk path.
+
+## Client lane, RUST CORE, round 3 (2026-09-05)
+
+Critic gap closed: `handle_peer_info` in `src/client.rs` wrote the ticket-derived password into
+the peer config when `remember` was set (only a shared address book password was excluded), so a
+peer with a remembered password had it overwritten by a spent one-time hash, and the flutter
+build then synced that hash to the personal address book. This contradicted the "never saved"
+promise on `PasswordSource::Ticket`.
+
+- `PasswordSource::is_storable(password, hash)`: false for a shared address book password that
+  matches the sent one and for `Ticket`, true otherwise. Both save paths (the `remember` branch
+  and the `sync_peer_hash_password_to_personal_ab` event behind the `flutter` feature) call it
+  where they called `!is_shared_ab` before, so the shared password behaviour is unchanged and a
+  ticket is excluded from both.
+- `password_source_tests` (three tests beside the type) pin the rule: a ticket is never storable,
+  a shared ab password is storable only when it does not match the sent one, a typed or personal
+  ab password is storable.
+- `docs/CONSOLE.md` "Connect tickets" states the rule.
+
+Proof: the crate does not build on this workstation (kcp-sys needs libclang), so the red run
+was not executed locally and the green is the CI run on the pushed head, recorded in the
+workbench log. The disk sources are unchanged since c342c53cb, so the homebox field proof stands;
+Foundry's QEMU disks cannot prove Windows.

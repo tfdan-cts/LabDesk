@@ -2006,6 +2006,58 @@ impl PasswordSource {
         let res = hasher.finalize();
         connected_password[..] == res[..]
     }
+
+    // Whether the password may be written to the peer config or synced to the
+    // personal ab: a shared ab password and a spent connect ticket never are.
+    pub fn is_storable(&self, password: &[u8], hash: &Hash) -> bool {
+        !self.is_shared_ab(password, hash) && !matches!(self, PasswordSource::Ticket)
+    }
+}
+
+#[cfg(test)]
+mod password_source_tests {
+    use super::PasswordSource;
+    use hbb_common::{
+        message_proto::Hash,
+        sha2::{Digest, Sha256},
+    };
+
+    fn hashed(password: &str, hash: &Hash) -> Vec<u8> {
+        let mut hasher = Sha256::new();
+        hasher.update(password);
+        hasher.update(&hash.salt);
+        hasher.finalize()[..].into()
+    }
+
+    #[test]
+    fn a_ticket_password_is_never_stored() {
+        let hash = Hash {
+            salt: "salt".to_owned(),
+            ..Default::default()
+        };
+        let sent = hashed("ticket-secret-hash", &hash);
+        assert!(!PasswordSource::Ticket.is_storable(&sent, &hash));
+        assert!(!PasswordSource::Ticket.is_storable(b"", &hash));
+    }
+
+    #[test]
+    fn shared_ab_matching_the_sent_password_is_not_stored() {
+        let hash = Hash {
+            salt: "salt".to_owned(),
+            ..Default::default()
+        };
+        let sent = hashed("shared", &hash);
+        assert!(!PasswordSource::SharedAb("shared".to_owned()).is_storable(&sent, &hash));
+        assert!(PasswordSource::SharedAb("other".to_owned()).is_storable(&sent, &hash));
+    }
+
+    #[test]
+    fn typed_and_personal_ab_passwords_are_stored() {
+        let hash = Hash::default();
+        let sent = hashed("typed", &hash);
+        assert!(PasswordSource::Undefined.is_storable(&sent, &hash));
+        assert!(PasswordSource::PersonalAb(sent.clone()).is_storable(&sent, &hash));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2842,7 +2894,7 @@ impl LoginConfigHandler {
             // not sync shared password to recent
             if !password.is_empty()
                 && password != password0
-                && !self.password_source.is_shared_ab(&password, &hash)
+                && self.password_source.is_storable(&password, &hash)
             {
                 config.password = password.clone();
                 log::debug!("remember password of {}", self.id);
@@ -2873,7 +2925,7 @@ impl LoginConfigHandler {
         {
             // sync connected password to personal ab automatically if it is not shared password
             if !config.password.is_empty()
-                && !self.password_source.is_shared_ab(&password, &hash)
+                && self.password_source.is_storable(&password, &hash)
                 && !self.password_source.is_personal_ab(&password)
             {
                 let hash = base64::encode(config.password.clone(), base64::Variant::Original);
