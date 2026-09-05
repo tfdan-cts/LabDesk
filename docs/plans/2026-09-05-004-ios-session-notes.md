@@ -241,6 +241,42 @@ foreground service and able to be the controlled side.
 tests; the wiring into the session screen is not, and backgrounding under
 real memory pressure is something a simulator cannot show anyway.
 
+## The verification loop so far, failure by failure
+
+Named verifier: the `simulator` job of `.github/workflows/ios-verify.yml`
+produces screenshots of the running application. Nothing about a screen is
+claimed until that job has produced one. Attempts, in order:
+
+**Run 33982913736.** Reached the Rust build and stopped there, as expected,
+because dvonr-02's iOS compile fix was not yet on the branch. It answered
+the question the whole approach rested on: `Install vcpkg dependencies`
+succeeded in 8 minutes 31 seconds against the `arm64-ios-simulator`
+triplet. No Intel runner is needed and none exists.
+
+**Run 33983869505.** Carried the compile fix. vcpkg passed again, the
+bridge restored, and the Rust build failed on something new:
+
+    thread 'main' panicked at libsodium-sys-0.2.7/build.rs
+    Unknown iOS build target: aarch64-apple-ios-sim
+
+`sodiumoxide` pins `libsodium-sys 0.2.7`, whose build script maps the
+target triple to an iOS build flavour and panics on any triple it does not
+recognise. That crate predates the simulator triple, and upstream
+sodiumoxide is unmaintained, so waiting for a release is not a plan.
+
+Reading its `build.rs` rather than guessing at a workaround: `main` checks
+`SODIUM_LIB_DIR` first and calls `find_libsodium_env`, returning before
+`build_libsodium` and therefore before `make_libsodium`, which is where the
+panic lives. So a prebuilt libsodium removes the problem without patching
+or vendoring anything. The job now installs `libsodium:arm64-ios-simulator`
+through the vcpkg that is already there and points `SODIUM_LIB_DIR` at it.
+The device build in `flutter-build.yml` is untouched: it targets
+`aarch64-apple-ios`, a triple that crate does recognise.
+
+Source for the build script reading:
+<https://raw.githubusercontent.com/sodiumoxide/sodiumoxide/master/libsodium-sys/build.rs>,
+read 2026-09-05.
+
 ## The bar, written before anything is judged against it
 
 The brief asks for a gauntlet loop: one concrete bar, pieces judged alone,

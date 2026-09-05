@@ -105,6 +105,24 @@ jobs:
             exit 1
           fi
 
+      # libsodium-sys 0.2.7, which sodiumoxide pins, predates
+      # aarch64-apple-ios-sim: its build script maps the target triple to an
+      # iOS build flavour and panics with "Unknown iOS build target" on any
+      # triple it does not recognise. It skips that path entirely when
+      # SODIUM_LIB_DIR is set, so the simulator slice comes from vcpkg like
+      # every other native dependency rather than from a patched crate.
+      #
+      # Run from outside the repository: naming a package is classic mode, and
+      # vcpkg refuses that inside a manifest root.
+      - name: A libsodium the simulator can link
+        run: |
+          cd "$RUNNER_TEMP"
+          "$VCPKG_ROOT/vcpkg" install libsodium:arm64-ios-simulator \
+            --x-install-root="$VCPKG_ROOT/installed"
+          lib="$VCPKG_ROOT/installed/arm64-ios-simulator/lib"
+          ls -l "$lib/libsodium.a"
+          echo "SODIUM_LIB_DIR=$lib" >> "$GITHUB_ENV"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
