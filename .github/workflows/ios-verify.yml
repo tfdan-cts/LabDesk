@@ -34,7 +34,12 @@ env:
   FLUTTER_VERSION: "3.24.5"
   RUST_VERSION: "1.75"
   VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  # No VCPKG_BINARY_SOURCES here on purpose. The rest of the repository sets
+  # "clear;x-gha,readwrite", and vcpkg now answers that with "the 'x-gha' binary
+  # caching backend has been removed", so it caches nothing and only prints a
+  # warning. Carrying a setting that does nothing would suggest this job has a
+  # binary cache when it does not; it rebuilds the ports each run, which is
+  # about eight and a half minutes.
   # The device type is fixed so screenshots are comparable between runs; the
   # runtime is resolved at run time because the runner image moves.
   SIM_DEVICE_TYPE: "com.apple.CoreSimulator.SimDeviceType.iPhone-17"
@@ -61,8 +66,13 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
+      # nasm and yasm are what the ffmpeg and aom ports want. autoconf,
+      # automake and libtool are what the libsodium port wants: it builds
+      # through vcpkg_configure_make and fails with "libsodium requires autoconf
+      # from the system package manager" without them, which is not something
+      # the ports install for themselves.
       - name: Install dependencies
-        run: brew install nasm yasm
+        run: brew install nasm yasm autoconf automake libtool
 
       - name: Checkout source code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

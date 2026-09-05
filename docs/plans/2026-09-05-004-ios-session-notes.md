@@ -303,6 +303,40 @@ yet a screenshot, which is why the verification job now takes one of the
 home screen: it shows the icon and the display name as iOS renders them,
 and it is the only thing that settles both the rebrand and this paragraph.
 
+### Run 33985338173, and two things it taught
+
+The libsodium step, the one added to get past the `libsodium-sys` panic,
+failed itself:
+
+    CMake Error at scripts/cmake/vcpkg_configure_make.cmake:721
+    libsodium requires autoconf from the system package manager
+
+The vcpkg libsodium port builds through `vcpkg_configure_make` and needs
+autoconf, automake and libtool present on the machine; the ports do not
+install them for themselves. The job installed only nasm and yasm, which is
+what the ffmpeg and aom ports want. Fixed by installing all five.
+
+Worth separating: the vcpkg step itself succeeded again, so the
+`arm64-ios-simulator` triplet install is now confirmed twice rather than
+once. The failure was in the newest and least proven step in the job, which
+is the right place for a failure to be.
+
+The second thing is not about iOS at all and belongs to whoever owns CI.
+vcpkg printed:
+
+    warning: The 'x-gha' binary caching backend has been removed.
+    on expression: clear;x-gha,readwrite
+
+`VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"` is set at workflow level in
+`flutter-build.yml` and inherited by every build in this repository. Since
+that backend was removed from vcpkg, the setting caches nothing and only
+emits a warning, which means every job rebuilds its vcpkg ports from source
+every time. For this job that is about eight and a half minutes a run; for
+the Windows, Linux, Android and macOS builds it will be considerably more.
+This workflow now sets no `VCPKG_BINARY_SOURCES` at all and says why,
+because carrying a dead setting suggests a cache that does not exist.
+Passed to dvonr-02 rather than changed, since it is their workflow.
+
 ## The bar, written before anything is judged against it
 
 The brief asks for a gauntlet loop: one concrete bar, pieces judged alone,
