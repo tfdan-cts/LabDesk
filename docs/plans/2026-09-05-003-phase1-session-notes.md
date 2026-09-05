@@ -211,3 +211,64 @@ only the ack case fails, so those lines are now covered. `tsc` clean, the suite 
 466/466, site CI 33965660638 green on the head, dev build `86caaa66` deployed version
 `8e3e6fe6` at 12:19:26Z, production probes unchanged (every org and console route 401 JSON
 unsigned). Evidence under the session scratchpad `gauntlet-evidence/p1-worker-core/round-4/`.
+
+## Client lane, RUST CORE, round 1 (2026-09-05)
+
+Two commits on `feat/labnet`, `e9f76968a` and `8df27e59d`, on top of the round that built
+`tools.rs`, `ticket.rs`, `netview.rs` and the self-heal file read. What was left of the piece was
+the half of WP15 nothing called, and the field proof the plan asks for on real hardware.
+
+The claim report. `POST /agent/ticket/:id/claimed` existed on the Worker and had no caller, so a
+ticket's row never recorded that its one-time credential was spent and the Worker kept offering
+the same ticket in every batch answer for the rest of its two minutes. The claim happens inside
+`--server`, the process that answers logins, and that process holds no agent key, so it cannot
+make the signed call itself.
+
+- `src/server/connection.rs`: `PendingTicket` gains `reported`, and `take_claimed_tickets()`
+  hands each claimed id over exactly once.
+- `src/ipc.rs`: `Data::ClaimedTickets(Vec<String>)`, sent empty by the daemon as the question and
+  answered with the ids. The `_service` channel (0666) still admits only `SyncConfig` and
+  `Labnet`, so this rides the main channel alone.
+- `src/labdesk/ticket.rs`: `ask()` is the one connect both `deliver` and the new `claimed()` use;
+  `is_ticket_id` checks what comes back before it reaches a URL path, because on Linux and macOS
+  those ids cross from a process running as the logged-in user.
+- `src/labdesk/collector.rs`: `TICKET_POLL` is 5 s and the daemon asks only while a ticket it
+  delivered is still live (`watch_until`), because a ticket lives 120 s, the default flush is
+  300 s, and the route answers 410 past `expiresAt`.
+
+Tests, one per behaviour: `test_pending_ticket_claim_once_per_ticket_never_for_another_peer`
+gained the two assertions that the three claimed ids are reported and that a second ask has
+nothing left, and `ticket.rs` gained `a_ticket_id_that_could_reshape_a_url_is_dropped`.
+
+The field proof, and what CI now hands out. `.github/workflows/ci.yml` uploads the stripped Linux
+binary as `labdesk-x86_64-unknown-linux-gnu`, which is how a machine the program may not install
+anything on gets a binary to prove the disk read path with. On homebox-devserver, a real
+Lubuntu 26.04 box, `sudo /tmp/labdesk-fieldcheck --disk-health` from run 33975560768's artifact
+read both real drives:
+
+- `/dev/nvme0n1`, a Micron_3400_MTFDKBA512TFH, source `nvme_logpage`, `percentUsed` 1,
+  `sparePct` 100 against a threshold of 5, `tempC` 26, `powerOnHours` 4500, `mediaErrors` 0,
+  `criticalWarning` 0, verdict `ok`;
+- `/dev/sda`, an ATA ST1000VX008-2AY1, source `ata_smart`, `powerOnHours` 47216, `reallocated` 0,
+  `pending` 0, `uncorrectable` 0, `crcErrors` 0, `tempC` 27, verdict `ok`.
+
+That reading is what found the second commit. The SATA drive came back with `bus` `unknown`
+beside its `ata_smart` source, because `probe_linux` named the bus from the device name and had
+no value for anything that is not an NVMe namespace. A drive that answers ATA PASS-THROUGH with a
+SMART table is an ATA drive whatever controller is in front of it, so the branch that parses its
+attributes now says so.
+
+Proof: the crate does not build on this workstation (kcp-sys needs libclang), so the green is CI
+on the exact head. CI 33975560768 is success on `e9f76968a` with 250 tests passed including the
+two new ones, and 33976803049 on `8df27e59d`. Nothing was installed on homebox: the binary was
+copied to `/tmp` and run from there.
+
+Open at this head: no Windows disk proof exists in this phase, because trapLab-Foundry is off
+limits by owner order and its disks are virtual in any case; the round 4 critic's gap, that the
+Windows adapter walk's `FriendlyName` keying of the sysinfo counters map is source read and not
+proven at runtime, is still open and could not be closed this round because the workstation had
+under 1 GB of free memory; `HealConfig::from_options` still reads the three self-heal tuning
+options from process memory, so on Windows only the switch itself survives a daemon that was
+started before the change; and section 3's delivery timing (a ticket lives 120 s while the
+default flush is 300 s) is recorded as contracts section 12 correction 6 and belongs to the site
+lane.
