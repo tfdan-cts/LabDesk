@@ -200,7 +200,7 @@ jobs:
             launchctl list | grep "${{ steps.launch.outputs.bundle_id }}" || true)
           echo "launchctl says: ${state:-nothing}"
           if [ -z "$state" ]; then
-            echo "the app is not running twenty seconds after launch" >&2
+            echo "the app is not running after the screenshot sequence" >&2
             exit 1
           fi
 
