@@ -1,10 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
+<!--
+  Deliberately empty. Upstream asked for two entitlements this
+  application neither uses nor can be granted:
+
+  aps-environment, a push notification environment. LabDesk sends no
+  push notifications, and the entitlement can only be issued against an
+  Apple Developer membership, which the owner does not hold.
+
+  com.apple.developer.networking.wifi-info, which reads the current
+  network name. Nothing in this application asks for it.
+
+  Add an entitlement here when a feature needs it, not before.
+-->
 <dict>
-	<key>aps-environment</key>
-	<string>development</string>
-	<key>com.apple.developer.networking.wifi-info</key>
-	<true/>
 </dict>
 </plist>
