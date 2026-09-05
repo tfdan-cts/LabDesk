@@ -78,3 +78,38 @@ Open after this round:
   enrolled machine and therefore an owner-minted token.
 - `CHANGELOG.md` and the program plan's phase 1 row carry another session's uncommitted edits
   in this checkout and were left alone.
+
+## Site lane, WORKER CORE, rounds 1 to 3 (2026-09-05)
+
+What landed on `feat/labnet-broker` = `dev`, deployed to lab-desk.net:
+
+- `99e83df`: the tool catalog (`src/worker/tools.json`, nine v1 entries, and `tool-catalog.ts`
+  enforcing every rule of contracts section 1), the job outbox (`routes/jobs.ts` under `/api`
+  and `/console`: request, approve by an owner other than the requester on a fresh sign-in,
+  refuse, list, read one), the batch wire (`jobs`, `tickets`, `collectNow` in the answer;
+  `jobResults` and `attrs` in the request), the connect ticket minted beside the session grant
+  and reported claimed on `POST /agent/ticket/:id/claimed`, the console read routes
+  (`machines?state=1`, `machines/:id/state`, `/metrics`, `/disks`, `events` and `ack`,
+  `PATCH machines/:id`, `attrs` on the machine answer), a `runTool` firing writing a job row
+  from `scheduled.ts`, and migration `0011_job_urgent.sql`, applied to production D1.
+- `b86f288`: the wrong organization, wrong role and narrowed member cases for approve, refuse,
+  one job, metrics and disks, after the round 1 critic found the suite held none.
+- Round 3 was a verification pass on `b86f288` with no code change: `npx tsc --noEmit` clean,
+  the suite run serially, `cmp` of the two `tools.json` copies, production probes with a
+  browser user agent (every new route 401 JSON unsigned, `/agent/*` 401 "no machine
+  signature", `/console/nothing` 404 JSON), and a hand review pass with three P3 notes
+  (a job may be requested against a revoked machine and then expires undispatched; an attrs
+  key `__proto__` is dropped rather than refused; the minute tick's expiry update has no
+  serving index). Evidence under the session scratchpad
+  `gauntlet-evidence/p1-worker-core/round-3/`.
+
+Recorded for the client lane: the two `tools.json` blobs are identical in git
+(`652f3923addf13646b88498dbf00beaa2e22ac25` on both sides), but this repository's
+`.gitattributes` `text=auto` checks the file out with CRLF on Windows, so a working-tree `cmp`
+on a Windows checkout differs at byte 2 while `git show HEAD:src/labdesk/tools.json` matches
+byte for byte. A `src/labdesk/tools.json text eol=lf` line would make the working-tree `cmp`
+silent everywhere; it is the client lane's file to change.
+
+Open after these rounds: no signed-in production request (the program seeds no account); a job
+and a ticket end to end need an enrolled machine and therefore an owner-minted token; WP17's
+pages and the rules presets are their own pieces.
