@@ -27,14 +27,33 @@ wrong, the correction is recorded here rather than left to be rediscovered.
    dropped the approval gate every other authenticated surface enforces, so an account an admin had
    revoked still ran.
 
-3b. WP19 (Linux delivery) was BUILT AND REVERTED, and is still outstanding. The attempt shipped
+3b. WP19 (Linux delivery) was BUILT AND REVERTED once, and is now built. The first attempt shipped
    src/platform/linux.rs calling /usr/share/rustdesk/labdesk-helper, a path that NO package this
-   repository builds produces, and its new Linux update arm was unreachable, so Linux still received
+   repository builds produced, and its new Linux update arm was unreachable, so Linux still received
    no unattended update while the code implied otherwise. It also asserted invented pkexec behaviour
    as fact in shipped comments. A reviewer returned BROKEN and the change was reverted rather than
    committed, because a broken and misleading state is worse than the honest broken state that
-   preceded it. Re-scoping WP19 must start by making build.py actually produce and package the
-   helper; until then the true statement is that Linux machines receive no updates at all.
+   preceded it.
+   As built, 2026-09-05, in the order the earlier attempt got wrong. build.py stages res/labdesk-helper
+   at /usr/share/rustdesk/labdesk-helper and res/polkit/net.lab-desk.LabDesk.policy at
+   /usr/share/polkit-1/actions/, on both deb paths and in both flutter rpm specs, so the file the
+   code calls is a file a package produces. The helper is the fence, not a wrapper: it copies the
+   package into a root-owned directory, reads the name and version out of the copy, refuses a
+   version that is not newer than the installed one, fetches the digest lab-desk.net publishes for
+   that asset of that release, and installs only bytes that hash to it. A package the site has not
+   published cannot be installed as root through the polkit action even by an administrator who
+   authenticates. Measured on homebox 2026-09-05: pkaction reads the action, pkexec executes the
+   script, a genuine published 1.2.4 deb is refused as not newer, and a repacked 9.9.9 deb is
+   refused because the site publishes no digest for it.
+   The unattended arm is crate::updater::start_auto_update_linux, started from start_os_service in
+   src/platform/linux.rs, which is the root process; --server is the desktop user's and cannot
+   install a package. It asks that --server over IPC whether a session is live (Data::HasNoActiveConns
+   is no longer macOS-only) and treats no answer as a live session. The install is handed to the
+   helper through systemd-run and NOT as a child of the service: res/DEBIAN/preinst stops
+   rustdesk.service on an upgrade and KillMode=mixed then kills whatever is left in that cgroup,
+   which would be dpkg part way through unpacking. postinst starts the service again on the new
+   binary. res/DEBIAN/postinst needed no change; polkit picks the action file up from the packaged
+   path on its own.
 
 3. WP1's migration number (section 9). 0003 was already taken by the organization migration, so the
    indexes ship as 0008. drizzle-kit reports no pending schema changes, and wrangler lists 0002

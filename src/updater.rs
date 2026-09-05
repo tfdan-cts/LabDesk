@@ -17,6 +17,9 @@ use std::os::{
     unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
 };
 
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
 #[cfg(target_os = "macos")]
 struct MacUpdateLock {
     _file: std::fs::File,
@@ -1120,6 +1123,291 @@ pub fn check_update_as_root() -> ResultType<bool> {
         log::warn!("[root-update] Failed to remove temp dir {}: {}", private_tmp, e);
     }
     result.map(|_| true)
+}
+
+/// Whether every LabDesk session on this machine is idle, asked over IPC.
+///
+/// The root service holds no connection state on Linux: `res/rustdesk.service`
+/// runs this process as root while `--server`, where connections live, is
+/// launched as the desktop user. So the desktop user's `--server` is asked, and
+/// a question that is not answered is read as a session in progress. Installing
+/// through a live session would drop it, because the package's `preinst` stops
+/// the service.
+#[cfg(target_os = "linux")]
+fn has_no_active_conns_ipc() -> bool {
+    let uid = crate::platform::get_active_userid();
+    if uid.is_empty() {
+        // No seat0 session, so no `--server` was ever started and no connection
+        // can be held by one.
+        return true;
+    }
+    let Ok(uid) = uid.parse::<u32>() else {
+        return false;
+    };
+    let Ok(rt) = hbb_common::tokio::runtime::Runtime::new() else {
+        return false;
+    };
+    rt.block_on(async {
+        let Ok(mut conn) = crate::ipc::connect_for_uid(1000, uid, "").await else {
+            return false;
+        };
+        if conn
+            .send(&crate::ipc::Data::HasNoActiveConns(None))
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        matches!(
+            conn.next_timeout(1000).await,
+            Ok(Some(crate::ipc::Data::HasNoActiveConns(Some(true))))
+        )
+    })
+}
+
+/// Removes the download directories earlier checks left behind.
+/// `try_remove_temp_update_files` does this on Windows and has no Linux arm, so
+/// without this every unattended update would leave its package in the temp
+/// directory for good. Only root-owned directories carrying this process's own
+/// prefix, and only once they are older than a retry interval, so a download in
+/// flight is never taken out from under an install.
+#[cfg(target_os = "linux")]
+fn remove_stale_update_dirs() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(UPDATE_DIR_PREFIX)
+        {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        let stale = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| std::time::SystemTime::now().duration_since(modified).ok())
+            .is_some_and(|age| age >= RETRY_INTERVAL);
+        if metadata.file_type().is_dir() && metadata.uid() == 0 && stale {
+            if let Err(err) = std::fs::remove_dir_all(&path) {
+                log::warn!(
+                    "[root-update] Failed to remove the stale download directory {}: {}",
+                    path.display(),
+                    err
+                );
+            }
+        }
+    }
+}
+
+/// The name the release gives this platform's package, which is the name
+/// lab-desk.net serves it and its digest under.
+///
+/// Getting this wrong is not a visible failure: the site answers 404, the check
+/// ends in an error line, and the machine simply never updates. The names come
+/// from `.github/workflows/flutter-build.yml`, which renames each deb to carry
+/// the architecture, and from `res/rpm-flutter.spec`, whose `Release: 0` is the
+/// `-0.` in the rpm name.
+#[cfg(target_os = "linux")]
+fn linux_asset_name(kind: &str, version: &str, arch: &str) -> String {
+    match kind {
+        "deb" => format!("labdesk-{}-{}.deb", version, arch),
+        _ => format!("labdesk-{}-0.{}.rpm", version, arch),
+    }
+}
+
+/// Starts the unattended update loop on Linux, from `start_os_service()`.
+///
+/// Until this existed the updater had a `windows` arm and a `macos` arm and
+/// nothing else, so a Linux machine could learn that a new version was offered
+/// and had no way to install it: Linux received no update at all. The loop runs
+/// in the root service for the same reason the telemetry collector does, that
+/// `--server` is the desktop user's process and cannot install a package.
+#[cfg(target_os = "linux")]
+pub fn start_auto_update_linux() {
+    let spawned = std::thread::Builder::new()
+        .name("labdesk-auto-update".to_owned())
+        .spawn(|| {
+            log::info!("[root-update] The unattended update loop has started.");
+            std::thread::sleep(INITIAL_CHECK_DELAY);
+            loop {
+                let interval = if !has_no_active_conns_ipc() {
+                    log::info!("[root-update] A session is in progress, retrying in 10 minutes.");
+                    MIN_INTERVAL
+                } else {
+                    match check_update_as_root_linux() {
+                        // The install runs in a transient systemd unit that
+                        // outlives this process, so there is nothing more to do
+                        // here: either it replaces this service or the retry
+                        // interval brings us back.
+                        Ok(true) => RETRY_INTERVAL,
+                        Ok(false) => DUR_ONE_DAY,
+                        Err(err) => {
+                            log::error!("[root-update] The update check failed: {}", err);
+                            RETRY_INTERVAL
+                        }
+                    }
+                };
+                std::thread::sleep(interval);
+            }
+        });
+    if let Err(err) = spawned {
+        log::error!("[root-update] Failed to start the update loop: {}", err);
+    }
+}
+
+/// One unattended check, running as root. Returns whether an install was handed
+/// to the helper.
+///
+/// The asset names are the ones `.github/workflows/flutter-build.yml` uploads
+/// and lab-desk.net therefore serves. Which of them is asked for is decided by
+/// the package manager that owns the running binary, so an AppImage or a copy
+/// that was never installed from a package is left alone rather than handed a
+/// package it cannot install.
+#[cfg(target_os = "linux")]
+pub fn check_update_as_root_linux() -> ResultType<bool> {
+    if !config::Config::get_bool_option(config::keys::OPTION_ALLOW_AUTO_UPDATE) {
+        log::info!("[root-update] Auto update is off, skipping.");
+        return Ok(false);
+    }
+    // LabDesk is a custom client upstream and checks lab-desk.net for itself.
+    if crate::is_custom_client() && !crate::common::is_labdesk() {
+        log::info!("[root-update] Custom client detected, skipping the stock update.");
+        return Ok(false);
+    }
+    let Some(kind) = crate::platform::installed_package_kind() else {
+        log::info!(
+            "[root-update] This copy was not installed from a package, so nothing here can upgrade it in place."
+        );
+        return Ok(false);
+    };
+    remove_stale_update_dirs();
+
+    do_check_software_update().map_err(|e| {
+        hbb_common::anyhow::anyhow!("Checking lab-desk.net for a new version: {}", e)
+    })?;
+    let update_url = crate::common::SOFTWARE_UPDATE_URL.lock().unwrap().clone();
+    if update_url.is_empty() {
+        log::debug!("[root-update] No update available.");
+        return Ok(false);
+    }
+    let download_url = update_url.replace("tag", "download");
+    let version = download_url.split('/').last().unwrap_or_default().to_owned();
+    let arch = if std::env::consts::ARCH == "aarch64" {
+        "aarch64"
+    } else {
+        "x86_64"
+    };
+    let asset = linux_asset_name(kind, &version, arch);
+    let asset_url = format!("{}/{}", download_url, asset);
+    // The allowlist first, so nothing below ever talks to a host this updater
+    // does not accept.
+    if get_update_download_file_from_url(&asset_url).is_none() {
+        bail!(
+            "[root-update] The update URL failed the release allowlist check: {}",
+            asset_url
+        );
+    }
+    // What the asset has to hash to, learned before a byte of it is fetched.
+    let expected_sha256 = get_published_sha256(&asset_url)?;
+    log::info!(
+        "[root-update] lab-desk.net offers {} over {}; the release publishes sha256 {} for {}",
+        version,
+        crate::VERSION,
+        expected_sha256,
+        asset
+    );
+
+    // A directory whose name cannot be guessed, created by this process, refused
+    // if it already exists, and readable only by root. The temp directory is
+    // world-writable and this download is about to be installed as root.
+    let dir = std::env::temp_dir().join(format!("{}-{}", UPDATE_DIR_PREFIX, uuid::Uuid::new_v4()));
+    std::fs::create_dir(&dir)?;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    let file_path = dir.join(&asset);
+    let client = create_http_client_with_url_strict(&asset_url)?;
+    let response = client.get(&asset_url).send()?;
+    if !response.status().is_success() {
+        std::fs::remove_dir_all(&dir).ok();
+        bail!(
+            "[root-update] Failed to download the new version: {}",
+            response.status()
+        );
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&file_path)?;
+    // Streamed and bounded rather than buffered whole in the service.
+    let mut body = response.take(UPDATE_MAX_BYTES);
+    if let Err(e) = std::io::copy(&mut body, &mut file) {
+        std::fs::remove_dir_all(&dir).ok();
+        return Err(e.into());
+    }
+    drop(file);
+
+    // The download can take minutes, so the session question is asked again
+    // right before the install rather than only before it.
+    if !has_no_active_conns_ipc() {
+        std::fs::remove_dir_all(&dir).ok();
+        bail!("[root-update] A session started during the download, deferring the update.");
+    }
+    if let Err(e) = verify_downloaded_file(&file_path, &expected_sha256) {
+        std::fs::remove_dir_all(&dir).ok();
+        return Err(e);
+    }
+    let Some(path) = file_path.to_str() else {
+        std::fs::remove_dir_all(&dir).ok();
+        bail!("[root-update] The download path is not valid UTF-8");
+    };
+    log::info!("[root-update] Handing {} to the update helper.", path);
+    crate::platform::install_update_as_root(path)?;
+    Ok(true)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    use super::{get_update_checksum_url, get_update_download_file_from_url, linux_asset_name};
+
+    /// The Linux update arm builds an asset URL out of the version the site
+    /// offers, and everything downstream of it -- the allowlist, the published
+    /// digest, the download -- is reached through that one string. A name the
+    /// release does not carry is answered with a 404 and reads as "no update",
+    /// so this is checked here rather than in the field.
+    #[test]
+    fn the_linux_asset_url_is_one_the_release_allowlist_accepts() {
+        for (kind, expected) in [
+            ("deb", "labdesk-1.2.5-x86_64.deb"),
+            ("rpm", "labdesk-1.2.5-0.x86_64.rpm"),
+        ] {
+            let asset = linux_asset_name(kind, "1.2.5", "x86_64");
+            assert_eq!(asset, expected);
+            let url = format!("https://lab-desk.net/releases/download/1.2.5/{}", asset);
+            assert_eq!(
+                get_update_download_file_from_url(&url)
+                    .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())),
+                Some(expected.to_owned()),
+                "the release allowlist refused {}",
+                url
+            );
+            assert_eq!(
+                get_update_checksum_url(&url),
+                Some(format!(
+                    "https://lab-desk.net/releases/checksums/1.2.5/{}",
+                    asset
+                ))
+            );
+        }
+        assert_eq!(
+            linux_asset_name("deb", "1.2.5", "aarch64"),
+            "labdesk-1.2.5-aarch64.deb"
+        );
+    }
 }
 
 #[cfg(test)]
