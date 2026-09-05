@@ -241,6 +241,53 @@ foreground service and able to be the controlled side.
 tests; the wiring into the session screen is not, and backgrounding under
 real memory pressure is something a simulator cannot show anyway.
 
+## The bar, written before anything is judged against it
+
+The brief asks for a gauntlet loop: one concrete bar, pieces judged alone,
+a separate critic with fresh context per piece, looping until the critic
+picks ours. The bar has to exist before the screenshots do, or it becomes a
+description of whatever was built.
+
+The reference is TeamViewer's iOS app, and the useful part of the research
+brief is not its feature list but its review feed: 50 most recent reviews,
+2026-02-06 to 2026-08-28. What that app loses users over is not missing
+features. It is, in order of count: the licence gate, pointer precision
+(six reviews, missed clicks and external mouse), connection drops (six),
+sign-in that does not persist (three, one of them logged out within three
+minutes of closing a connection), on-screen controls that are almost
+impossible to see, no dark mode, and a session left open in the background
+draining a phone from 100 percent to 9 in a couple of hours.
+
+So the bar, per piece, is a thing a critic can check in a screenshot or a
+log rather than a matter of taste:
+
+1. **The machine list.** A machine nobody has asked about is visibly not the
+   same as a machine that answered and is down, at a glance, without reading
+   a word. Every row's state is legible in one look at a phone-sized image.
+   No row invents a time it does not have.
+2. **Both appearances.** The dark screenshot and the light screenshot differ,
+   and text is readable in both. The reference app has a review complaining
+   there is no dark mode at all.
+3. **On-screen controls.** Anything overlaid on a session is legible against
+   whatever is behind it. The reference app has a review saying its controls
+   are almost impossible to see.
+4. **First run.** A fresh install asks for nothing it does not need yet: no
+   camera prompt, no notification prompt, no permission dialog in the first
+   screenshot. Statically this already holds (no permission plugin is
+   invoked at launch, and AppDelegate registers no push), but the first
+   screenshot is what proves it.
+5. **Backgrounding.** A session left in the background stops, and the log
+   says so. This is the battery complaint, and it is item 7.
+6. **Staying signed in.** A sign in survives a relaunch. The token is kept
+   in the local option store and `runMobileApp` calls
+   `refreshCurrentUser` at launch, so this should already hold; proving it
+   needs a real lab-desk.net account, which is named as a limit rather than
+   assumed away.
+
+Pointer precision and connection drops, the two largest complaint themes,
+cannot be judged on a simulator at all. They are named here so that nothing
+later claims the bar was cleared when only the part a simulator can see was.
+
 ## Open items
 
 - Rebase onto `feat/labnet` once `82a6d8f27` is pushed there, then rerun the
