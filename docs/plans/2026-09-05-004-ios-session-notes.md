@@ -350,6 +350,40 @@ Pointer precision and connection drops, the two largest complaint themes,
 cannot be judged on a simulator at all. They are named here so that nothing
 later claims the bar was cleared when only the part a simulator can see was.
 
+## A finding that gives Tier 1 item 2 its point
+
+A fresh LabDesk install on a phone, before anybody configures anything,
+registers with RustDesk's public rendezvous server. This was traced rather
+than suspected.
+
+`Config::get_rendezvous_server` in `libs/hbb_common/src/config.rs:913` tries
+four sources in order and then falls back:
+
+1. `EXE_RENDEZVOUS_SERVER`, written in exactly one place in the tree,
+   `src/platform/windows.rs:2197`, from the licence embedded in the
+   installer executable. There is no such mechanism on iOS.
+2. the `custom-rendezvous-server` option, which is empty until a server
+   profile is set or a sign in writes one.
+3. `PROD_RENDEZVOUS_SERVER`, which a grep of `src/` and `libs/` shows is
+   read in three places and written in none, so it is always empty.
+4. `CONFIG2.rendezvous_server`, empty on a fresh install.
+
+Then `RENDEZVOUS_SERVERS`, which is `["rs-ny.rustdesk.com"]`
+(`config.rs:120`) with `RS_PUB_KEY` beside it, RustDesk's own key.
+
+So the phone has no LabDesk server until somebody gives it one, and in the
+meantime it talks to upstream's infrastructure under upstream's key. That
+is precisely what Tier 1 item 2 asks for, a first run that asks for a
+server profile or the lab-desk.net sign in, and this is the reason the item
+exists rather than a matter of polish. The first screenshot from the
+verification job will be of an application in exactly this state.
+
+Worth flagging beyond iOS: nothing here is iOS specific except the absence
+of the Windows installer path, so an Android build and a desktop build
+started without the installer licence land in the same place. That is
+another lane's call, and it has been passed to dvonr-02 rather than acted
+on here.
+
 ## Open items
 
 - Rebase onto `feat/labnet` once `82a6d8f27` is pushed there, then rerun the
