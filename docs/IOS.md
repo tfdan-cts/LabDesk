@@ -179,9 +179,52 @@ unrounded.
 The camera and photo library purpose strings now say what LabDesk actually does
 with each: the camera is used only to scan a connection QR code and never during
 a session, and a photo is read only when the operator picks one holding a QR
-code. The encryption declaration, `ITSAppUsesNonExemptEncryption`, still carries
-upstream's answer and has not been checked against what the Rust core actually
-does. It is unverified and is its own piece of work.
+code.
+
+### The encryption declaration
+
+`ITSAppUsesNonExemptEncryption` is `true`. Upstream shipped `false`, which is
+not true of this application.
+
+What the Rust core actually does, read from the manifests and the code rather
+than assumed. `libs/hbb_common/Cargo.toml` depends on `sodiumoxide 0.2`, which
+is libsodium, and the client uses `crypto::box_` (X25519 key agreement with
+XSalsa20 and Poly1305), `crypto::secretbox`, `crypto::sign` (Ed25519) and
+`crypto::hash::sha256` in `src/common.rs`, `src/client.rs`, `src/server.rs` and
+`src/custom_server.rs`. Transport security is `tokio-rustls` with the `ring`
+backend plus `rustls-platform-verifier`, so even the TLS is the application's
+own, not the system's. The one dependency that is not compiled on iOS is
+`openssl`, which `Cargo.toml` scopes to Linux and Android.
+
+Apple's exemption is narrow. Its export compliance reference says an app needs
+no encryption documentation when "your app uses encryption limited to that
+within the Apple operating system". LabDesk bundles its own libsodium and its
+own TLS stack, so it does not qualify, and answering `false` would be claiming
+an exemption that does not apply. Apple states plainly that the developer is
+"responsible for all liabilities associated with misinterpretation of export
+regulations or claiming exemption inaccurately", so the declaration is answered
+against what the code does.
+
+Sources, read on 2026-09-05:
+<https://developer.apple.com/help/app-store-connect/reference/app-information/export-compliance-documentation-for-encryption>
+and
+<https://developer.apple.com/help/app-store-connect/manage-app-information/overview-of-export-compliance>.
+
+What this does not decide, and what waits on the owner. Apple distinguishes
+standard algorithms from proprietary ones: an app using industry standard
+algorithms that are not the operating system's needs the French encryption
+declaration, and only then if it is distributed on the App Store in France; an
+app using proprietary algorithms not accepted by a standards body such as IEEE,
+IETF or ITU must upload a CCATS classification from the US Bureau of Industry
+and Security. Everything LabDesk uses is standard and published, so the CCATS
+path should not apply, but that determination is the owner's to make and Apple
+points at the Export Administration Regulations for it. It is marked unverified
+here because nobody has filed anything and there is no account to file it
+against.
+
+`ITSEncryptionExportComplianceCode` is deliberately absent. That key carries a
+code Apple issues after approving uploaded documentation, and no documentation
+has been uploaded, so writing a code there would be inventing one.
 
 The bundle identifier prefix is not new: the
 Linux packaging already ships a polkit action named

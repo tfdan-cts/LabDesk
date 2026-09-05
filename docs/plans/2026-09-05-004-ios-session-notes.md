@@ -182,6 +182,34 @@ which the rest of this codebase also carries, and one is a pre-existing
 the rules, not the look, and the look cannot be judged until the simulator
 job is green.
 
+## Piece 4: the encryption declaration, Tier 1 item 9
+
+`ITSAppUsesNonExemptEncryption` was `false`, inherited from upstream. It is
+now `true`, and the reasoning is in `docs/IOS.md` with both Apple pages
+cited.
+
+The code side, read rather than remembered: `libs/hbb_common/Cargo.toml`
+pulls `sodiumoxide 0.2`, and `src/common.rs`, `src/client.rs`,
+`src/server.rs` and `src/custom_server.rs` use `crypto::box_`,
+`crypto::secretbox`, `crypto::sign` and `crypto::hash::sha256`. Transport is
+`tokio-rustls` with `ring` and `rustls-platform-verifier`, so the TLS is the
+application's own rather than the system's. `openssl` is scoped in
+`Cargo.toml` to Linux and Android and is not compiled for iOS.
+
+The Apple side: the exemption is for an app whose encryption is limited to
+what is within the Apple operating system. This one bundles libsodium and a
+TLS stack, so it is not that app, and Apple says the developer carries the
+liability for claiming an exemption inaccurately.
+
+**Unverified, and owner work.** Whether a French encryption declaration is
+needed depends on distributing in France, and whether anything more than
+self classification is needed is a determination against the Export
+Administration Regulations that Apple explicitly leaves to the developer.
+Nothing has been filed and there is no account to file it against.
+`ITSEncryptionExportComplianceCode` is left absent on purpose: that key
+holds a code Apple issues after approving uploaded documentation, and
+writing one there would be inventing it.
+
 ## Open items
 
 - Rebase onto `feat/labnet` once `82a6d8f27` is pushed there, then rerun the
