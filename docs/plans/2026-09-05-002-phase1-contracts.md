@@ -17,9 +17,12 @@ Two lanes build phase 1 at once, one in the client repository (`~/TrapLab/LabDes
 in the site repository as `docs/phase1-contracts.md`; a change lands in both copies in the same
 round or it is not a change.
 
-Every claim about existing code names the file and the symbol it was read from, at client
-`d11800abd` and site `d191d97`. Each section says what EXISTS (read from code) and what is
-MISSING (fixed here, inside what `2026-09-04-003-rmm-architecture.md` already says). Nothing here
+Every claim about existing code names the file and the symbol it was read from. Sections 1 to 9
+were read at client `d11800abd` and site `d191d97`, before either lane had built anything;
+section 11 is the client lane's corrections and section 12 is the state of both repositories at
+client `d572566815` and site `fb3c14e`, which is where a reader should start. Each section says
+what EXISTS (read from code) and what is MISSING (fixed here, inside what
+`2026-09-04-003-rmm-architecture.md` already says). Nothing here
 adds a table, a storage system or a mechanism section 10 of that plan rules out. Where this
 document has to choose something the plan left open, the choice is marked "contract decision"
 and the reason is inline.
@@ -131,7 +134,8 @@ parsers. The `scripts` tool is free text and is not in the catalog by section 10
 and which would otherwise let a parameter name a path. `power_logoff` on Linux takes the user
 from `crate::platform::get_active_username()` (`src/platform/linux.rs`), never from a parameter;
 the argv is built by the agent with that value, so the entry has no `{user}` token a caller can
-fill. `taskkill.exe` and `sc.exe` replace the PowerShell cmdlets of `tool_catalog.dart` because a
+fill. As shipped in `tools.json` the Linux step is `["loginctl", "terminate-user"]` and the agent
+appends the username as the final argument (round 1 of the site lane; the file is the contract). `taskkill.exe` and `sc.exe` replace the PowerShell cmdlets of `tool_catalog.dart` because a
 cmdlet needs `-Command`.
 
 What `runAs` costs, stated so nobody is surprised in the console: seven of the nine v1 entries
@@ -164,7 +168,7 @@ as `org.ts`, so every path below also answers under `/console`:
 
 | Route | Need | Body and answer |
 |---|---|---|
-| `POST /api/org/jobs` | `job:request`, target `{ machineId }` | `{ machineId, toolId, params, urgent? }`. The Worker looks the tool up, checks `machine.platform` against `platforms`, validates `params`, writes the row with `requestedBy` the caller, `requestedAt` now, `expiresAt` now + 3600, `runAs` and `timeoutS` copied from the entry, and `state` `approved` when `runAs` is `active_user`, `pending` when `system`. Answers 201 `{ id, state, expiresAt }`. Unknown tool, wrong platform or a bad parameter is 400 naming the parameter. |
+| `POST /api/org/jobs` | `job:request`, target `{ machineId }` | `{ machineId, toolId, params, urgent? }`. The Worker looks the tool up, checks `machine.platform` against `platforms`, validates `params`, writes the row with `requestedBy` the caller, `requestedAt` now, `expiresAt` now + 3600, `runAs` and `timeoutS` copied from the entry, `urgent` (a column added by `drizzle/0011_job_urgent.sql`, since the schema had nowhere else to hold it), and `state` `approved` when `runAs` is `active_user`, `pending` when `system`. Answers 201 `{ id, state, expiresAt }`. Unknown tool, wrong platform or a bad parameter is 400 naming the parameter. |
 | `POST /api/org/jobs/:id/approve` | `org:admin` with `FRESH_SECONDS` | Refused 409 when `approvedBy` would equal `requestedBy`, 409 when `state` is not `pending`, 410 past `expiresAt`. Sets `approvedBy`, `approvedAt`, `state` `approved`. A rule-fired job (`requestedBy` NULL) needs this call like any other (section 6.4 step 3). |
 | `POST /api/org/jobs/:id/refuse` | `org:admin` | `pending` only; `state` `refused`. |
 | `GET /api/org/jobs?machineId=&state=&since=` | `read` | The org's rows, newest first, narrowed by `member_fleet` through `actor()` like `/api/org/machines`. Answers `{ jobs: [row] }` with every column of the table except that `output` is present only on `GET /api/org/jobs/:id`. |
@@ -218,7 +222,9 @@ Request gains one member, sent on the batch AFTER the job ran:
 ```
 
 - `exitCode` is an integer, or `null` with `refused` a short string when the agent did not run
-  the job: `expired`, `unknown_tool`, `bad_params`, `wrong_platform`, `already_ran`, `timeout`.
+  the job: `expired`, `unknown_tool`, `bad_params`, `wrong_platform`, `already_ran`, `timeout`,
+  `no_active_user` (the seventh word, from the `runAs` paragraph below; the Worker accepts all
+  seven and refuses the member 400 on any other).
   The Worker maps `exitCode === 0` to `done`, any other integer to `failed`, `refused` to
   `refused`, and writes `startedAt`, `finishedAt`, `exitCode`, `output` (re-truncated to 16 KiB),
   `outputSha256`. The update is guarded `WHERE state IN ('dispatched','running')` (section 3.3),
@@ -371,8 +377,8 @@ Nothing in phase 1 changes these. What phase 1 adds beside them: the machine fie
 projection reads (`displayName`, `machine_tag`, `machine_attr` `username`) need a writer.
 `username` arrives from the collector as the `attrs` member below (section 6); `displayName`
 and tags are set through `PATCH /api/org/machines/:id { displayName?, tags? }` with
-`machine:write` (plan section 2 row 3), which `src/worker/routes/org.ts` does not have yet and
-WP17 adds with `test/console-api.test.ts`.
+`machine:write` (plan section 2 row 3), landed in `src/worker/routes/org.ts` with
+`test/console-api.test.ts` in the site lane's round 1 rather than waiting for WP17.
 
 ## 5. Health and telemetry read routes for the consoles
 
@@ -402,6 +408,8 @@ WP17 adds with `test/console-api.test.ts`.
 
 Five human-plane routes in `src/worker/routes/org.ts` (so they answer under `/console` too),
 all `read`, all narrowed through `actor()`:
+
+All five landed in the site lane's round 1 with `test/console-api.test.ts`.
 
 `GET /api/org/machines/:id/state`
 
@@ -492,7 +500,9 @@ does not know.
 
 Storage without a new table: the collector sends `attrs` (plan section 4.4) and the ingest
 upserts `machine_attr` rows with `source = 'agent'` only where the value changed (section 4.5).
-Two keys carry the network view:
+The ingest half and the `attrs` member of `GET /api/org/machines/:id` landed in the site lane's
+round 1 (`test/ingest.test.ts`, "attrs"); the collector half is the client lane's. Two keys
+carry the network view:
 
 - `net.adapters`, a JSON array, at most 4 KiB (the column bound), sent only when it changed:
 
@@ -679,7 +689,8 @@ Web, `src/app/pages/org.tsx`: machines, fleets, enrolment token. No labnet surfa
    applies to `DELETE /console/overlay/labnets/:id`, `POST /console/org/enrol-token` and
    `POST /console/org/fleets`. Contract: the console, on that 403, asks for the password once
    and calls `POST /api/login` again to hold a fresh token, then retries; the Worker is not
-   loosened. `test/console.test.ts` gains the case.
+   loosened. `test/console.test.ts` holds the case since the site lane's round 1 (all four
+   routes answer 403 "Sign in again to confirm this change." on a token aged past 300 s).
 2. `createLabnet` sends no `fleetId`, so a narrowed technician of several fleets is answered 400
    "Name the fleet this labnet belongs to." with no way to name one. Contract: the create form
    offers the fleets from `GET /console/org/fleets` when the caller's `GET /console/org`
@@ -704,8 +715,9 @@ Web, `src/app/pages/org.tsx`: machines, fleets, enrolment token. No labnet surfa
 
 - Site: `npx tsc --noEmit` clean; `npm test` green; the new files named above exist at the
   paths named; `test/jobs.test.ts`, `test/ticket.test.ts`, `test/console-api.test.ts`,
-  `test/rules.test.ts` exist and pass; `cmp src/worker/tools.json ../LabDesk/src/labdesk/tools.json`
-  is silent.
+  `test/rules.test.ts` exist and pass; the git blob of `src/worker/tools.json` equals the client's
+  blob of `src/labdesk/tools.json` (section 12 correction 4 says why `cmp` between two Windows
+  working trees is not that check).
 - Client: the CI run id on the exact head for `cargo test` (`labdesk::tools`, `claim_once`,
   `labdesk::selfheal`); `flutter test test/labdesk_*.dart` then `git checkout flutter/pubspec.lock`;
   `git ls-files --error-unmatch src/labdesk/tools.json`.
@@ -769,3 +781,55 @@ builds against these.
    `net.reachability.selfheal` is the running step and `off` while the switch is off.
 10. `labdesk --disk-health` (root or administrator) prints the `disks` member the daemon would
     send, for field checks on any machine.
+
+## 12. Built and not built, at client `d572566815` and site `fb3c14e`
+
+Read from the code at those two heads on 2026-09-05, not recalled. A section named here is
+otherwise unchanged above; where the code and the contract disagree, the correction is written
+out and the code wins.
+
+### Built
+
+| Contract | Client | Site |
+|---|---|---|
+| 1, the catalog | `src/labdesk/tools.json` compiled by `src/labdesk/tools.rs` (`Catalog::parse`, `Tool`, `CharClass`, `argv_for`, `run_steps`, `execute`, `Ledger`, `run_here`, `platform`) | `src/worker/tools.json` read by `src/worker/tool-catalog.ts` (`checkCatalog`, `TOOLS`, `checkParams`, `initialState`, `PARAMS_MAX_BYTES`, `JOB_TTL_SECONDS`), asserted by `test/jobs.test.ts` |
+| 2, jobs and results | `tools.rs::jobs_in`, `JobResult::to_json`, `Ledger` (the executed ids on disk), driven from `src/labdesk/collector.rs` | `src/worker/routes/jobs.ts` (request, approve, refuse, list, one row), the `jobs`, `tickets` and `collectNow` members of the `/agent/batch` answer and the `jobResults` and `attrs` readers in `src/worker/routes/agent-ingest.ts`, `drizzle/0011_job_urgent.sql`, the `runTool` firing and the expiry sweep in `src/worker/scheduled.ts` (`minuteTick`) |
+| 3, connect ticket | `src/labdesk/ticket.rs` (`Ticket`, `tickets_in`, `secret_hash`), the IPC variant, the claim-once map and the `handle_hash` branch | the mint in `src/worker/routes/overlay.ts`, the delivery select in `agent-ingest.ts`, `POST /agent/ticket/:id/claimed` in `src/worker/routes/ticket.ts`, `test/ticket.test.ts` |
+| 4, the writer the projection needs | -- | `PATCH /api/org/machines/:id` in `src/worker/routes/org.ts` with `test/console-api.test.ts` |
+| 5, console read routes | -- | `GET /org/machines/:id/state`, `/metrics`, `/disks`, `GET /org/events`, `POST /org/events/:id/ack` and `GET /org/machines?state=1` in `src/worker/routes/org.ts` |
+| 6, network view | `src/labdesk/netview.rs` (`Adapter`, `Address`, `collect`, `to_value`, `counters`, `adapters`, `windows_kind`, a `walk` per platform) | the `attrs` upsert in `agent-ingest.ts` and the `attrs` member of `GET /api/org/machines/:id` |
+| 7, the daemon half of the switch | `selfheal::enabled` and `enabled_in` parse the daemon's config file on every tick, which closes the Windows gap section 7 recorded | -- |
+
+`labdesk --disk-health` prints the `disks` member for a field check (section 11 item 10).
+
+### Not built at these heads
+
+- Section 5, the client half (WP18): `flutter/lib/labdesk/services/metrics_collector.dart` and
+  `probe_reader.dart` are still present and `console_page.dart` still probes over the PTY.
+- Section 7, both console surfaces: `grep -rn selfheal flutter/lib` and the same over the site's
+  `src/` are empty, so no console can set or show the switch yet.
+- Section 8: there is no `src/worker/routes/rules.ts`, no `test/rules.test.ts`, and `preset`
+  appears nowhere in either repository.
+- Section 9 items 1 to 6, and the WP17 web pages: `src/app/pages/` holds `account`, `admin`,
+  `auth`, `download` and `org` only.
+
+### Corrections to the contract above, from the code as built
+
+1. Section 2, expiry. `minuteTick` (`src/worker/scheduled.ts`) moves `pending`, `approved` AND
+   `dispatched` rows past `expiresAt` to `expired`. The contract named the last two only; a
+   pending row nobody approved inside its hour has to expire as well or it sits for ever.
+2. Section 2, the list route. `GET /api/org/jobs` answers at most 500 rows, newest first
+   (`src/worker/routes/jobs.ts`). The contract fixed no bound.
+3. Section 2, the dispatch answer. The Worker parses `params` back to an object and strips
+   `urgent` from each job it hands out (`agent-ingest.ts`), so the agent reads the shape section 2
+   prints and never the requester's urgency flag; `collectNow` is the only thing urgency becomes
+   on the wire.
+4. Section 1 and section 10, the byte-for-byte check. The two copies of `tools.json` are the same
+   git blob (`652f3923addf13646b88498dbf00beaa2e22ac25` at both heads), but the client repository
+   pins its copy to LF (`.gitattributes`, `src/labdesk/tools.json text eol=lf`) while the site
+   repository has no `.gitattributes` and `core.autocrlf` is true on a Windows checkout, so the
+   site's working copy is CRLF and `cmp` between the two working trees fails on a difference that
+   is not in either repository. The verifier is therefore the blob:
+   `git -C LabDesk rev-parse HEAD:src/labdesk/tools.json` equal to
+   `git -C labdesk-site rev-parse HEAD:src/worker/tools.json`. A site lane that would rather keep
+   `cmp` adds the same one line to a site `.gitattributes`.
