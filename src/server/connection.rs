@@ -89,6 +89,8 @@ lazy_static::lazy_static! {
     pub static ref CONTROL_PERMISSIONS_ARRAY: Arc::<Mutex<Vec<(i32, ControlPermissions)>>> = Default::default();
     static ref WAKELOCK_SENDER: Arc::<Mutex<std::sync::mpsc::Sender<(usize, usize)>>> = Arc::new(Mutex::new(start_wakelock_thread()));
     static ref WAKELOCK_KEEP_AWAKE_OPTION: Arc::<Mutex<Option<bool>>> = Default::default();
+    // Connect tickets (src/labdesk/ticket.rs): on every build, unlike the switch-sides map below.
+    static ref PENDING_TICKETS: Arc::<Mutex<Vec<PendingTicket>>> = Default::default();
 }
 
 #[cfg(feature = "flutter")]
@@ -100,7 +102,6 @@ const SWITCH_SIDES_UUID_TTL: Duration = Duration::from_secs(10);
 lazy_static::lazy_static! {
     static ref SWITCH_SIDES_UUID: Arc::<Mutex<HashMap<String, (Instant, uuid::Uuid)>>> = Default::default();
     static ref PENDING_SWITCH_SIDES_UUID: Arc::<Mutex<HashMap<String, (Instant, uuid::Uuid, bool)>>> = Default::default();
-    static ref PENDING_TICKETS: Arc::<Mutex<Vec<PendingTicket>>> = Default::default();
 }
 
 #[cfg(target_os = "windows")]
